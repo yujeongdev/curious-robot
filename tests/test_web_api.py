@@ -186,5 +186,8 @@ def test_packaged_agent_lab_shell_is_self_contained(tmp_path: Path) -> None:
             asset_match = re.search(r'src="(/assets/[^"]+\.js)"', root.text)
             assert asset_match is not None
             assert client.get(asset_match.group(1)).status_code == 200
+            model = client.get("/models/franka/fr3.glb")
+            assert model.status_code == 200
+            assert model.headers["content-type"] == "model/gltf-binary"
     finally:
         manager.close()

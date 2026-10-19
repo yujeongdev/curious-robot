@@ -160,7 +160,7 @@ async function main() {
     const gif = output.replace(/\.mp4$/i, ".gif");
     execFileSync("ffmpeg", ["-y", "-i", output, "-vf", "fps=12,scale=960:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer", gif], { stdio: "inherit" });
     const bytes = readFileSync(output);
-    writeFileSync(`${output}.json`, JSON.stringify({ source_run: options.run, width: options.width, height: options.height, fps: options.fps, frames: frameIndex, sha256: createHash("sha256").update(bytes).digest("hex") }, null, 2));
+    writeFileSync(`${output}.json`, JSON.stringify({ source_run: fixtureMode ? options.run : basename(runDirectory), width: options.width, height: options.height, fps: options.fps, frames: frameIndex, sha256: createHash("sha256").update(bytes).digest("hex") }, null, 2));
     rmSync(temporary, { recursive: true, force: true });
   } finally {
     await browser.close();

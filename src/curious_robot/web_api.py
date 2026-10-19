@@ -212,6 +212,9 @@ def create_app(
         assets = web_root / "assets"
         if assets.is_dir():
             app.mount("/assets", StaticFiles(directory=assets), name="agent-lab-assets")
+        models = web_root / "models"
+        if models.is_dir():
+            app.mount("/models", StaticFiles(directory=models), name="agent-lab-models")
 
     @app.get("/{spa_path:path}", response_class=HTMLResponse)
     async def agent_lab_shell(spa_path: str) -> HTMLResponse:

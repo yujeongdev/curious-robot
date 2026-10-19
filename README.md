@@ -20,6 +20,9 @@ research runs and CI.
 
 > The browser is a presentation mirror. Newton/MuJoCo Warp remains the only
 > physics authority; React Three Fiber never simulates contacts or dynamics.
+> Its FR3 visuals are converted from Franka Robotics' official Apache-2.0
+> [`franka_description`](https://github.com/frankarobotics/franka_description)
+> meshes at pinned commit `d9841cf`; Newton body transforms remain authoritative.
 
 ```mermaid
 flowchart LR
@@ -172,3 +175,7 @@ See [`docs/architecture.md`](docs/architecture.md),
 [`docs/capabilities.json`](docs/capabilities.json), the approved
 [`Agent Lab design`](docs/designs/agent-lab-ui.md), and
 [`DESIGN.md`](DESIGN.md) for boundaries, evidence, and UI decisions.
+
+The official Franka visual asset provenance, per-link bounds, and SHA-256 are
+recorded in `src/web/public/models/franka/manifest.json`; regenerate them with
+`uv run python scripts/export_franka_visuals.py`.

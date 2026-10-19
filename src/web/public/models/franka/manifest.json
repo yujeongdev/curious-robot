@@ -1,0 +1,210 @@
+{
+  "manifest_version": "2.0.0",
+  "source_repository": "https://github.com/frankarobotics/franka_description",
+  "source_commit": "d9841cf",
+  "source_license": "Apache-2.0",
+  "coordinate_system": "right-handed, meters, link-local mesh coordinates; Newton world is Z-up",
+  "consumer": "React Three Fiber presentation mirror",
+  "presentation_only": true,
+  "glb_sha256": "95d80509bc190f0106ffa574b10228105c873675e3e3b46cfd28b037694eb95c",
+  "links": {
+    "fr3__fr3_link0": {
+      "node": "fr3__fr3_link0",
+      "source": "link0.dae",
+      "geometry_count": 7,
+      "bounds_m": [
+        [
+          -0.154072913812211,
+          -0.09457283469216371,
+          0.0
+        ],
+        [
+          0.07156230503476912,
+          0.09457283469216371,
+          0.14000000664964318
+        ]
+      ],
+      "file": "/models/franka/fr3.glb"
+    },
+    "fr3__fr3_link1": {
+      "node": "fr3__fr3_link1",
+      "source": "link1.dae",
+      "geometry_count": 1,
+      "bounds_m": [
+        [
+          -0.055000082721006205,
+          -0.1294000084352429,
+          -0.192000004073057
+        ],
+        [
+          0.055000082721006205,
+          0.05500000261235982,
+          0.05500001003452798
+        ]
+      ],
+      "file": "/models/franka/fr3.glb"
+    },
+    "fr3__fr3_link2": {
+      "node": "fr3__fr3_link2",
+      "source": "link2.dae",
+      "geometry_count": 1,
+      "bounds_m": [
+        [
+          -0.055000082721006205,
+          -0.1930000091670081,
+          -0.05500000261235982
+        ],
+        [
+          0.055000082721006205,
+          0.05400001400895471,
+          0.12940000004265428
+        ]
+      ],
+      "file": "/models/franka/fr3.glb"
+    },
+    "fr3__fr3_link3": {
+      "node": "fr3__fr3_link3",
+      "source": "link3.dae",
+      "geometry_count": 2,
+      "bounds_m": [
+        [
+          -0.05500000261235982,
+          -0.05500000261235982,
+          -0.12099999934434891
+        ],
+        [
+          0.1374989995228974,
+          0.1110500047201595,
+          0.05683791498628743
+        ]
+      ],
+      "file": "/models/franka/fr3.glb"
+    },
+    "fr3__fr3_link4": {
+      "node": "fr3__fr3_link4",
+      "source": "link4.dae",
+      "geometry_count": 2,
+      "bounds_m": [
+        [
+          -0.13750000115658334,
+          -0.054887922833291,
+          -0.054999999006169066
+        ],
+        [
+          0.054999022307239624,
+          0.12295000879837105,
+          0.11105000832635016
+        ]
+      ],
+      "file": "/models/franka/fr3.glb"
+    },
+    "fr3__fr3_link5": {
+      "node": "fr3__fr3_link5",
+      "source": "link5.dae",
+      "geometry_count": 3,
+      "bounds_m": [
+        [
+          -0.05499890397949514,
+          -0.05500001405645216,
+          -0.2590000033378601
+        ],
+        [
+          0.05500000261235982,
+          0.12992149970121325,
+          0.053294109395704226
+        ]
+      ],
+      "file": "/models/franka/fr3.glb"
+    },
+    "fr3__fr3_link6": {
+      "node": "fr3__fr3_link6",
+      "source": "link6.dae",
+      "geometry_count": 8,
+      "bounds_m": [
+        [
+          -0.047833673841801705,
+          -0.051200009111312,
+          -0.04399109080254498
+        ],
+        [
+          0.13200000605110657,
+          0.08192154864467026,
+          0.05695588671570938
+        ]
+      ],
+      "file": "/models/franka/fr3.glb"
+    },
+    "fr3__fr3_link7": {
+      "node": "fr3__fr3_link7",
+      "source": "link7.dae",
+      "geometry_count": 4,
+      "bounds_m": [
+        [
+          -0.04399996394056408,
+          -0.04400000591900635,
+          0.05199999724397821
+        ],
+        [
+          0.08128136237730246,
+          0.08128135589522467,
+          0.10680000557919979
+        ]
+      ],
+      "file": "/models/franka/fr3.glb"
+    },
+    "fr3__fr3_hand": {
+      "node": "fr3__fr3_hand",
+      "source": "hand.dae",
+      "geometry_count": 5,
+      "bounds_m": [
+        [
+          -0.03151952847838402,
+          -0.1039464995265007,
+          -0.02594578079879284
+        ],
+        [
+          0.031525131314992905,
+          0.10056989639997482,
+          0.06599997729063034
+        ]
+      ],
+      "file": "/models/franka/fr3.glb"
+    },
+    "fr3__fr3_leftfinger": {
+      "node": "fr3__fr3_leftfinger",
+      "source": "finger.dae",
+      "geometry_count": 2,
+      "bounds_m": [
+        [
+          -0.010500900447368622,
+          -8.376430196221918e-05,
+          0.00013333199603948742
+        ],
+        [
+          0.01050155982375145,
+          0.02634548954665661,
+          0.05389988049864769
+        ]
+      ],
+      "file": "/models/franka/fr3.glb"
+    },
+    "fr3__fr3_rightfinger": {
+      "node": "fr3__fr3_rightfinger",
+      "source": "finger.dae",
+      "geometry_count": 2,
+      "bounds_m": [
+        [
+          -0.010500900447368622,
+          -8.376430196221918e-05,
+          0.00013333199603948742
+        ],
+        [
+          0.01050155982375145,
+          0.02634548954665661,
+          0.05389988049864769
+        ]
+      ],
+      "file": "/models/franka/fr3.glb"
+    }
+  }
+}

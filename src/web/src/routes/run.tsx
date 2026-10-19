@@ -88,6 +88,7 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
   }, [fixtureEvents, ingest, isFixture, runId]);
 
   const controlStatus = isFixture && !fixturePlaying && run.status === "running" ? "paused" : run.status;
+  const viewerDisconnected = connection === "error" && !["completed", "failed", "cancelled", "abandoned"].includes(run.status);
   const progress = Math.round((run.lastSequence / Math.max(1, isFixture ? fixtureEvents.length : run.lastSequence + 8)) * 100);
   return (
     <main className="agent-lab">
@@ -105,7 +106,7 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
         <div className="run-state">
           <Badge className={`status-badge status-badge--${controlStatus}`}>{controlStatus.toUpperCase()}</Badge>
           <span className="mono">SIM {formatElapsed(run.lastSimTimeS)}</span>
-          {connection === "error" && <span className="connection-error"><TriangleAlert /> viewer disconnected</span>}
+          {viewerDisconnected && <span className="connection-error"><TriangleAlert /> viewer disconnected</span>}
         </div>
         <RunControls status={controlStatus} onCommand={control} onReset={() => navigate({ to: "/runs/new" })} />
       </header>
@@ -113,10 +114,10 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
       {(run.status === "preparing" || run.status === "idle") && sourceEvents.length > 0 && (
         <div className="system-banner"><span className="spin-dot" /> Preparing Newton · validating assets and body manifest</div>
       )}
-      {connection === "error" && <div className="degraded-banner" role="status">Visual connection interrupted. Committed evidence remains available; no run state has been fabricated.</div>}
+      {viewerDisconnected && <div className="degraded-banner" role="status">Visual connection interrupted. Committed evidence remains available; no run state has been fabricated.</div>}
       <StageStepper run={run} />
       <ResizableWorkspace
-        primary={<NewtonViewport frame={run.latestFrame} disconnected={connection === "error"} />}
+        primary={<NewtonViewport frame={run.latestFrame} disconnected={viewerDisconnected} />}
         secondary={<EvidenceFeed run={run} />}
       />
       <TelemetryDock run={run} />

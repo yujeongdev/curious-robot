@@ -19,7 +19,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["httpx>=0.28", "pytest>=8.3", "pytest-cov>=6", "ruff>=0.9"]
+dev = [
+  "httpx>=0.28",
+  "pycollada>=0.9",
+  "pytest>=8.3",
+  "pytest-cov>=6",
+  "ruff>=0.9",
+  "trimesh>=5.1",
+]
 llm = ["openai>=2.0"]
 web = ["fastapi>=0.135,<1", "uvicorn[standard]>=0.41,<1"]
 

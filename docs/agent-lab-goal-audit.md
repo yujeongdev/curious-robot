@@ -39,8 +39,9 @@ RTX 4080 SUPER with Newton 1.7.0, Warp 1.18.0, and MuJoCo 3.15.0.
   coefficients.
 - MuJoCo Warp contact is calibrated by SciPy black-box methods. No
   end-to-end differentiable-contact claim is made.
-- The R3F robot is a procedural presentation mirror driven exclusively by
-  Newton body transforms; it does not yet use production Franka render meshes.
+- The R3F robot uses the official Franka FR3 visual meshes, converted to a
+  link-addressable GLB. It remains a presentation mirror driven exclusively by
+  Newton body transforms and never advances browser-side physics.
 - Exact low-level re-execution can exceed tolerance because fresh public state
   reconstruction does not restore all solver-private contact warm-start state.
   The numerical report is published rather than relabeled as deterministic

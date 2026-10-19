@@ -1,39 +1,46 @@
+import { useGLTF } from "@react-three/drei";
+import { useMemo } from "react";
+import type { Mesh, Object3D } from "three";
 import type { BodyTransform } from "../../generated/agent-events";
 import { isFrankaBody } from "./body-mapping";
 
-function RobotLink({ body }: { body: BodyTransform }) {
-  const isHand = body.body_id.includes("hand");
+const officialVisualBodyIds = new Set([
+  "fr3__fr3_link0", "fr3__fr3_link1", "fr3__fr3_link2", "fr3__fr3_link3",
+  "fr3__fr3_link4", "fr3__fr3_link5", "fr3__fr3_link6", "fr3__fr3_link7",
+  "fr3__fr3_hand", "fr3__fr3_leftfinger", "fr3__fr3_rightfinger",
+]);
+const officialFrankaGlb = "/models/franka/fr3.glb";
+
+useGLTF.preload(officialFrankaGlb);
+
+function OfficialFrankaLink({ body, source }: { body: BodyTransform; source: Object3D }) {
+  const visual = useMemo(() => {
+    const clone = source.clone(true);
+    clone.traverse((object: Object3D) => {
+      const mesh = object as Mesh;
+      if (mesh.isMesh) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      }
+    });
+    return clone;
+  }, [source]);
   return (
     <group position={body.position_m} quaternion={body.orientation_xyzw} name={body.asset_node_id}>
-      <mesh castShadow receiveShadow>
-        <cylinderGeometry args={[isHand ? 0.065 : 0.072, isHand ? 0.055 : 0.065, isHand ? 0.12 : 0.28, 20]} />
-        <meshStandardMaterial color={isHand ? "#17212b" : "#e8ecef"} roughness={0.36} metalness={0.2} />
-      </mesh>
-      {!isHand && (
-        <mesh position={[0, 0, 0.14]} castShadow>
-          <sphereGeometry args={[0.078, 20, 16]} />
-          <meshStandardMaterial color="#f1f5f7" roughness={0.3} metalness={0.18} />
-        </mesh>
-      )}
-      {isHand && (
-        <>
-          <mesh position={[0, 0.06, -0.09]}><boxGeometry args={[0.025, 0.025, 0.16]} /><meshStandardMaterial color="#2a3642" /></mesh>
-          <mesh position={[0, -0.06, -0.09]}><boxGeometry args={[0.025, 0.025, 0.16]} /><meshStandardMaterial color="#2a3642" /></mesh>
-        </>
-      )}
+      <primitive object={visual} dispose={null} />
     </group>
   );
 }
 
 export function FrankaMirror({ bodies }: { bodies: readonly BodyTransform[] }) {
-  // Newton preserves the imported robot instance name in body identifiers.  The
-  // bundled Franka asset is named `fr3`, while alternate assets commonly use
-  // `franka` or `panda`.  Match all verified names at this presentation-only
-  // boundary; physics remains authoritative in the incoming transforms.
+  const { scene } = useGLTF(officialFrankaGlb);
   const robotBodies = bodies.filter(isFrankaBody);
   return (
-    <group aria-label="Franka presentation mirror">
-      {robotBodies.map((body) => <RobotLink key={body.body_id} body={body} />)}
+    <group aria-label="Official Franka FR3 presentation mirror">
+      {robotBodies.map((body) => {
+        const source = officialVisualBodyIds.has(body.body_id) ? scene.getObjectByName(body.body_id) : null;
+        return source ? <OfficialFrankaLink key={body.body_id} body={body} source={source} /> : null;
+      })}
     </group>
   );
 }
