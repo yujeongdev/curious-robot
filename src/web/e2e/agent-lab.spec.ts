@@ -14,4 +14,6 @@ test("mobile companion keeps safe stop reachable", async ({ page }, testInfo) =>
   await page.goto("/runs/demo?fixture=true");
   await expect(page.getByRole("button", { name: /safe stop/i }).last()).toBeVisible();
   await expect(page.getByText("Current phase")).toBeVisible();
+  await page.getByRole("button", { name: "Telemetry" }).click();
+  await expect(page.getByRole("dialog", { name: "Telemetry" })).toBeVisible();
 });

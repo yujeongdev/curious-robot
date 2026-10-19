@@ -225,6 +225,13 @@ a { color: inherit; text-decoration: none; }
 .replay-bar input[type="range"] { flex: 1; accent-color: var(--signal); }
 .replay-bar > span { color: var(--text-secondary); font-size: .75rem; }
 .mobile-safety-bar { display: none; }
+.mobile-inspectors { display: none; }
+.sheet-overlay { position: fixed; z-index: 60; inset: 0; background: rgb(0 0 0 / .66); animation: evidence-in 160ms var(--ease-enter); }
+.sheet-content { position: fixed; z-index: 61; left: 0; right: 0; bottom: 0; max-height: 82svh; display: flex; flex-direction: column; border-top: 1px solid var(--border); background: var(--surface-1); box-shadow: 0 -18px 48px rgb(0 0 0 / .35); }
+.sheet-content > header { min-height: 54px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 8px 12px; }
+.sheet-content > header button { width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: transparent; color: var(--text-secondary); }
+.sheet-content > header svg { width: 19px; }
+.sheet-body { min-height: 0; overflow: auto; }
 
 @media (max-width: 1279px) {
   .lab-header { gap: 10px; }
@@ -273,6 +280,14 @@ a { color: inherit; text-decoration: none; }
   .evidence-list { min-height: 240px; }
   .evidence-card:not(:last-child) { display: none; }
   .telemetry { display: none; }
+  .mobile-inspectors { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px; border-top: 1px solid var(--border); }
+  .mobile-inspectors .button { width: 100%; }
+  .mobile-sheet .telemetry { height: auto; min-height: 340px; display: flex; }
+  .mobile-sheet .telemetry-grid { min-height: 470px; display: grid; grid-template-columns: 1fr; }
+  .mobile-sheet .chart-panel, .mobile-sheet .belief-panel, .mobile-sheet .outcome-panel { min-height: 150px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .mobile-sheet .evidence-panel { max-height: none; }
+  .mobile-sheet .evidence-list { max-height: calc(82svh - 108px); }
+  .mobile-sheet .evidence-card:not(:last-child) { display: block; }
   .mobile-safety-bar { position: fixed; z-index: 40; left: 0; right: 0; bottom: 0; display: block; border-top: 1px solid var(--border); padding: 6px 8px env(safe-area-inset-bottom); background: var(--surface-1); }
   .mobile-safety-bar .run-controls { display: grid; grid-template-columns: 1fr 1fr; }
   .mobile-safety-bar .desktop-only { display: none; }

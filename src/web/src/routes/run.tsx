@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commandRun, subscribeToRun } from "../api/events";
 import { EvidenceFeed } from "../components/evidence-feed";
 import { NewtonViewport } from "../components/newton-viewport";
+import { MobileInspectors } from "../components/mobile-inspectors";
 import { RunControls } from "../components/run-controls";
 import { StageStepper } from "../components/stage-stepper";
 import { TelemetryDock } from "../components/telemetry-dock";
@@ -118,6 +119,7 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
         <EvidenceFeed run={run} />
       </div>
       <TelemetryDock run={run} />
+      <MobileInspectors run={run} />
       {mode === "replay" && (
         <div className="replay-bar" aria-label="Replay controls">
           <Button size="compact" variant="ghost" onClick={() => seek(Math.max(1, (selectedSequence ?? 1) - 1))}>− frame</Button>
