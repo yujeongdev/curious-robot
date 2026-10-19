@@ -150,6 +150,12 @@ Run a second browser physics model in Three.js/Rapier. This was rejected because
 
 ## Recommended Architecture
 
+### Engineering scope decision
+
+The plan exceeds eight files and introduces more than two services, but reduction to a sidecar dashboard would violate the approved live/replay/event-provenance goal. Proceed with the full architecture in dependency-ordered vertical slices, not one big-bang branch. Complexity is accepted only at these essential boundaries: scientific core, event durability, worker lifecycle, local API, frontend reducer, R3F mirror, and media capture.
+
+Scope is reduced where it does not block the core: start with one randomized surface family before expanding profiles; preserve reduced belief worlds rather than adding Franka to every candidate; use a complete latest frame inside the existing snapshot rather than a second frame API; defer chat, Compare, remote scheduling, authentication, abandoned-run resume, Monaco, and table tooling.
+
 ```text
 React/Vite/shadcn Agent Lab
   ├─ StageStepper
@@ -198,16 +204,56 @@ The FastAPI process owns the run manager. Newton execution runs in one dedicated
 - `GET /api/runs?status=completed`: stored-run picker metadata sorted by creation time.
 - `GET /api/runs/{run_id}/artifacts/{name}`: safe allowlisted artifact access.
 
-SSE is enough because the server produces most updates and browser commands are ordinary HTTP requests. Do not introduce WebSocket complexity until bidirectional high-rate interaction is measured as necessary. An event is persisted and flush-confirmed before publication. `GET /api/runs/{id}` returns an atomic snapshot containing `snapshot_sequence`; the client subscribes with `after_sequence=snapshot_sequence`, the server replays later stored events, then atomically joins live fan-out. `Last-Event-ID` is equivalent on reconnect. An expired or unknown cursor returns HTTP 409 with `snapshot_required=true`. The broker buffers 2,048 events per client; a slow client is disconnected with its last delivered sequence and reconnects from storage. Authoritative 240 Hz measurements stay in the measurement artifact, while UI sample events are capped at 30 Hz and charts decimate to at most 2,000 visible points.
+SSE is enough because the server produces most updates and browser commands are ordinary HTTP requests. Do not introduce WebSocket complexity until bidirectional high-rate interaction is measured as necessary. An event is persisted and flush-confirmed before publication. `GET /api/runs/{id}` returns an atomic snapshot containing `snapshot_sequence`; the client subscribes with `after_sequence=snapshot_sequence`, the server replays later stored events, then atomically joins live fan-out. `Last-Event-ID` is equivalent on reconnect. An expired or unknown cursor returns HTTP 409 with `snapshot_required=true`. Each subscriber queue is bounded by both 2,048 events and 16 MiB; one event is capped at 512 KiB and contacts/overlays are deterministically truncated with explicit counts. Overflow disconnects only that subscriber with its last delivered sequence, never persistence, controls, or healthy subscribers. Authoritative 240 Hz measurements stay in the measurement artifact, while UI sample events are capped at 30 Hz and charts decimate to at most 2,000 visible points.
+
+### Single-writer and IPC contract
+
+The FastAPI manager process is the only authority that validates public payloads, assigns `sequence`, appends events/indexes, advances the snapshot reducer, and publishes SSE. The spawned Newton worker sends unsequenced typed event intents over a dedicated `multiprocessing.Pipe` using `send_bytes`; commands use a second pipe. Do not use `multiprocessing.Queue`, whose feeder thread and abrupt termination can corrupt buffered messages. The worker uses the `spawn` start method so CUDA/Warp state is never inherited through `fork`.
+
+For each accepted intent the manager performs: validate and redact → assign sequence → serialize once → append complete newline and flush Python buffers → update index/reducer → publish those exact bytes. `fsync` occurs at stage boundaries and terminalization, not at 30 Hz, so process-crash durability is guaranteed for flushed records and machine-power-loss durability for the last fsynced boundary. Disk/serialization failure enters out-of-band manager error state, stops physics at the next control checkpoint, rejects new run commands, preserves the committed prefix, and does not assume it can append `run.failed` to the failed store.
+
+Terminalization drains already accepted worker messages, closes worker input, commits artifact metadata, appends exactly one of `run.completed|failed|cancelled|abandoned`, fsyncs, freezes terminal downloads, and rejects late worker intents. Terminal NDJSON never changes after it becomes downloadable.
+
+Snapshot creation and SSE registration share the event-store lock. A snapshot embeds the complete latest allowed visual frame for each active `(world_instance_id, scenario_id)` so a client connecting to a paused run renders immediately even if no later event arrives.
+
+```text
+Browser commands ─HTTP─> FastAPI RunManager ─command Pipe─> Spawned Newton worker
+                              │                              │
+                              │                    ControlGate.before_step()
+                              │                              │
+                              │<──── unsequenced event-intent Pipe ─────┘
+                              ▼
+                 validate/redact → assign sequence
+                              ▼
+                     append exact NDJSON line
+                              ▼
+                 index + reducer + atomic snapshot
+                              ▼
+                    identical committed SSE bytes
+                              ▼
+             Browser reducer → R3F/evidence/telemetry
+```
+
+`runner.py` and `tools.py` depend only on a small `AgentEventSink` protocol with a no-op/CLI implementation; they never import FastAPI or frontend concerns. CLI dispatch imports simulation code lazily only for physics commands, so web fixture/replay tooling can start without initializing Warp.
+
+### Local API security
+
+- Bind to `127.0.0.1` by default; non-loopback requires an explicit unsafe-development flag and warning.
+- Validate `Host`, require same-origin `Origin` for mutating requests, reject wildcard CORS, and accept JSON content types only.
+- Use an unpredictable per-launch local control token in mutation headers and the bootstrapped page; never place it in URLs or logs.
+- Never mount an artifacts directory as static files. Artifact routes resolve an allowlisted artifact ID and enforce public/evaluator classification.
+- Public artifacts include sanitized events, measurements, visual frames, prediction/observation plots, and public replay. Evaluator artifacts include `reexecution.json`, truth comparison plots/GIF/HTML, evaluator reveal, and unaudited Newton ViewerFile model data. Evaluator artifacts are served only after a terminal state with evaluator mode enabled.
 
 ### Run control semantics
 
 - `pause` in `running` returns a command acknowledgment with `pause_pending`; eventual `run.paused` confirms state. Repeating pause in `pause_pending` or `paused` succeeds idempotently without another lifecycle event.
 - `resume` in `paused` returns `resume_pending`; eventual `run.resumed` confirms state before the next physics advance. Repeating resume in `resume_pending` or `running` succeeds idempotently without another lifecycle event.
-- `step` is accepted only in `paused` and advances one display frame, currently four 240 Hz physics substeps, emits a frame event, and remains paused.
+- `step` is accepted only in `paused` and advances one display frame: eight 240 Hz physics substeps for the canonical 30 Hz display cadence. It emits one acknowledged visual frame and remains paused. ViewerFile stride four remains an independent diagnostic recording cadence.
 - `cancel` is valid during initialization, running, or paused. It requests cooperative shutdown, writes a terminal event, saves partial artifacts, and escalates only after the documented deadlines.
 - Commands after a terminal state return HTTP 409. Commands received during an atomic controller segment take effect at its next safe boundary.
 - `safe stop` is the UI label for cancel-with-artifact-preservation. `reset` starts a new immutable run with the same settings.
+
+All environment/controller loops call one injected `ControlGate.before_step()` at the shared `NewtonWorld.step()` boundary, including settle, joint motion, weighing, probes, push, pick-place, and belief candidate worlds. The gate checks pause/step/cancel without taking a sensor observation or advancing RNG state. Initialization and SciPy optimization expose explicit cancellation checkpoints. Maximum cooperative cancellation latency is one display frame during stepping and 250 ms during host-side optimization/asset work; escalation deadlines remain the documented 5 s/5 s sequence.
 
 ## Event Contract
 
@@ -278,7 +324,7 @@ Required event types:
 | `verification.completed` | success, goal predicates, prediction residual, tolerance |
 | `learning.completed` | affected parameters, old/new uncertainty, residual evidence, follow-up decision |
 | `artifact.created` | artifact ID, allowlisted kind, relative path, media type, bytes, SHA-256 |
-| `snapshot` | snapshot sequence, reducer schema, run/stage instances, belief, artifact index, latest frame ID |
+| `snapshot` | snapshot sequence, reducer schema, run/stage instances, belief, artifact index, and complete latest public visual frame for every active scene/scenario |
 
 ### Visual-frame contract
 
@@ -288,14 +334,19 @@ Required event types:
 frame_id: monotonic integer
 source_state_sequence: event sequence that produced the frame
 scene: truth | belief
+world_instance_id: UUID
+scenario_id/action_id: optional stable identifiers
+belief_revision: integer | null
+body_manifest_id: identifies the valid body/link set for this world
 sim_time_s: float
+presentation_time_s: monotonic run-level replay/capture time
 bodies: [{body_id, label, asset_node_id, position_m[3], orientation_xyzw[4]}]
 contacts: [{position_m[3], normal_world[3], force_world_n[3], shape labels}]
 vectors: force/target/prediction overlays with frame and SI units
 target_region and camera_hint
 ```
 
-Stable `body_id` and `asset_node_id` values come from the committed visual manifest, never array order guessed by the browser. Live transport uses the same ordered SSE channel at ≤30 Hz. The complete `simulation.visual_frame` event, including transforms and overlays, is first appended as one newline-delimited record to the canonical uncompressed `events.ndjson`, then the identical committed event is published over SSE. A sidecar index maps `frame_id → event sequence → file byte offset` at line boundaries. Replay seeks directly to the indexed line and renders the same event bytes; there is no separate compressed frame representation in the MVP. On recovery, an incomplete final line is discarded and the index is rebuilt from the last committed newline. Tests seek a late frame without scanning or decompressing the entire recording and recover all committed frames after a deliberately truncated final line. Public-data allowlisting applies before serialization, including scene identity and labels.
+Stable `body_id` and `asset_node_id` values come from the body manifest for that world instance, never array order guessed by the browser. Reduced belief rollouts intentionally use a different manifest than the full truth world. `scenario_id` distinguishes push/pick candidates; each world keeps its own physical time while `presentation_time_s` provides one run-level timeline. Live transport uses the same ordered SSE channel at ≤30 Hz. The complete `simulation.visual_frame` event, including transforms and overlays, is first appended as one newline-delimited record to the canonical uncompressed `events.ndjson`, then the identical committed event is published over SSE. A sidecar index maps `(world_instance_id, frame_id) → event sequence → file byte offset` at line boundaries. Replay seeks directly to the indexed line and renders the same event bytes. On recovery, an incomplete final line is discarded and the index is rebuilt from the last committed newline. Tests seek a late frame without scanning the entire recording and recover all committed frames after a deliberately truncated final line. Public-data allowlisting applies before serialization, including scene identity and labels.
 
 ## Discovery Stage Model
 
@@ -314,7 +365,7 @@ Use these display stages, mapping multiple low-level events into a legible produ
 11. Verify
 12. Learn
 
-Each stage has `pending`, `active`, `completed`, `failed`, or `skipped`. Experiments can repeat, so the authoritative model is an ordered list of `stage_instance_id` values grouped by `iteration_id`, not one mutable status per stage name. Legal flow is forward within an iteration; a planner may begin a new iteration at Identify Unknowns after Learn or failed validation. It cannot jump backward inside an existing instance. The top stepper shows aggregate completion and highlights the active instance; an `Experiment 2/3` badge reveals repetition. Clicking a completed aggregate stage opens its instances and seeks to the selected instance's first event. Failure and skipped reasons are always visible.
+Each stage has `pending`, `active`, `completed`, `failed`, or `skipped`. Experiments can repeat, so the authoritative model is an ordered list of `stage_instance_id` values grouped by `iteration_id`, not one mutable status per stage name. Legal flow follows the existing runner: Calibrate may transition directly back to Discover for the next probe; after experiments stop, Decide contains Predict and Select Action; Execute contains physical execution, Verify, then Learn. A failed validation may also return to Discover. It cannot jump backward inside an existing stage instance. The top stepper shows aggregate completion and highlights the active instance; an `Experiment 2/3` badge reveals repetition. Clicking a completed aggregate stage opens its instances and seeks to the selected instance's first event. Failure and skipped reasons are always visible.
 
 The top-level stepper uses six macro phases rather than twelve equal-width labels:
 
@@ -444,7 +495,7 @@ Mobile permits Quick Demo start, live observation, safe controls, stage/evidence
 
 The user delegated remaining design choices to the reviewer; these recommended behaviors are approved without additional gates:
 
-- Evidence Feed follows the newest event only while the user is at the live edge. Scrolling up or selecting a stage enters inspection mode, preserves the viewport/frame, buffers incoming events, and shows `N new events · Return to live`. It never force-scrolls the user away from evidence they are reading.
+- Evidence Feed follows the newest event only while the user is at the live edge. Scrolling up or selecting a stage enters inspection mode and pins only the selected sequence/frame plus a bounded 500-event local tail; canonical state continues advancing without duplicating the whole run. Evicted history is fetched by indexed range from storage. `N new events · Return to live` reduces the ordered tail to current state. It never force-scrolls the user away from evidence they are reading.
 - R3F starts in stage-guided camera mode with deterministic named presets. Pointer/camera interaction enters `Manual camera`; no later stage steals control until `Return to guided` is pressed. Safe-state overlays remain visible in both modes.
 - Desktop panel proportions are resizable and stored locally per viewport class, with `Reset layout` available. Recorded media always uses the canonical 65/35 layout rather than personal settings.
 - Precision Lab Instrument dark mode is the canonical live/capture theme. `/design-consultation` must also define an accessible light theme for long replay/review sessions, but theme switching is not permitted to change chart/overlay semantics.
@@ -557,6 +608,20 @@ The 45-second capture must make these five moments visible without narration:
 4. System Identification changes `μ_static` and `μ_dynamic` with uncertainty shrinking in a belief delta card.
 5. Predict → Execute → Verify compares push and pick, executes the winner, reports prediction residual, and either succeeds or visibly returns to Learn.
 
+## Engineering Review Corrections to Existing Scientific Boundaries
+
+These pre-existing paths must be corrected before event/UI work so the Agent Lab does not make a hidden truth leak more visible:
+
+1. `environment.py:271` currently sets public `MotionSample.normal_load_n` from `self._parameters.mass_kg * GRAVITY`. This is a direct hidden-mass read disguised as a measurement. Replace it with an optional measured-normal-load field from a validated contact/virtual sensor producer; when unavailable, the estimator derives assumed normal load from the agent's mass posterior and records that assumption. Add sentinel-value tests across every public tool/event/artifact.
+2. `environment.py:409-411` currently adds gravity compensation using hidden truth mass during pick/place. Change the deterministic controller contract to receive `assumed_mass_kg` from the agent belief. Truth and belief environments execute the same command/controller parameters; the truth world uses hidden mass only inside physical dynamics.
+3. `tools.py:271-275` returns objects home through `execute_pick_place` without an explicit public assumed mass. Route restoration through the same belief-parameterized controller and record it as an action/tool event.
+4. `sysid.py:106` consumes `sample.normal_load_n`; after correction it must distinguish measured normal load from posterior-derived load and propagate uncertainty accordingly.
+5. Cross-module calls currently use private members such as `RobotTools._return_object_home`, `NewtonWorld._cube_state`, and `_tool_pose`. Promote explicit observation/controller-boundary methods before adding events; the web/event layer must not deepen those private couplings.
+
+Event emission remains DRY: orchestration owns stage/rationale/decision events, the tool façade owns tool lifecycle and evidence summaries, the environment owns display-frame and safety events, and the run manager owns process/storage/terminal lifecycle. No layer emits another layer's event type.
+
+These are P1 scientific regressions. Tests must fail if the hidden sentinel mass appears numerically in observation/tool/event payloads before evaluator reveal, even under an unrelated key.
+
 ## Delivery Slices
 
 ### Slice 0: R3F mirror contract spike and minimum surface model
@@ -639,6 +704,23 @@ Done when at least four profile families run without leaking hidden values and p
 
 The run manager must preserve the event log and partial artifacts on failure. The UI must show whether the physics worker is still running independently of viewer connectivity.
 
+### Engineering failure-mode matrix
+
+| Code path | Realistic failure | Test | Handling | User-visible result |
+| --- | --- | --- | --- | --- |
+| Worker startup | CUDA/assets hang or child exits before ready | timeout/EOF integration | manager cancels/joins, preserves init log, frees lock only after reconciliation | exact failed initialization step and rerun command |
+| Control gate | pause/cancel arrives inside long controller | inject command in every controller category | next `before_step()` boundary acknowledges; host work polls ≤250 ms | pending state then paused/cancelled, never silent |
+| Event append | ENOSPC or truncated line | fault-injected filesystem | out-of-band manager error, bounded physics stop, committed prefix retained | storage failure banner and downloadable prefix |
+| Snapshot/SSE | append races subscription | barrier-controlled integration | shared lock, storage catch-up, dedupe, then live fan-out | no missing/duplicate evidence |
+| Slow subscriber | frame events exceed event/byte queue | soak with delayed consumer | disconnect only slow client with last sequence | disconnected indicator and recoverable reconnect |
+| Visual mirror | missing GLB link or stale frame ack | manifest/parity/browser tests | fail viewport layer, keep DOM evidence and physics worker independent | frozen last frame with explicit visual error |
+| Artifact access | caller requests evaluator/path traversal asset | actual HTTP response tests | opaque artifact IDs, policy check, no directory mount | 403/404 without leaking path or metadata |
+| Replay | corrupt index or incomplete last record | truncated/index mutation tests | rebuild from newline records, discard incomplete suffix | recovery notice with last valid event |
+| Capture | render barrier timeout, blank viewport, low disk, ffmpeg missing | browser/capture fault matrix | stop export, preserve completed frames, no false success | exact checkpoint/dependency/disk error and retry command |
+| Packaged web | wheel missing fonts/GLB/static build | clean-wheel offline E2E | CLI refuses web startup with build/install guidance | no blank web page |
+
+With these tests and handlers, no listed failure remains silent and there are zero planned critical gaps.
+
 ### Interaction-state matrix
 
 | Area | Loading | Empty | Partial / disconnected | Error | Success / terminal |
@@ -660,6 +742,24 @@ State rules:
 
 ## Testing Strategy
 
+### Performance budgets and benchmark gate
+
+Slice 0/4 produces a named-workstation baseline with a 10-minute fixture at 30 visual frames/s, normal measurement traffic, and more than 500 evidence cards. Record event bytes/s, serialize/append/flush/publish latency, SSE catch-up, HTTP control latency, seek latency, React commit counts, browser/API/worker RSS, WebGL allocations, GPU readback cost, and capture throughput.
+
+Initial budgets, revised only with committed evidence:
+
+- manager validate→append→publish p95 ≤20 ms for non-frame events and ≤25 ms for visual frames;
+- pause/resume/cancel command HTTP p95 ≤50 ms, with state acknowledgment by the next 33.3 ms display boundary during stepping;
+- 10,000-event storage catch-up ≤2 s on the named workstation;
+- indexed stage/frame seek ≤200 ms when its snapshot/index is warm and ≤750 ms cold;
+- no per-body React commits; one R3F invalidation/commit per acknowledged visual frame;
+- browser RSS ≤750 MiB for a 10-minute run and growth ≤5% across five replay open/close cycles;
+- API manager RSS ≤300 MiB excluding the Newton worker; subscriber queues remain under both event and byte caps;
+- event/visual extraction occurs once per eight physics substeps and reuses one host snapshot for bodies, contacts, and overlays;
+- capture uses numbered JPEG frames at quality 95, preflights at least 2 GiB free space for a 45-second 1080p export, keeps no unbounded in-memory image list, and deletes temporary frames only after checksum-verified encoding.
+
+Barrier waits have explicit 5-second per-frame timeout with run/frame diagnostics. Capture tests cover missing assets, stale/wrong acknowledgments, WebGL context loss, legitimate still intervals, absent ffmpeg, interrupted export, low disk, and a bright UI surrounding a blank viewport crop.
+
 ### Python
 
 - event schema round trips and version rejection;
@@ -674,6 +774,10 @@ State rules:
 - repeated experiment iterations and permitted stage transitions;
 - public-data policy across snapshots, errors, artifacts, and viewport labels;
 - physics re-execution events at 5 mm reduced-scene and 15 mm articulated tolerances.
+- single-writer fault injection: partial append, flush/ENOSPC failure, index ahead/behind log, truncated final line, worker EOF, heartbeat timeout, live/dead orphan, concurrent run starts, and cancel escalation;
+- atomic snapshot→storage catch-up→live handoff with an append at every boundary, exactly-once reduction, conflicting duplicates, wrong-run/future/expired cursor, and slow-client overflow;
+- sink/no-sink full episodes for push and pick, residual Learn branch, four-seed surface evaluation, and late connection to a paused run with no future events;
+- evaluator mode off/on across completed, failed, cancelled, and abandoned states using recognizable sentinel secrets in actual HTTP bytes.
 
 ### Frontend
 
@@ -687,6 +791,8 @@ State rules:
 - R3F transform parity against Newton fixtures, missing-link failure, and no browser-physics dependencies;
 - Zustand selectors prevent per-body React rerenders at display rate;
 - component admission allowlist and bundle-size budget.
+- rapid backward/forward seek with stale acknowledgment rejection, long inspection tail eviction/reload, route changes without leaked listeners, and all terminal-run picker states;
+- no-WebGL DOM evidence flow, mobile orientation preserving selection, keyboard-only safe stop, and terminal command rejection.
 
 ### End to end
 
@@ -698,6 +804,44 @@ State rules:
 - replay and seek to a stage;
 - generate non-empty MP4/GIF and validate duration, resolution, and source run ID;
 - compare the final result against the existing scientific acceptance tests.
+- install the built wheel in a clean environment and exercise New Run, direct run URL, replay, offline fonts/GLB, and capture from packaged static assets.
+
+### Coverage diagram
+
+```text
+CODE / PROCESS PATHS                                USER FLOWS
+[E] Existing physics, SysID, planning              [G→E2E] Quick Demo → terminal result
+ ├─ [E★★★] estimators + planner edge cases          ├─ [G] double start / stale form / close tab
+ ├─ [E★★★] reduced GPU identification              ├─ [G] push and pick selected-action branches
+ ├─ [E★★] Franka IK motion                          └─ [G] mismatch → Learn → verification
+ └─ [G] full runner sink/no-sink regression
+
+[G] Spawned Newton worker                          [G→E2E] Live control
+ ├─ init / heartbeat / parent death                 ├─ pause pending → paused
+ ├─ ControlGate before every physics step           ├─ one 30 Hz step → remains paused
+ ├─ cancel / TERM / KILL escalation                 ├─ safe stop with partial artifacts
+ └─ crash / orphan reconciliation                   └─ server restart during active run
+
+[G] Single event writer                            [G→E2E] Reconnect and inspect
+ ├─ validate/redact → sequence → append              ├─ snapshot + catch-up + live exactly once
+ ├─ flush/index/snapshot/publish                     ├─ slow subscriber disconnect/resume
+ ├─ storage failure out-of-band stop                 ├─ scroll inspection + bounded tail
+ └─ one immutable terminal event                     └─ Return to live without duplication
+
+[G] R3F visual mirror                              [G→E2E] Replay and capture
+ ├─ asset/body-manifest validation                  ├─ stage/frame seek while paused
+ ├─ Newton Z-up transform parity                    ├─ no-WebGL semantic fallback
+ ├─ frame acknowledgment / stale rejection          ├─ fixed-clock 1080p image sequence
+ └─ contact/force/trajectory overlays               └─ MP4/GIF/checksum/README evidence
+
+[G] Public/evaluator artifact boundary             [G] Mobile companion
+ ├─ sentinel scan of real response bytes             ├─ orientation preserves selection
+ ├─ all four terminal states                         └─ safety controls remain reachable
+ └─ no static run-directory mount
+
+CURRENT: 13 tests (10 CPU, 3 GPU); planned Agent Lab paths are gaps until implemented.
+LEGEND: E=existing, G=gap to implement, ★★★=edge/error behavior, →E2E=integration required.
+```
 
 ## Success Criteria
 
@@ -718,13 +862,15 @@ State rules:
 ## Distribution Plan
 
 - Keep the repository Python-first. Add a Python `web` optional extra for FastAPI/Uvicorn and a pinned `pnpm-lock.yaml` for `src/web`.
+- Supported live target for this milestone is Linux x86-64 with NVIDIA Turing-or-newer GPU and R580+ driver, matching Newton/Warp verification. Static replay fixtures and frontend tests remain platform-neutral; macOS/Windows live GPU support is not claimed.
 - Development setup is `uv sync --extra dev --extra web && pnpm --dir src/web install --frozen-lockfile`.
 - Production build is `pnpm --dir src/web build`; output goes to `src/curious_robot/web_static/`. Missing production assets make `curious-robot web` fail with the exact build command rather than serving a blank page.
 - The Python wheel includes `web_static/**` as package data. CI builds the frontend before the wheel and tests the installed wheel in a clean environment.
 - Provide `uv run curious-robot web --open` as the primary local experience. It starts FastAPI, serves the production frontend, opens `/runs/new`, creates an episode when Run is pressed, and navigates to `/runs/{run_id}`. `--autorun --seed N` bypasses the form for capture/automation.
 - Keep `uv run curious-robot run` for headless research and CI.
 - Build frontend assets in GitHub Actions and serve the static build from FastAPI for a single-command local package.
-- Upload demo MP4 and full run artifacts to a GitHub Release or workflow artifact; commit only the optimized GIF if size is reasonable.
+- CI runs Python CPU tests, frontend lint/type/unit/build, clean-wheel static-asset install, and browser fixture E2E. A documented self-hosted NVIDIA job runs GPU/full-Franka and media capture when the runner is available.
+- Upload demo MP4 and full run artifacts to a versioned GitHub Release or workflow artifact; commit only the optimized GIF if size is reasonable. Release notes include environment fingerprint and source run ID.
 
 ## Open Questions
 
@@ -784,17 +930,60 @@ Synthesized from this design review. Each task derives from a reviewed design de
   - Surfaced by: Pass 7 — live updates must not steal reading or camera control.
   - Files: Zustand run store, Evidence Feed, viewport controls, local preferences.
   - Verify: new events never force-scroll inspection mode; Return to live applies the ordered buffered tail.
+- [ ] **T8 (P1, human: ~4h / CC: ~30min)** — Scientific boundary — Remove hidden truth from public load samples and controller commands
+  - Surfaced by: Eng Architecture — `environment.py:271` and `:409-411` read hidden mass into public evidence/control.
+  - Files: `environment.py`, `tools.py`, `sysid.py`, truth-isolation and GPU regression tests.
+  - Verify: recognizable truth sentinels never appear in public values; sink/no-sink science remains within tolerance.
+- [ ] **T9 (P1, human: ~1d / CC: ~1h)** — Event durability — Build manager-owned sequence/store/snapshot/SSE pipeline
+  - Surfaced by: Eng Architecture — sequencing, persistence, terminalization, and reconnect need one authority.
+  - Files: `events.py`, `event_store.py`, `web_api.py`, fault-injection tests.
+  - Verify: exact-once snapshot/catch-up/live races, ENOSPC/truncation recovery, immutable terminal logs.
+- [ ] **T10 (P1, human: ~1d / CC: ~1h)** — Worker controls — Spawn Newton subprocess with Pipe IPC and shared ControlGate
+  - Surfaced by: Eng Architecture — nested controller loops otherwise ignore pause/cancel too long.
+  - Files: `run_manager.py`, `environment.py`, CLI lazy imports, process/control integration tests.
+  - Verify: pause/step/cancel in every controller category, orphan reconciliation, one GPU slot.
+- [ ] **T11 (P1, human: ~1d / CC: ~1h)** — Visual identity — Add world/scenario/body-manifest frame contract and paused snapshot frame
+  - Surfaced by: Eng Architecture — reduced belief rollouts restart time and omit robot; late paused clients need complete transforms.
+  - Files: event schemas/store, R3F state/mirror, manifest exporter, parity/reconnect tests.
+  - Verify: full/reduced worlds render correct bodies; paused late connect renders without a future event.
+- [ ] **T12 (P1, human: ~1d / CC: ~1h)** — Reliability/performance — Implement test plan and named-workstation budgets
+  - Surfaced by: Eng Test/Performance — current 13 tests do not cover runner, replay, event/API/browser/capture paths.
+  - Files: Python integration/fault tests, Vitest/Playwright suites, benchmark report, CI.
+  - Verify: coverage diagram gaps close; 10-minute soak and five replay cycles meet documented limits.
 
 No separate `TODOS.md` entries are created: every finding is in-scope implementation work already represented above, so duplicating it as design debt would create two sources of truth.
 
+## Worktree Parallelization Strategy
+
+| Step | Modules touched | Depends on |
+| --- | --- | --- |
+| Scientific-boundary fixes | `src/curious_robot/environment.py`, `tools.py`, `sysid.py`, existing tests | — |
+| Slice 0 R3F/asset spike | `scripts/`, `src/web/spike/`, design artifacts | visual-frame schema draft |
+| Event schema/store | `src/curious_robot/events.py`, `event_store.py`, schema tests | scientific-boundary fixes |
+| Worker/run manager/API | `run_manager.py`, `web_api.py`, integration tests | event schema/store |
+| Frontend reducer/design shell | `src/web/src/state`, routes, non-3D components/tests | generated event types/fixtures |
+| R3F production mirror | `src/web/src/components/scene`, model assets/tests | Slice 0 + event frame schema |
+| Replay/media | frontend replay, `record-demo.ts`, CI/media docs | frontend shell + R3F + event store |
+| Full evaluation/audit | E2E, GPU runs, README, release artifacts | all lanes merged |
+
+Parallel lanes after scientific-boundary fixes and the shared event/frame contract land:
+
+- Lane A: event schema/store → worker/run manager/API.
+- Lane B: frontend reducer → stage/evidence/state-matrix shell.
+- Lane C: R3F asset/frame spike → production mirror.
+- Lane D waits for B + C: replay and media pipeline.
+- Final evaluation waits for A + B + C + D.
+
+Lanes B and C both touch `src/web`; isolate ownership to `state/routes/components` versus `components/scene/public/models` and merge through generated event fixtures. Do not parallelize changes to event schemas/code generation across lanes.
+
 ## Next Steps
 
-1. Complete `/plan-design-review` on this document and approved wireframe.
-2. Run `/design-consultation` to create `DESIGN.md` for the approved Precision Lab Instrument direction.
-3. Run `/plan-eng-review` to lock event ordering, subprocess lifecycle, R3F frame contract, and replay tolerances.
-4. Implement Slice 0, preserving all existing scientific tests.
+1. Completed: `/plan-design-review` on this document and approved wireframe.
+2. Completed: `/design-consultation` created repository `DESIGN.md` for Precision Lab Instrument.
+3. Completed: `/plan-eng-review` locked scientific boundaries, event ordering, subprocess lifecycle, R3F frame contract, tests, and performance budgets.
+4. Implement scientific-boundary corrections, then Slice 0 while preserving all existing tests.
 5. Proceed to Slice 1 only after R3F/Newton transform parity and deterministic capture pass.
-6. Continue by vertical slices with one observable done condition and one feature commit each.
+6. Continue by reviewed vertical slices with one observable done condition and one feature commit each.
 
 ## The Assignment
 
@@ -940,7 +1129,7 @@ Editable approved source: `~/.gstack/projects/curious-robot/designs/agent-lab-re
 | Pass 2  (States)     | 8/10 → 10/10 after visible state matrix     |
 | Pass 3  (Journey)    | 6/10 → 10/10 after Quick Demo journey       |
 | Pass 4  (AI Slop)    | 8/10 → 10/10 Precision Lab Instrument       |
-| Pass 5  (Design Sys) | 5/10 → 9/10; DESIGN.md is pre-build gate    |
+| Pass 5  (Design Sys) | 5/10 → 10/10; DESIGN.md created/committed   |
 | Pass 6  (Responsive) | 6/10 → 10/10 mobile companion + a11y       |
 | Pass 7  (Decisions)  | 5 resolved automatically, 0 deferred        |
 +--------------------------------------------------------------------+
@@ -954,18 +1143,33 @@ Editable approved source: `~/.gstack/projects/curious-robot/designs/agent-lab-re
 +====================================================================+
 ```
 
-Plan is design-complete. Run `/design-consultation` for `DESIGN.md`, then `/plan-eng-review`; run `/design-review` after implementation for visual QA.
+Plan is design- and engineering-complete. Run `/design-review` after implementation for visual QA.
+
+## Engineering Plan Review Completion Summary
+
+- Step 0 Scope Challenge: full scope retained as dependency-ordered vertical slices; nonessential chat/Compare/remote features remain excluded.
+- Architecture Review: 12 issues found and folded, including scientific truth leaks, single-writer ownership, spawned worker IPC, control checkpoints, scenario-aware frames, paused snapshots, artifact security, and terminalization.
+- Code Quality Review: 3 issues found and folded: private cross-module APIs, duplicated event ownership risk, and eager CLI simulation imports.
+- Test Review: coverage diagram produced; 13 major gap groups mapped to unit/integration/E2E tests and a persistent QA test plan.
+- Performance Review: 5 issue groups folded into event/byte bounds, display cadence, shared GPU readback, compact snapshots, and bounded image-sequence capture.
+- NOT in scope: written.
+- What already exists: written and reused.
+- TODOS.md updates: 0; all findings are in-scope tasks in this document.
+- Failure modes: 0 critical gaps remain after adding explicit tests, handlers, and user-visible states.
+- Outside voice: two fresh-context engineering reviewers ran; architecture and test/performance findings were incorporated under delegated user authority.
+- Parallelization: four lanes; backend, frontend shell, and R3F can run in parallel after shared science/event contracts, media waits for frontend + R3F.
+- Lake Score: complete option selected for every recommendation; no shortcuts accepted.
 
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
 | --- | --- | --- | ---: | --- | --- |
-| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | Product premise already approved in office hours |
-| Codex Review | `/codex review` | Independent second opinion | 0 | — | Not run |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 0 | REQUIRED | Must validate subprocess, event ordering, R3F frame contract, and capture |
-| Design Review | `/plan-design-review` | UI/UX gaps | 1 | CLEAR | score 7/10 → 10/10, 7 primary decisions, 0 unresolved |
-| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | Not required before the architecture review |
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | Product premise approved through office hours; no new direction gap |
+| Codex Review | `/codex review` | Independent second opinion | 0 | — | Two fresh-context subagent reviews informed the eng review but were not logged as Codex review |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN) | 30 issues, 0 critical gaps, 0 unresolved |
+| Design Review | `/plan-design-review` | UI/UX gaps | 1 | CLEAR (FULL) | score 7/10 → 10/10, 7 primary decisions |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | Not required for initial local research workspace |
 
-**VERDICT:** DESIGN CLEARED — engineering review required before implementation.
+**VERDICT:** DESIGN + ENG CLEARED — ready to implement in reviewed vertical slices.
 
 NO UNRESOLVED DECISIONS
