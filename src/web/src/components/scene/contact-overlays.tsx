@@ -21,6 +21,27 @@ export function ContactOverlays({ frame }: { frame: VisualFramePayload }) {
           </group>
         );
       })}
+      {frame.vectors.map((vector) => {
+        const forceScale = vector.units === "N" ? 0.06 : 1;
+        const end: [number, number, number] = [
+          vector.origin_m[0] + vector.vector[0] * forceScale,
+          vector.origin_m[1] + vector.vector[1] * forceScale,
+          vector.origin_m[2] + vector.vector[2] * forceScale,
+        ];
+        const measured = vector.kind === "measured_force";
+        const commanded = vector.kind === "commanded_force";
+        return (
+          <Line
+            key={vector.vector_id}
+            points={[vector.origin_m, end]}
+            color={measured ? "#39d0df" : commanded ? "#f2b84b" : vector.kind === "observed" ? "#f1f5f7" : "#39d0df"}
+            lineWidth={measured ? 3 : 2}
+            dashed={commanded || vector.kind === "prediction"}
+            dashSize={0.025}
+            gapSize={0.015}
+          />
+        );
+      })}
       {frame.target_region && (
         <group position={frame.target_region.center_m}>
           <mesh rotation={[0, 0, 0]}>

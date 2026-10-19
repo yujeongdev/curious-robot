@@ -25,9 +25,10 @@ function RobotLink({ body }: { body: BodyTransform }) {
 }
 
 export function FrankaMirror({ bodies }: { bodies: readonly BodyTransform[] }) {
+  const robotBodies = bodies.filter((body) => /panda|franka/i.test(`${body.body_id} ${body.label}`));
   return (
     <group aria-label="Franka presentation mirror">
-      {bodies.filter((body) => body.body_id !== "cube").map((body) => <RobotLink key={body.body_id} body={body} />)}
+      {robotBodies.map((body) => <RobotLink key={body.body_id} body={body} />)}
     </group>
   );
 }

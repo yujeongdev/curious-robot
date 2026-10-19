@@ -48,6 +48,7 @@ function frame(frameId: number, stage: DetailedStage, cubeX: number, forceN = 0,
     presentation_time_s: frameId * 0.2,
     bodies: robotBodies(cubeX, Math.min(0.12, forceN * 0.012)),
     contacts: forceN > 0 ? [{ position_m: [cubeX - 0.055, 0, 0.055], normal_world: [-1, 0, 0], force_world_n: [forceN, 0, 0], shape_a_label: "panda_hand", shape_b_label: "cube" }] : [],
+    vectors: forceN > 0 ? [{ vector_id: `force-${frameId}`, kind: "measured_force", origin_m: [cubeX - 0.055, 0, 0.07], vector: [forceN, 0, 0], frame: "world", units: "N", label: "measured contact force" }] : [],
     target_region: { center_m: [0.62, 0, 0.005], radius_m: 0.09 },
     camera_hint: { preset: forceN > 0 ? "experiment" : "overview", target_m: [cubeX, 0, 0.05] },
   }, { sim: frameId * 0.2, frame: frameId });

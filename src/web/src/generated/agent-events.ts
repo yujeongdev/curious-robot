@@ -43,6 +43,16 @@ export const contactSchema = z.object({
   shape_b_label: z.string().optional(),
 });
 
+export const vectorVisualSchema = z.object({
+  vector_id: z.string(),
+  kind: z.enum(["measured_force", "commanded_force", "target", "prediction", "observed"]),
+  origin_m: vector3Schema,
+  vector: vector3Schema,
+  frame: z.string(),
+  units: z.string(),
+  label: z.string().nullable().optional(),
+});
+
 export const visualFramePayloadSchema = z.object({
   frame_id: z.number().int().nonnegative(),
   source_state_sequence: z.number().int().nonnegative(),
@@ -56,6 +66,7 @@ export const visualFramePayloadSchema = z.object({
   presentation_time_s: z.number(),
   bodies: z.array(bodyTransformSchema),
   contacts: z.array(contactSchema).default([]),
+  vectors: z.array(vectorVisualSchema).default([]),
   target_region: z.object({ center_m: vector3Schema, radius_m: z.number().positive() }).optional(),
   camera_hint: z.object({ preset: z.string(), target_m: vector3Schema.nullable().optional() }).nullable().optional(),
 });
