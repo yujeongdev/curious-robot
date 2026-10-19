@@ -32,6 +32,7 @@ packages = ["src/curious_robot"]
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
+markers = ["gpu: requires a CUDA-capable NVIDIA GPU"]
 
 [tool.ruff]
 line-length = 110
