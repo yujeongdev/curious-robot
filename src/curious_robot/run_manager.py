@@ -9,6 +9,7 @@ in CPU-only tests and lets the child initialize CUDA after ``spawn``.
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import importlib
 import inspect
 import json
@@ -29,9 +30,7 @@ from .events import EVENT_ADAPTER, AgentEvent, DiscoveryStage, validate_public_d
 
 MAX_IPC_MESSAGE_BYTES = 512 * 1024
 TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "abandoned"})
-CONTROLLABLE_STATES = frozenset(
-    {"initializing", "running", "pause_pending", "paused", "resume_pending"}
-)
+CONTROLLABLE_STATES = frozenset({"initializing", "running", "pause_pending", "paused", "resume_pending"})
 
 
 class RunManagerError(RuntimeError):
@@ -203,6 +202,7 @@ class _RunRecord:
     updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     events: list[dict[str, Any]] = field(default_factory=list)
     event_lines: list[bytes] = field(default_factory=list)
+    event_ids: set[str] = field(default_factory=set)
     artifacts: dict[str, dict[str, Any]] = field(default_factory=dict)
     stage: DiscoveryStage = DiscoveryStage.OBSERVE
     stage_instance_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -258,16 +258,13 @@ def _worker_bootstrap(
         controls=gate,
     )
     try:
-        sink.emit(
-            {"type": "run.started", "payload": {"state": "running", "worker_pid": os.getpid()}}
-        )
+        sink.emit({"type": "run.started", "payload": {"state": "running", "worker_pid": os.getpid()}})
         result = _resolve_entrypoint(entrypoint)(context)
+        _emit_output_artifacts(context)
         payload = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
         sink.emit({"type": "run.completed", "payload": {"state": "completed", "result": payload}})
     except RunCancelled as exc:
-        sink.emit(
-            {"type": "run.cancelled", "payload": {"state": "cancelled", "reason": str(exc)}}
-        )
+        sink.emit({"type": "run.cancelled", "payload": {"state": "cancelled", "reason": str(exc)}})
     except BaseException as exc:  # worker failures must cross the process boundary
         sink.emit(
             {
@@ -283,6 +280,53 @@ def _worker_bootstrap(
     finally:
         event_send.close()
         command_receive.close()
+
+
+_EVALUATOR_ARTIFACTS = frozenset(
+    {
+        "reexecution.json",
+        "reexecution_report.json",
+        "estimated_vs_true.png",
+        "discovery.gif",
+        "discovery_timeline.html",
+        "scene_replay.bin",
+    }
+)
+
+
+def _emit_output_artifacts(context: WorkerContext) -> None:
+    """Publish allowlisted top-level run artifacts after the runner flushes them."""
+    for path in sorted(context.output_directory.iterdir()):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        context.events.emit(
+            {
+                "type": "artifact.created",
+                "payload": {
+                    "artifact_id": str(uuid.uuid4()),
+                    "kind": path.stem,
+                    "relative_path": path.name,
+                    "media_type": _artifact_media_type(path),
+                    "filename": path.name,
+                    "classification": ("evaluator" if path.name in _EVALUATOR_ARTIFACTS else "public"),
+                    "bytes": path.stat().st_size,
+                    "sha256": digest,
+                },
+            }
+        )
+
+
+def _artifact_media_type(path: Path) -> str:
+    return {
+        ".json": "application/json",
+        ".csv": "text/csv",
+        ".html": "text/html",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".mp4": "video/mp4",
+        ".bin": "application/octet-stream",
+    }.get(path.suffix.lower(), "application/octet-stream")
 
 
 def default_newton_worker(context: WorkerContext) -> Any:
@@ -305,6 +349,8 @@ def default_newton_worker(context: WorkerContext) -> Any:
         kwargs["event_sink"] = context.events
     if "control_gate" in parameters:
         kwargs["control_gate"] = context.controls
+    if "material_bounds" in parameters:
+        kwargs["material_bounds"] = dict(context.configuration.material_bounds)
     return run_episode(**kwargs)
 
 
@@ -522,9 +568,7 @@ class RunManager:
             record = self._record(run_id)
             latest = len(record.events)
             if after_sequence < 0 or after_sequence > latest:
-                raise CursorError(
-                    f"cursor {after_sequence} is outside the committed range 0..{latest}"
-                )
+                raise CursorError(f"cursor {after_sequence} is outside the committed range 0..{latest}")
             return [event.copy() for event in record.events[after_sequence:]]
 
     def committed_after(self, run_id: str, after_sequence: int) -> list[tuple[dict[str, Any], bytes]]:
@@ -705,8 +749,11 @@ class RunManager:
     def _commit_locked(self, record: _RunRecord, intent: dict[str, Any]) -> dict[str, Any]:
         if record.state in TERMINAL_STATES:
             return record.events[-1]
+        event_id = str(intent.get("event_id") or uuid.uuid4())
+        if event_id in record.event_ids:
+            raise RunManagerError(f"duplicate worker event_id {event_id}")
         candidate = {
-            "event_id": str(uuid.uuid4()),
+            "event_id": event_id,
             "run_id": record.run_id,
             "sequence": len(record.events) + 1,
             "wall_time": _utc_now(),
@@ -734,6 +781,7 @@ class RunManager:
         event = json.loads(line)
         record.events.append(event)
         record.event_lines.append(line)
+        record.event_ids.add(event_id)
         record.updated_at = event["wall_time"]
         event_type = event["type"]
         if event_type == "run.started":

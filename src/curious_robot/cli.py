@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import argparse
-
-from .runner import run_episode
+import threading
+import webbrowser
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -15,16 +15,42 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--device", default="cuda:0")
     run.add_argument("--output", default="artifacts/demo")
     run.add_argument("--no-robot", action="store_true", help="CI-only reduced scene")
+    web = subparsers.add_parser("web", help="launch the local Agent Lab")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8765)
+    web.add_argument("--open", action=argparse.BooleanOptionalAction, default=True)
+    web.add_argument("--autorun", action="store_true", help="start the known-good demo from the browser")
+    web.add_argument("--seed", type=int, default=7)
+    web.add_argument("--device", default="cuda:0")
     args = parser.parse_args(argv)
-    result = run_episode(
-        seed=args.seed,
-        output_directory=args.output,
-        device=args.device,
-        include_robot=not args.no_robot,
-    )
-    print(result.model_dump_json(indent=2))
-    if not result.success:
-        raise SystemExit(2)
+    if args.command == "run":
+        from .runner import run_episode
+
+        result = run_episode(
+            seed=args.seed,
+            output_directory=args.output,
+            device=args.device,
+            include_robot=not args.no_robot,
+        )
+        print(result.model_dump_json(indent=2))
+        if not result.success:
+            raise SystemExit(2)
+        return
+
+    if args.host not in {"127.0.0.1", "localhost"}:
+        parser.error("Agent Lab binds to loopback by default; non-loopback hosting is not supported yet")
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise SystemExit("Install web dependencies with: uv sync --extra web") from exc
+    from .web_api import create_app
+
+    url = f"http://{args.host}:{args.port}/"
+    if args.autorun:
+        url += f"?autorun=1&seed={args.seed}&device={args.device}"
+    if args.open:
+        threading.Timer(0.8, webbrowser.open, args=(url,)).start()
+    uvicorn.run(create_app(), host=args.host, port=args.port, log_level="info")
 
 
 if __name__ == "__main__":

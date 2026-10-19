@@ -82,18 +82,12 @@ def test_pause_step_resume_and_cancel_are_safe_and_idempotent(manager: RunManage
     assert manager.pause(run_id)["state"] == "pause_pending"
     paused = wait_state(manager, run_id, "paused")
     assert manager.pause(run_id)["state"] == "paused"
-    frame_count = sum(
-        event["type"] == "simulation.visual_frame"
-        for event in manager.events_after(run_id, 0)
-    )
+    frame_count = sum(event["type"] == "simulation.visual_frame" for event in manager.events_after(run_id, 0))
 
     assert manager.step(run_id)["display_substeps"] == 8
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
-        after = sum(
-            event["type"] == "simulation.visual_frame"
-            for event in manager.events_after(run_id, 0)
-        )
+        after = sum(event["type"] == "simulation.visual_frame" for event in manager.events_after(run_id, 0))
         if after == frame_count + 1:
             break
         time.sleep(0.01)
@@ -112,9 +106,7 @@ def test_pause_step_resume_and_cancel_are_safe_and_idempotent(manager: RunManage
 
 
 def test_worker_failure_preserves_committed_prefix(manager: RunManager) -> None:
-    run_id = manager.start_run(
-        RunConfiguration(material_bounds={"fixture_fail": True})
-    )["run_id"]
+    run_id = manager.start_run(RunConfiguration(material_bounds={"fixture_fail": True}))["run_id"]
 
     terminal = manager.wait(run_id, 8)
     events = manager.events_after(run_id, 0)
@@ -126,9 +118,7 @@ def test_worker_failure_preserves_committed_prefix(manager: RunManager) -> None:
 
 
 def test_abrupt_worker_exit_becomes_a_terminal_failure(manager: RunManager) -> None:
-    run_id = manager.start_run(
-        RunConfiguration(material_bounds={"fixture_crash": True})
-    )["run_id"]
+    run_id = manager.start_run(RunConfiguration(material_bounds={"fixture_crash": True}))["run_id"]
 
     terminal = manager.wait(run_id, 8)
     events = manager.events_after(run_id, 0)
@@ -140,9 +130,7 @@ def test_abrupt_worker_exit_becomes_a_terminal_failure(manager: RunManager) -> N
 
 
 def test_canonical_store_bytes_are_the_stream_source(manager: RunManager) -> None:
-    run_id = manager.start_run(
-        RunConfiguration(material_bounds={"fixture_steps": 1})
-    )["run_id"]
+    run_id = manager.start_run(RunConfiguration(material_bounds={"fixture_steps": 1}))["run_id"]
     manager.wait(run_id, 8)
 
     committed = manager.committed_after(run_id, 0)
@@ -155,9 +143,7 @@ def test_canonical_store_bytes_are_the_stream_source(manager: RunManager) -> Non
 def test_artifacts_are_opaque_allowlisted_and_evaluator_gated(tmp_path: Path) -> None:
     disabled = RunManager(tmp_path / "disabled", worker_entrypoint=FIXTURE_WORKER)
     try:
-        run_id = disabled.start_run(
-            RunConfiguration(material_bounds={"fixture_artifacts": True})
-        )["run_id"]
+        run_id = disabled.start_run(RunConfiguration(material_bounds={"fixture_artifacts": True}))["run_id"]
         disabled.wait(run_id, 8)
         path, _ = disabled.artifact(run_id, PUBLIC_ARTIFACT_ID)
         assert path.read_text() == "public fixture\n"

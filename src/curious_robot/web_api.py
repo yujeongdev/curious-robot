@@ -16,7 +16,8 @@ from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .events import validate_public_data
@@ -57,6 +58,7 @@ def create_app(
     control_token: str | None = None,
     allowed_hosts: frozenset[str] | None = None,
     allow_non_loopback: bool = False,
+    static_dir: str | Path | None = None,
 ) -> FastAPI:
     run_manager = manager or RunManager(artifact_root)
     token = control_token or secrets.token_urlsafe(32)
@@ -64,6 +66,7 @@ def create_app(
     app = FastAPI(title="Curious Robot Agent Lab", version="0.1.0")
     app.state.run_manager = run_manager
     app.state.control_token = token
+    web_root = _resolve_static_dir(static_dir)
 
     @app.middleware("http")
     async def local_security(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -168,10 +171,10 @@ def create_app(
                     continue
                 for event, committed_json in events:
                     yield (
-                        f"id: {event['sequence']}\n"
-                        f"event: {event['type']}\n"
-                        "data: "
-                    ).encode() + committed_json + b"\n\n"
+                        (f"id: {event['sequence']}\nevent: {event['type']}\ndata: ").encode()
+                        + committed_json
+                        + b"\n\n"
+                    )
                     next_sequence = int(event["sequence"])
                 if terminal:
                     break
@@ -205,7 +208,43 @@ def create_app(
             filename=str(metadata.get("filename", path.name)),
         )
 
+    if web_root is not None:
+        assets = web_root / "assets"
+        if assets.is_dir():
+            app.mount("/assets", StaticFiles(directory=assets), name="agent-lab-assets")
+
+    @app.get("/{spa_path:path}", response_class=HTMLResponse)
+    async def agent_lab_shell(spa_path: str) -> HTMLResponse:
+        if spa_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API route not found")
+        if web_root is None or not (web_root / "index.html").is_file():
+            return HTMLResponse(
+                status_code=503,
+                content=(
+                    "<h1>Agent Lab frontend is not built</h1>"
+                    "<pre>corepack pnpm --dir src/web install --frozen-lockfile\n"
+                    "corepack pnpm --dir src/web build</pre>"
+                ),
+            )
+        html = (web_root / "index.html").read_text()
+        html = html.replace(
+            '<meta name="curious-robot-control-token" content="" />',
+            f'<meta name="curious-robot-control-token" content="{token}" />',
+        )
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
     return app
+
+
+def _resolve_static_dir(value: str | Path | None) -> Path | None:
+    if value is not None:
+        candidate = Path(value).resolve()
+        return candidate if candidate.is_dir() else None
+    packaged = Path(__file__).with_name("web_static")
+    if packaged.is_dir():
+        return packaged
+    repository_build = Path(__file__).resolve().parents[2] / "src" / "web" / "dist"
+    return repository_build if repository_build.is_dir() else None
 
 
 def _same_origin(origin: str, request: Request) -> bool:
@@ -230,6 +269,7 @@ def _resolve_cursor(after_sequence: int | None, last_event_id: str | None) -> in
             raise HTTPException(status_code=400, detail="Last-Event-ID must be an integer") from exc
         if header_cursor < 0:
             raise HTTPException(status_code=400, detail="Last-Event-ID must be non-negative")
-    if after_sequence is not None and header_cursor is not None and after_sequence != header_cursor:
-        raise HTTPException(status_code=400, detail="conflicting event cursors")
-    return after_sequence if after_sequence is not None else (header_cursor or 0)
+    # Native EventSource reconnects to its original URL while advancing the
+    # Last-Event-ID header.  The header therefore supersedes the bootstrap
+    # query cursor after the first connection.
+    return header_cursor if header_cursor is not None else (after_sequence or 0)

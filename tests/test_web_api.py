@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -69,9 +70,7 @@ def test_mutations_require_token_json_and_same_origin(api) -> None:
 def test_only_one_active_run_and_terminal_snapshot(api) -> None:
     client, manager = api
     run_id = create_run(client, fixture_steps=100, fixture_delay_s=0.02)
-    collision = client.post(
-        "/api/runs", headers={CONTROL_TOKEN_HEADER: TOKEN}, json={}
-    )
+    collision = client.post("/api/runs", headers={CONTROL_TOKEN_HEADER: TOKEN}, json={})
     assert collision.status_code == 409
     assert collision.json()["detail"]["active_run_id"] == run_id
 
@@ -107,11 +106,12 @@ def test_sse_reconnect_uses_committed_sequence_cursor(api) -> None:
     future = client.get(f"/api/runs/{run_id}/events?after_sequence=9999")
     assert future.status_code == 409
     assert future.json()["snapshot_required"] is True
-    conflict = client.get(
+    reconnected = client.get(
         f"/api/runs/{run_id}/events?after_sequence=1",
         headers={"Last-Event-ID": "2"},
     )
-    assert conflict.status_code == 400
+    assert reconnected.status_code == 200
+    assert "id: 3" in reconnected.text
 
 
 def test_ndjson_is_terminal_only(api) -> None:
@@ -150,3 +150,41 @@ def test_get_unknown_run_does_not_leak_paths(api) -> None:
     response = client.get("/api/runs/not-a-run")
     assert response.status_code == 404
     assert response.json() == {"detail": "run not found"}
+
+
+def test_agent_lab_shell_injects_control_token_and_serves_assets(tmp_path: Path) -> None:
+    static = tmp_path / "web"
+    assets = static / "assets"
+    assets.mkdir(parents=True)
+    (static / "index.html").write_text(
+        '<meta name="curious-robot-control-token" content="" /><script src="/assets/app.js"></script>'
+    )
+    (assets / "app.js").write_text("console.log('agent lab')")
+    manager = RunManager(tmp_path / "runs", worker_entrypoint=FIXTURE_WORKER)
+    app = create_app(manager=manager, control_token=TOKEN, static_dir=static)
+    try:
+        with TestClient(app) as client:
+            root = client.get("/")
+            assert root.status_code == 200
+            assert f'content="{TOKEN}"' in root.text
+            assert root.headers["cache-control"] == "no-store"
+            nested = client.get("/runs/new")
+            assert nested.status_code == 200
+            assert client.get("/assets/app.js").status_code == 200
+    finally:
+        manager.close()
+
+
+def test_packaged_agent_lab_shell_is_self_contained(tmp_path: Path) -> None:
+    manager = RunManager(tmp_path / "runs", worker_entrypoint=FIXTURE_WORKER)
+    app = create_app(manager=manager, control_token=TOKEN)
+    try:
+        with TestClient(app) as client:
+            root = client.get("/")
+            assert root.status_code == 200
+            assert f'content="{TOKEN}"' in root.text
+            asset_match = re.search(r'src="(/assets/[^"]+\.js)"', root.text)
+            assert asset_match is not None
+            assert client.get(asset_match.group(1)).status_code == 200
+    finally:
+        manager.close()
