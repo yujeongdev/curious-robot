@@ -6,6 +6,7 @@ import { EvidenceFeed } from "../components/evidence-feed";
 import { NewtonViewport } from "../components/newton-viewport";
 import { MobileInspectors } from "../components/mobile-inspectors";
 import { RunControls } from "../components/run-controls";
+import { ResizableWorkspace } from "../components/resizable-workspace";
 import { StageStepper } from "../components/stage-stepper";
 import { TelemetryDock } from "../components/telemetry-dock";
 import { Badge } from "../components/ui/badge";
@@ -114,10 +115,10 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
       )}
       {connection === "error" && <div className="degraded-banner" role="status">Visual connection interrupted. Committed evidence remains available; no run state has been fabricated.</div>}
       <StageStepper run={run} />
-      <div className="workspace-grid">
-        <NewtonViewport frame={run.latestFrame} disconnected={connection === "error"} />
-        <EvidenceFeed run={run} />
-      </div>
+      <ResizableWorkspace
+        primary={<NewtonViewport frame={run.latestFrame} disconnected={connection === "error"} />}
+        secondary={<EvidenceFeed run={run} />}
+      />
       <TelemetryDock run={run} />
       <MobileInspectors run={run} />
       {mode === "replay" && (

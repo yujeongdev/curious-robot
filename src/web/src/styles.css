@@ -147,8 +147,11 @@ a { color: inherit; text-decoration: none; }
 .phase-mobile { display: none; }
 .connection-marker { position: absolute; inset: auto 16px -30px auto; z-index: 5; border: 1px solid var(--warning); padding: 4px 9px; background: var(--surface-1); color: var(--warning); font-size: .75rem; }
 
-.workspace-grid { min-height: 410px; height: calc(100svh - 58px - 2px - 79px - 220px); display: grid; grid-template-columns: minmax(0, 65fr) minmax(370px, 35fr); border-bottom: 1px solid var(--border); }
-.viewport { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--canvas); }
+.workspace-grid { min-height: 410px; height: calc(100svh - 58px - 2px - 79px - 220px); display: grid; border-bottom: 1px solid var(--border); }
+.panel-separator { display: grid; place-items: center; border: 0; border-left: 1px solid var(--border); border-right: 1px solid var(--border); background: var(--surface-1); cursor: col-resize; touch-action: none; }
+.panel-separator:hover, .panel-separator:focus-visible { background: color-mix(in oklch, var(--signal), var(--surface-1) 84%); }
+.panel-separator span { width: 2px; height: 30px; border-radius: 2px; background: var(--border); }
+.viewport { min-width: 0; display: flex; flex-direction: column; background: var(--canvas); }
 .viewport-toolbar, .region-header { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 8px 12px; background: var(--surface-1); }
 .viewport-toolbar h2, .region-header h2 { font-size: 1rem; line-height: 1.25; }
 .viewport-badges { display: flex; align-items: center; gap: 6px; }
@@ -237,7 +240,7 @@ a { color: inherit; text-decoration: none; }
   .lab-header { gap: 10px; }
   .run-identity { min-width: 145px; }
   .run-identity .metadata, .run-state > .mono, .lab-header > .run-controls .desktop-only { display: none; }
-  .workspace-grid { grid-template-columns: minmax(0, 58fr) minmax(330px, 42fr); height: calc(100svh - 58px - 2px - 79px - 54px); }
+  .workspace-grid { height: calc(100svh - 58px - 2px - 79px - 54px); }
   .telemetry { height: 54px; }
   .telemetry-grid { display: none; }
   .phase-list button { padding: 8px; grid-template-columns: 24px 1fr; }
@@ -273,6 +276,7 @@ a { color: inherit; text-decoration: none; }
   .phase-mobile strong { color: var(--signal); }
   .phase-mobile div > span:last-child { color: var(--text-muted); font-size: .75rem; text-transform: capitalize; }
   .workspace-grid { min-height: 0; height: auto; display: flex; flex-direction: column; }
+  .panel-separator { display: none; }
   .viewport { height: 42svh; min-height: 310px; border-right: 0; border-bottom: 1px solid var(--border); }
   .viewport-toolbar { min-height: 48px; }
   .viewport-badges .button, .viewport-badges .badge:not(:first-child), .viewport-legend { display: none; }
