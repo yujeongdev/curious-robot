@@ -59,14 +59,11 @@
     <!-- The stepper is the primary navigation and run status, not decorative tabs. -->
     <nav class="steps" aria-label="Agent stages">
       <span class="step done">✓ Observe</span><span class="arrow">›</span>
-      <span class="step done">✓ Reason</span><span class="arrow">›</span>
-      <span class="step done">✓ Experiment</span><span class="arrow">›</span>
-      <span class="step active">Measure · 01:24</span><span class="arrow">›</span>
-      <span class="step">Identify</span><span class="arrow">›</span>
-      <span class="step">Update Sim</span><span class="arrow">›</span>
-      <span class="step">Predict</span><span class="arrow">›</span>
-      <span class="step">Execute</span><span class="arrow">›</span>
-      <span class="step">Verify</span><span class="arrow">›</span><span class="step">Learn</span>
+      <span class="step done">✓ Discover</span><span class="arrow">›</span>
+      <span class="step active">Experiment · Measure μs · 2/3 · 01:24</span><span class="arrow">›</span>
+      <span class="step">Calibrate</span><span class="arrow">›</span>
+      <span class="step">Decide</span><span class="arrow">›</span>
+      <span class="step">Execute</span>
     </nav>
 
     <main class="workspace">
@@ -81,7 +78,7 @@
 
       <!-- shadcn: ScrollArea + Card + Collapsible. This is evidence, never raw chain-of-thought. -->
       <aside class="feed">
-        <div class="panel-head"><strong>Agent Evidence</strong><span>18 events</span><button>Filter</button></div>
+        <div class="panel-head"><strong>Agent Evidence</strong><span>LIVE · 18 events</span><button>Filter</button></div>
         <div class="events">
           <article class="event agent"><div class="meta"><b>RATIONALE</b><span>12.10s</span></div>Push success is sensitive to effective cube–surface friction. Static breakaway has the highest remaining task-weighted information gain.</article>
           <article class="event tool"><div class="meta"><b>TOOL · probe_static_friction</b><span>12.12s</span></div>Force ramp: 0.0 → 2.60 N<br>Motion threshold crossed at 2.51 N<br><button>Inspect 86 samples</button></article>

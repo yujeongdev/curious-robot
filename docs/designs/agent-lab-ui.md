@@ -57,6 +57,50 @@ The UI follows current agent-application patterns without copying a generic chat
 - make observability first-class through timestamps, duration, sequence, and provenance;
 - use generative components only for domain evidence, never arbitrary unvalidated UI code.
 
+## Visual Direction: Precision Lab Instrument
+
+The interface should feel like a calibrated robotics instrument, not a SaaS dashboard or game HUD. Newton motion is the single visual anchor. Typography, spacing, signal color, and precise state changes provide hierarchy; decorative glow, gradients, large shadows, and repeated rounded cards are prohibited.
+
+Before implementation, run `/design-consultation` and create repository-level `DESIGN.md` using this section as the approved direction. `DESIGN.md` must resolve exact OKLCH values, bundled font files/licensing, light/dark policy, chart palette, R3F overlay encodings, shadcn variants, density, focus styles, and deterministic recording motion. Agent Lab implementation cannot begin past Slice 0 until that file exists and this plan's semantic roles map to its tokens.
+
+### Typography
+
+- Primary UI and Korean text: bundled `IBM Plex Sans KR`, 16 px minimum body size, 1.45–1.6 line height.
+- Measurements, event IDs, timestamps, SI units, and code-like values: bundled `IBM Plex Mono` with tabular numerals.
+- One display scale only: 20 px workspace title, 16 px region title, 14–16 px metadata according to contrast and density. Never reduce essential status or evidence below 14 px.
+- Fonts ship locally under their licenses so offline demos and MP4 capture do not depend on network loading.
+
+### Color roles
+
+Define semantic CSS variables in OKLCH, with tested light and dark values:
+
+- `--canvas`: near-black graphite live workspace;
+- `--surface-1` and `--surface-2`: calm neutral elevation through value difference, not shadows;
+- `--text-primary`, `--text-secondary`, `--text-muted`: body contrast ≥4.5:1;
+- `--signal`: cyan used only for current phase, selected evidence, synchronized cursor, and primary Run action;
+- `--warning`: amber for degraded/partial states;
+- `--danger`: red for safety/terminal failure;
+- `--success`: restrained green for verified predicates, never the only success indicator;
+- `--truth-reveal`: evaluator-only color paired with an explicit label and icon.
+
+Force vectors, predicted paths, observed paths, and target regions have separate color-plus-shape encodings so color-blind users can distinguish them. No purple/indigo AI gradient is permitted.
+
+### Geometry and spacing
+
+- 4 px base spacing scale; common gaps 8, 12, 16, 24 px.
+- Hairline separators organize full-height regions. Cards exist only for discrete evidence/tool events.
+- Radius scale is 2/4/6 px; no uniformly bubbly 12–24 px surfaces.
+- Shadows are reserved for transient overlays, menus, and dialogs, not permanent layout regions.
+- The R3F viewport remains edge-to-edge within its region; do not inset it inside a decorative card.
+
+### Motion
+
+- Active macro phase uses a restrained 1.5 s status pulse plus text/shape change; respect `prefers-reduced-motion`.
+- Evidence events enter once with 120–180 ms opacity/translation and never animate continuously.
+- Belief delta animates prior → posterior only when the event becomes current; replay seeking renders the target state immediately.
+- R3F camera motion is user-driven or tied to an explicit camera preset, never ambient orbit.
+- Recording mode disables nondeterministic UI animation and uses the fixed replay clock.
+
 ## Frontend Component Admission Review
 
 Every dependency needs one owned responsibility. “Popular in 2026” is not sufficient.
@@ -272,6 +316,19 @@ Use these display stages, mapping multiple low-level events into a legible produ
 
 Each stage has `pending`, `active`, `completed`, `failed`, or `skipped`. Experiments can repeat, so the authoritative model is an ordered list of `stage_instance_id` values grouped by `iteration_id`, not one mutable status per stage name. Legal flow is forward within an iteration; a planner may begin a new iteration at Identify Unknowns after Learn or failed validation. It cannot jump backward inside an existing instance. The top stepper shows aggregate completion and highlights the active instance; an `Experiment 2/3` badge reveals repetition. Clicking a completed aggregate stage opens its instances and seeks to the selected instance's first event. Failure and skipped reasons are always visible.
 
+The top-level stepper uses six macro phases rather than twelve equal-width labels:
+
+| Macro phase | Detailed stages |
+| --- | --- |
+| Observe | Observe |
+| Discover | Reason, Identify Unknowns, Design Experiment |
+| Experiment | Act, Measure |
+| Calibrate | System Identification, Update Simulation |
+| Decide | Predict, Select Action |
+| Execute | Execute, Verify, Learn |
+
+The active phase displays the exact substep, target parameter/action, iteration badge, and elapsed time, for example `Experiment · Measure static friction · 2/3 · 01:24`. Selecting a macro phase expands its stage instances and seeks to the chosen instance. The twelve-stage loop remains authoritative in events, replay, accessibility labels, and the detail drawer.
+
 ## Surface Material Randomization
 
 Replace the implicit ground plane material with an explicit hidden `SurfaceParameters` owned only by the evaluator/truth scene:
@@ -298,6 +355,26 @@ One allowlist governs SSE events, snapshots, request echoes, API errors, logs, a
 
 ## Screen Structure
 
+### First-run journey and emotional arc
+
+The New Run screen has one primary action, `Run discovery demo`, using a versioned known-good preset. `Configure run` is secondary disclosure for seed, GPU, observation noise, surface bounds, and recording options. Opening the page never starts GPU work without an explicit action. `--autorun` remains automation-only and is visibly labeled when active.
+
+| Moment | User does | Intended feeling | Design support |
+| --- | --- | --- | --- |
+| First 5 seconds | Sees Franka/table preview, one-sentence mission, and presses `Run discovery demo` | “I know what this will show and how to start.” | One primary action; preset summary in one line; configuration collapsed |
+| Initialization | Watches GPU, asset, worker, and R3F readiness events | “The system is doing real work, not showing a fake spinner.” | Concrete initialization checklist and cancel action |
+| First experiment | Sees Discover choose a probe, then Newton motion and force evidence align | “The robot chose this experiment for a reason.” | Macro stepper, structured rationale, synchronized viewport/feed |
+| Belief update | Sees uncertainty contract and the belief world rebuild | “The measurement changed what the robot knows.” | Belief delta is the dominant feed event and telemetry cursor is pinned |
+| Final decision | Compares push and pick predictions before the selected action executes | “I can audit why this action won.” | Candidate comparison uses consistent metrics, then selected state collapses noise |
+| Verification | Sees target predicate, residual, success/failure, and possible return to Learn | “The system checks itself instead of declaring victory.” | Final observed frame and verification card remain pinned |
+| Return visit | Opens a stored terminal run and jumps by macro phase | “This is a reusable research instrument.” | Run picker, deterministic replay, artifact provenance, stable navigation |
+
+Time horizons:
+
+- 5 seconds: understand the mission and start the known-good demo.
+- 5 minutes: inspect one complete evidence-to-action loop and replay a stage.
+- Long term: compare reproducible runs through artifacts and event provenance without relearning the interface.
+
 ### Global header
 
 - project and run ID;
@@ -309,9 +386,10 @@ One allowlist governs SSE events, snapshots, request echoes, API errors, logs, a
 ### Stage stepper
 
 - always visible directly under the header;
-- active stage uses motion and elapsed time without relying on color alone;
+- six macro phases are always visible; the active phase includes the exact detailed substep, iteration, and elapsed time;
+- active state uses motion and elapsed time without relying on color alone;
 - completed, failed, skipped, and future states are distinguishable;
-- horizontal scrolling on narrow screens;
+- narrow screens show the active macro phase plus previous/next phase controls; the full six-phase list is available in a Sheet rather than tiny horizontal labels;
 - selecting a stage filters evidence and seeks replay.
 
 ### Newton viewport
@@ -340,6 +418,37 @@ One allowlist governs SSE events, snapshots, request echoes, API errors, logs, a
 - predicted vs observed trajectory;
 - synchronized cursor shared with viewport and evidence feed;
 - collapsible to prioritize the simulation.
+
+### Responsive layout
+
+| Viewport | Intentional layout |
+| --- | --- |
+| ≥1280 px desktop | Full header and six-phase stepper; 65/35 resizable R3F/Evidence split; 180–240 px telemetry dock; all research controls |
+| 768–1279 px tablet | Compact header; 58/42 viewport/feed split; telemetry becomes a bottom Sheet; custom configuration remains available; controls use labels, not icon-only affordances |
+| <768 px mobile | Live Companion + Replay: active macro phase with previous/next controls, R3F viewport around 42 svh, latest evidence below, telemetry/history in Sheets, sticky 44 px Pause/Resume/Safe stop bar |
+
+Mobile permits Quick Demo start, live observation, safe controls, stage/evidence inspection, replay, and artifact sharing. Advanced material bounds, detailed recording configuration, and single-step debugging show a clear `Open on desktop` explanation rather than cramped controls. Orientation changes preserve the selected event and viewer frame. Safe stop is never hidden behind an overflow menu.
+
+### Accessibility contract
+
+- All actions are reachable by keyboard with visible focus; shortcuts are disabled while a text/select control owns focus and are listed in a help Sheet.
+- Stage changes use a polite live region; `safety.triggered` and terminal failures use an assertive announcement containing the measured condition and response.
+- Canvas content has a synchronized DOM summary: active camera, object pose, robot/end-effector state, contacts, vectors, target predicate, and selected frame. Evidence and telemetry remain usable when WebGL is unavailable.
+- Touch targets are at least 44×44 px. Body text is at least 16 px and 4.5:1 contrast; large labels are at least 3:1.
+- Color is never the sole encoding. Phase state adds icon/text, prediction/observation paths differ by dash/marker, and force/target overlays differ by shape.
+- `prefers-reduced-motion` removes pulse/translation and camera transitions. Replay seeking never requires animation to communicate state.
+- Resizable separators expose keyboard adjustment and numeric accessible labels. Focus order follows header → phase stepper → viewport controls → evidence → telemetry.
+- R3F pointer interactions have equivalent buttons/list controls; essential actions do not depend on hover, drag, or canvas hit testing.
+
+### Design-review auto-decisions
+
+The user delegated remaining design choices to the reviewer; these recommended behaviors are approved without additional gates:
+
+- Evidence Feed follows the newest event only while the user is at the live edge. Scrolling up or selecting a stage enters inspection mode, preserves the viewport/frame, buffers incoming events, and shows `N new events · Return to live`. It never force-scrolls the user away from evidence they are reading.
+- R3F starts in stage-guided camera mode with deterministic named presets. Pointer/camera interaction enters `Manual camera`; no later stage steals control until `Return to guided` is pressed. Safe-state overlays remain visible in both modes.
+- Desktop panel proportions are resizable and stored locally per viewport class, with `Reset layout` available. Recorded media always uses the canonical 65/35 layout rather than personal settings.
+- Precision Lab Instrument dark mode is the canonical live/capture theme. `/design-consultation` must also define an accessible light theme for long replay/review sessions, but theme switching is not permitted to change chart/overlay semantics.
+- Evidence cards are chronological and append-only. Final decision and verification are pinned as summaries without reordering the underlying event history.
 
 ### shadcn component mapping
 
@@ -530,6 +639,25 @@ Done when at least four profile families run without leaking hidden values and p
 
 The run manager must preserve the event log and partial artifacts on failure. The UI must show whether the physics worker is still running independently of viewer connectivity.
 
+### Interaction-state matrix
+
+| Area | Loading | Empty | Partial / disconnected | Error | Success / terminal |
+| --- | --- | --- | --- | --- | --- |
+| Run shell | Header says `Preparing Newton` with the current concrete task such as assets, GPU, or worker; Cancel remains available | New Run screen explains the one action: choose preset or custom settings | Persistent amber status names the degraded subsystem while healthy areas remain usable | Red terminal banner names the failed subsystem, preserves run ID, and links partial artifacts | Summary states success/failure predicates, selected action, elapsed time, and Replay CTA |
+| Stage stepper | Observe is `waiting`; no fake progress animation | Before Run, six phases appear muted with `Not started` | Last committed phase remains visible; an outlined `connection interrupted` marker prevents false advancement | Failed stage and reason are explicit; future phases become skipped only after a terminal event | Completed phases remain clickable; active state becomes `Run complete` rather than disappearing |
+| R3F viewport | Skeleton is forbidden; show asset/GPU/frame readiness checklist over a stable neutral canvas | No run shows a labeled Franka/table preview and `Start a run to observe physics` | Freeze the last acknowledged frame, stamp `Frame stream paused · physics worker running/stopped`, and offer Return to live | Preserve the last valid frame behind an error overlay with retry-connection action, never a blank canvas | Hold final observed frame with target/result overlay and Replay control |
+| Evidence Feed | Show ordered initialization events, not generic spinner cards | Explain that rationale and evidence appear after Run; one primary Run action | Keep committed cards readable and show a sequence-gap marker at the missing boundary | Append one failure card with cause, safe response, and artifact availability; no interactive retry policy | Pin final decision and verification card; keep full chronology scrollable |
+| Telemetry | Axes/placeholders display expected units and `Waiting for first sample` | Explain which experiment creates each signal | Plot committed samples, stop the live cursor, and mark the gap interval visually | Preserve data with an error annotation; raw measurement download remains available | Add final prediction/observation residual and confidence summary |
+| Replay | Show index and asset loading progress with byte/frame counts | Stored-run picker explains that completed, failed, cancelled, and abandoned runs are replayable | Missing optional media disables only that layer and names it; events remain replayable | Incompatible schema shows required version and leaves artifact downloads accessible | Scrubber, stage jumps, speed, and return-to-summary are enabled |
+| Media capture | Show checkpoint/frame count and current render barrier | Explain that capture requires a terminal recorded run | Preserve completed frame images and identify the first unavailable frame | Fail with dependency/blank-frame details and the exact rerun command | Show MP4/GIF paths, duration, resolution, checksum, and source run ID |
+
+State rules:
+
+- Never replace existing evidence with a spinner once any committed data exists.
+- Never label a run failed because only the browser viewer disconnected.
+- Every empty state supplies context and one relevant primary action, not `No data`.
+- Partial states state what is still running, what is stale, the last acknowledged sequence/frame, and what the user can safely do.
+
 ## Testing Strategy
 
 ### Python
@@ -605,13 +733,68 @@ The run manager must preserve the event log and partial artifacts on failure. Th
 - Remote multi-user scheduling and authentication are out of scope.
 - Side-by-side Compare mode, automated retry-policy UI, resumable abandoned GPU runs, Monaco, and TanStack Table are deferred.
 
+No unresolved design decisions remain after plan design review. Engineering details for subprocess/event contracts are intentionally delegated to `/plan-eng-review`.
+
+## NOT in scope
+
+- Free-form agent chat or control-changing natural language: it creates a second model/control path before evidence UX is proven.
+- Browser physics: R3F mirrors Newton and never simulates contacts or dynamics.
+- Side-by-side Compare mode: one viewport with explicit truth/belief mode keeps the first slice legible.
+- Multi-user remote hosting, authentication, and GPU scheduling: local single-user workstation is the delivery target.
+- Monaco and TanStack Table: no current editing or dense tabular workflow justifies their bundle/interaction cost.
+- Automatic experiment approval prompts: current bounded deterministic experiments need no human authority gate.
+
+## What already exists
+
+- Newton/Warp truth and belief environments, Franka IK/gripper control, typed tools, active experiment planning, SysID, and action selection.
+- Structured `ToolCallRecord`, belief history, replay manifest, measurements, plots, generated GIF, and Newton ViewerFile recording.
+- CLI stages and deterministic physics re-execution that the event sink must preserve numerically.
+- Approved Agent Lab desktop wireframe and the full-demo artifacts used as real content fixtures.
+- No existing frontend or repository `DESIGN.md`; both are created deliberately rather than inheriting accidental conventions.
+
+## Implementation Tasks
+
+Synthesized from this design review. Each task derives from a reviewed design decision.
+
+- [ ] **T1 (P1, human: ~3h / CC: ~30min)** — Design system — Create `DESIGN.md` through `/design-consultation`
+  - Surfaced by: Pass 5 — repository has no durable design system despite approved Precision Lab Instrument direction.
+  - Files: `DESIGN.md`, `docs/designs/agent-lab-ui.md`
+  - Verify: token contrast audit, font/license check, chart/R3F overlay distinction review.
+- [ ] **T2 (P1, human: ~4h / CC: ~30min)** — Navigation — Implement six-phase macro stepper with detailed repeated stage instances
+  - Surfaced by: Pass 1 — twelve equal labels weakened current-state hierarchy and repetition handling.
+  - Files: `src/web/src/components/stage-stepper.tsx`, event stage schemas and reducer tests.
+  - Verify: fixtures for repeated experiments, failed/skipped stages, 1280 px and mobile companion views.
+- [ ] **T3 (P1, human: ~5h / CC: ~40min)** — Interaction states — Build component state fixtures from the reviewed matrix
+  - Surfaced by: Pass 2 — backend failures were listed without defining what each region shows.
+  - Files: Agent Lab components, Storybook/test fixtures, frontend component tests.
+  - Verify: loading, empty, partial, error, and terminal screenshots for every matrix row.
+- [ ] **T4 (P2, human: ~3h / CC: ~20min)** — First-run journey — Add Quick Demo primary action and progressive custom settings
+  - Surfaced by: Pass 3 — configuration-first delayed the first meaningful physics moment.
+  - Files: `src/web/src/routes/new-run.tsx`, run presets, API request tests.
+  - Verify: one explicit action starts the known-good preset; no GPU work begins on page load.
+- [ ] **T5 (P1, human: ~1d / CC: ~1h)** — Visual language — Apply Precision Lab Instrument tokens and deterministic motion
+  - Surfaced by: Pass 4 — raw shadcn defaults would read as a generic AI dashboard.
+  - Files: Tailwind/theme CSS, shadcn variants, R3F overlays, capture styles.
+  - Verify: AI-slop checklist, reduced-motion capture, body contrast, overlay color/shape tests.
+- [ ] **T6 (P1, human: ~1.5d / CC: ~1h)** — Responsive/a11y — Implement desktop, tablet, and mobile companion contracts
+  - Surfaced by: Pass 6 — stacking the dense desktop workspace would hide safety and current evidence.
+  - Files: workspace layout, Sheets, DOM canvas summary, keyboard/live-region tests.
+  - Verify: 375/768/1280/1920 screenshots, keyboard-only flow, axe audit, 44 px target audit.
+- [ ] **T7 (P2, human: ~4h / CC: ~30min)** — Live inspection — Implement auto-follow pause, buffered-event badge, guided/manual camera, and layout reset
+  - Surfaced by: Pass 7 — live updates must not steal reading or camera control.
+  - Files: Zustand run store, Evidence Feed, viewport controls, local preferences.
+  - Verify: new events never force-scroll inspection mode; Return to live applies the ordered buffered tail.
+
+No separate `TODOS.md` entries are created: every finding is in-scope implementation work already represented above, so duplicating it as design debt would create two sources of truth.
+
 ## Next Steps
 
-1. Run `/plan-design-review` on this document and approved wireframe.
-2. Run `/plan-eng-review` to lock event ordering, subprocess lifecycle, R3F frame contract, and replay tolerances.
-3. Implement Slice 0, preserving all existing scientific tests.
-4. Proceed to Slice 1 only after R3F/Newton transform parity and deterministic capture pass.
-5. Continue by vertical slices with one observable done condition and one feature commit each.
+1. Complete `/plan-design-review` on this document and approved wireframe.
+2. Run `/design-consultation` to create `DESIGN.md` for the approved Precision Lab Instrument direction.
+3. Run `/plan-eng-review` to lock event ordering, subprocess lifecycle, R3F frame contract, and replay tolerances.
+4. Implement Slice 0, preserving all existing scientific tests.
+5. Proceed to Slice 1 only after R3F/Newton transform parity and deterministic capture pass.
+6. Continue by vertical slices with one observable done condition and one feature commit each.
 
 ## The Assignment
 
@@ -736,3 +919,53 @@ Required final evidence:
 Do not stop at architecture, mock data, or a disconnected UI. Implement, execute,
 record, inspect, fix, and verify the end-to-end result.
 ```
+
+## Approved Mockups
+
+| Screen/Section | Mockup Path | Direction | Notes |
+| --- | --- | --- | --- |
+| Live Agent Lab workspace | `~/.gstack/projects/curious-robot/designs/agent-lab-review-20261020/approved-wireframe.png` | Precision Lab Instrument structure with six macro phases | R3F is the primary anchor; Evidence Feed is read-only; telemetry shares the frame cursor |
+
+Editable approved source: `~/.gstack/projects/curious-robot/designs/agent-lab-review-20261020/approved-wireframe.html`.
+
+## Design Plan Review Completion Summary
+
+```text
++====================================================================+
+|         DESIGN PLAN REVIEW — COMPLETION SUMMARY                    |
++====================================================================+
+| System Audit         | DESIGN.md required; new Agent Lab UI scope  |
+| Step 0               | 6.7/10, hierarchy/states/journey focus      |
+| Pass 1  (Info Arch)  | 7/10 → 10/10 after six-phase stepper        |
+| Pass 2  (States)     | 8/10 → 10/10 after visible state matrix     |
+| Pass 3  (Journey)    | 6/10 → 10/10 after Quick Demo journey       |
+| Pass 4  (AI Slop)    | 8/10 → 10/10 Precision Lab Instrument       |
+| Pass 5  (Design Sys) | 5/10 → 9/10; DESIGN.md is pre-build gate    |
+| Pass 6  (Responsive) | 6/10 → 10/10 mobile companion + a11y       |
+| Pass 7  (Decisions)  | 5 resolved automatically, 0 deferred        |
++--------------------------------------------------------------------+
+| NOT in scope         | written (6 explicit exclusions)             |
+| What already exists  | written                                     |
+| TODOS.md updates     | 0; tasks remain in this single source       |
+| Approved Mockups     | 1 updated/approved                          |
+| Decisions made       | 7 primary + 5 delegated behaviors          |
+| Decisions deferred   | 0 unresolved; exclusions are intentional    |
+| Overall design score | 6.7/10 → 9.9/10                             |
++====================================================================+
+```
+
+Plan is design-complete. Run `/design-consultation` for `DESIGN.md`, then `/plan-eng-review`; run `/design-review` after implementation for visual QA.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+| --- | --- | --- | ---: | --- | --- |
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | Product premise already approved in office hours |
+| Codex Review | `/codex review` | Independent second opinion | 0 | — | Not run |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 0 | REQUIRED | Must validate subprocess, event ordering, R3F frame contract, and capture |
+| Design Review | `/plan-design-review` | UI/UX gaps | 1 | CLEAR | score 7/10 → 10/10, 7 primary decisions, 0 unresolved |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | Not required before the architecture review |
+
+**VERDICT:** DESIGN CLEARED — engineering review required before implementation.
+
+NO UNRESOLVED DECISIONS
