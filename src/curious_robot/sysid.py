@@ -61,8 +61,19 @@ def estimate_static_friction(evidence: ExperimentEvidence, mass: ParameterEstima
     pre = evidence.samples[:first]
     hold = max((abs(s.measured_force_n[0]) for s in pre), default=0.0)
     brk = abs(evidence.samples[first].measured_force_n[0])
-    lo = float(np.clip(hold / (mass.interval95[1] * GRAVITY), 0.2, 0.9))
-    hi = float(np.clip(brk / (max(mass.interval95[0], 1e-6) * GRAVITY), lo, 0.9))
+    # Preserve coverage under finite force increments and sensor noise rather
+    # than reporting an unjustifiably sharp contact-event boundary.
+    discretization_margin = float(evidence.metadata.get("force_increment_n", 0.0)) / (
+        max(mass.mean, 1e-6) * GRAVITY
+    )
+    lo = float(np.clip(hold / (mass.interval95[1] * GRAVITY) - discretization_margin, 0.2, 0.9))
+    hi = float(
+        np.clip(
+            brk / (max(mass.interval95[0], 1e-6) * GRAVITY) + discretization_margin,
+            lo,
+            0.9,
+        )
+    )
     mid = (lo + hi) / 2
     return ParameterEstimate(
         name=ParameterName.STATIC_FRICTION,
@@ -137,6 +148,58 @@ def calibrate_effective_friction(
     result = least_squares(residual, [initial_mu], bounds=([bounds[0]], [bounds[1]]), loss="soft_l1")
     rmse = float(np.sqrt(np.mean(residual(result.x) ** 2)))
     return float(result.x[0]), rmse
+
+
+def calibrate_coulomb_surrogate(
+    evidence: ExperimentEvidence,
+    mass_kg: float,
+    initial_mu: float,
+    bounds: tuple[float, float] = (0.1, 0.9),
+) -> dict[str, float | str | bool]:
+    """Fit an effective mu against a held-out 1-D trajectory surrogate.
+
+    This is deliberately not presented as differentiable MuJoCo contact. The
+    surrogate integrates the measured actuator force through a Coulomb model;
+    SciPy supplies finite-difference Jacobians for a bounded robust fit.
+    """
+    samples = [sample for sample in evidence.samples if sample.velocity_m_s[0] > 0.015]
+    if len(samples) < 12:
+        return {"success": False, "reason": "insufficient sliding samples"}
+    split = max(8, int(len(samples) * 2 / 3))
+
+    def rollout(mu: float, subset: Sequence) -> np.ndarray:
+        predicted = [subset[0].position_m[0]]
+        velocity = subset[0].velocity_m_s[0]
+        for previous, current in zip(subset[:-1], subset[1:], strict=True):
+            dt = current.timestamp_s - previous.timestamp_s
+            acceleration = (previous.measured_force_n[0] - mu * mass_kg * GRAVITY) / mass_kg
+            velocity += acceleration * dt
+            predicted.append(predicted[-1] + velocity * dt)
+        return np.asarray(predicted)
+
+    training = samples[:split]
+    observed_train = np.asarray([sample.position_m[0] for sample in training])
+    fit = least_squares(
+        lambda x: (rollout(float(x[0]), training) - observed_train) / 0.002,
+        [initial_mu],
+        bounds=([bounds[0]], [bounds[1]]),
+        loss="soft_l1",
+    )
+    mu = float(fit.x[0])
+    train_rmse = float(np.sqrt(np.mean((rollout(mu, training) - observed_train) ** 2)))
+    validation = samples[split - 1 :]
+    observed_validation = np.asarray([sample.position_m[0] for sample in validation])
+    validation_rmse = float(np.sqrt(np.mean((rollout(mu, validation) - observed_validation) ** 2)))
+    return {
+        "success": bool(fit.success),
+        "optimizer": "scipy.optimize.least_squares(soft_l1, finite_difference)",
+        "effective_dynamic_friction": mu,
+        "analytic_dynamic_friction": initial_mu,
+        "train_position_rmse_m": train_rmse,
+        "validation_position_rmse_m": validation_rmse,
+        "evaluations": int(fit.nfev),
+        "model": "1-D Coulomb trajectory surrogate; numerical/contact settings fixed",
+    }
 
 
 def _unidentifiable(

@@ -29,9 +29,10 @@ def test_force_limit_is_a_hard_filter() -> None:
 def test_action_selection_is_input_order_invariant() -> None:
     push = outcome("push", error=0.01, probability=0.9, force=3.0)
     pick = outcome("pick", error=0.02, probability=0.85, force=4.0)
-    assert select_next_action([push, pick]).selected_action_id == select_next_action(
-        [pick, push]
-    ).selected_action_id
+    assert (
+        select_next_action([push, pick]).selected_action_id
+        == select_next_action([pick, push]).selected_action_id
+    )
 
 
 def outcome(action_id: str, error: float, probability: float, force: float) -> PredictedOutcome:

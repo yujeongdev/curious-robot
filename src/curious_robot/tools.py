@@ -188,7 +188,7 @@ class RobotTools:
 
     # Experiments
     def weigh_object(self) -> ExperimentEvidence:
-        self.reality.reset_cube()
+        self._return_object_home()
         self.reality.settle(0.25)
         samples = []
         target_z = 0.10
@@ -204,12 +204,21 @@ class RobotTools:
             metadata={"tare_force_z_n": 0.0, "controller": "vertical spring-damper", "target_z_m": target_z},
             quality_flags=() if len(stable) >= 3 else ("insufficient_quasistatic_samples",),
         )
+        # Lower through the same bounded force path; no privileged state reset.
+        home = self.config.initial_position_m
+        for _ in range(round(1.5 / self.config.dt_s)):
+            pos, _, velocity = self.reality._cube_state()
+            error_z = home[2] - pos[2]
+            if abs(error_z) < 0.003 and abs(velocity[2]) < 0.02:
+                break
+            force_z = float(np.clip(35.0 * error_z - 5.0 * velocity[2], 0.0, 12.0))
+            self.reality.step((0.0, 0.0, force_z))
         self.evidence.append(evidence)
         self._record("weigh_object", {}, {"evidence_id": evidence.evidence_id, "samples": len(stable)})
         return evidence
 
     def probe_static_friction(self) -> ExperimentEvidence:
-        self.reality.reset_cube()
+        self._return_object_home()
         self.reality.settle(0.25)
         samples = []
         moved_frames = 0
@@ -234,13 +243,21 @@ class RobotTools:
         return evidence
 
     def probe_dynamic_friction(self) -> ExperimentEvidence:
-        self.reality.reset_cube()
+        self._return_object_home()
         self.reality.settle(0.25)
         samples = []
         target_velocity = 0.04
-        for _ in range(round(2.0 / self.config.dt_s)):
+        sliding_established = False
+        mass = self.belief.parameters[ParameterName.MASS].mean
+        mu_prior = self.belief.parameters[ParameterName.DYNAMIC_FRICTION].mean
+        feedforward = mass * 9.81 * mu_prior
+        for index in range(round(2.0 / self.config.dt_s)):
             _, _, velocity = self.reality._cube_state()
-            force_x = float(np.clip(2.0 + 12.0 * (target_velocity - velocity[0]), 0.0, 8.0))
+            sliding_established = sliding_established or velocity[0] > 0.02
+            if sliding_established:
+                force_x = float(np.clip(feedforward + 30.0 * (target_velocity - velocity[0]), 0.0, 8.0))
+            else:
+                force_x = float(min(8.0, 0.5 + 4.0 * index * self.config.dt_s))
             samples.append(self.reality.step((force_x, 0.0, 0.0)))
         evidence = ExperimentEvidence(
             evidence_id=f"dynamic-{uuid.uuid4().hex[:8]}",
@@ -250,7 +267,14 @@ class RobotTools:
         )
         self.evidence.append(evidence)
         self._record("probe_dynamic_friction", {}, {"evidence_id": evidence.evidence_id})
+        self._return_object_home()
         return evidence
+
+    def _return_object_home(self) -> None:
+        position = np.asarray(self.reality.observe_object_pose().pose.position_m)
+        home = np.asarray(self.config.initial_position_m)
+        if np.linalg.norm(position[:2] - home[:2]) > 0.01 or position[2] > home[2] + 0.01:
+            self.reality.execute_pick_place(tuple(home), max_force_n=12.0)
 
     def estimate_center_of_mass(self) -> ParameterEstimate:
         estimate = ParameterEstimate(
@@ -327,7 +351,7 @@ class RobotTools:
         target = np.asarray(self.config.target_position_m)
         planar_error = float(np.linalg.norm(position[:2] - target[:2]))
         stable = np.linalg.norm(observation.linear_velocity_m_s) < 0.02
-        success = planar_error <= 0.03 and bool(stable) and position[2] >= 0.015
+        success = bool(planar_error <= 0.03 and bool(stable) and position[2] >= 0.015)
         self._record("verify_task_success", {}, {"success": success, "target_error_m": planar_error})
         return success
 

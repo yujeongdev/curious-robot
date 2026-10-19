@@ -97,8 +97,7 @@ def evaluate_information_gain(
         candidate_id=candidate.candidate_id,
         expected_information_gain=float(
             sum(
-                g / max(relevance.get(t, 1e-12), 1e-12)
-                for g, t in zip(gains, candidate.targets, strict=True)
+                g / max(relevance.get(t, 1e-12), 1e-12) for g, t in zip(gains, candidate.targets, strict=True)
             )
         ),
         relevance_weighted_gain=weighted_gain,

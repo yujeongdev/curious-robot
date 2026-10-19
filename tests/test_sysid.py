@@ -1,5 +1,11 @@
 from curious_robot.schemas import ExperimentEvidence, MotionSample, ParameterEstimate, ParameterName
-from curious_robot.sysid import GRAVITY, estimate_dynamic_friction, estimate_mass, estimate_static_friction
+from curious_robot.sysid import (
+    GRAVITY,
+    calibrate_coulomb_surrogate,
+    estimate_dynamic_friction,
+    estimate_mass,
+    estimate_static_friction,
+)
 
 
 def sample(t: float, *, force_x: float = 0.0, force_z: float = 0.0, vx: float = 0.0) -> MotionSample:
@@ -62,6 +68,35 @@ def test_dynamic_friction_remains_distinct_from_static() -> None:
     result = estimate_dynamic_friction(evidence, mass, static)
     assert result.mean == pytest_approx(mu_dynamic, abs=0.01)
     assert result.mean < static.mean
+
+
+def test_black_box_surrogate_calibration_reports_holdout_error() -> None:
+    mass = 0.2
+    mu = 0.3
+    dt = 0.05
+    force = 0.8
+    velocity = 0.03
+    position = 0.0
+    samples = []
+    for index in range(40):
+        samples.append(
+            MotionSample(
+                timestamp_s=index * dt,
+                position_m=(position, 0.0, 0.025),
+                velocity_m_s=(velocity, 0.0, 0.0),
+                measured_force_n=(force, 0.0, 0.0),
+                normal_load_n=mass * GRAVITY,
+            )
+        )
+        velocity += (force - mu * mass * GRAVITY) / mass * dt
+        position += velocity * dt
+    evidence = ExperimentEvidence(
+        evidence_id="calibration-1", experiment="dynamic_friction", samples=tuple(samples)
+    )
+    result = calibrate_coulomb_surrogate(evidence, mass, initial_mu=0.4)
+    assert result["success"]
+    assert result["effective_dynamic_friction"] == pytest_approx(mu, abs=0.02)
+    assert "validation_position_rmse_m" in result
 
 
 def pytest_approx(value: float, **kwargs: float):
