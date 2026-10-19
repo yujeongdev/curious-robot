@@ -15,6 +15,30 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync --extra dev --locked
+      - run: uv sync --extra dev --extra web --locked
       - run: uv run ruff check src tests
       - run: uv run pytest -m "not gpu"
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: src/web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: src/web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: diff -qr dist ../curious_robot/web_static
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e

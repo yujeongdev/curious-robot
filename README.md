@@ -38,6 +38,10 @@ flowchart LR
   E --> R[Deterministic re-execution]
 ```
 
+![Curious Robot Agent Lab: synchronized discovery stages, Newton mirror, evidence, and telemetry](docs/media/curious-robot-demo.gif)
+
+[Watch the MP4 demo](docs/media/curious-robot-demo.mp4) · generated from the same replay reducer with a fixed capture clock.
+
 ## Choose an experience
 
 | Mode | Use it for | What you see |
@@ -49,20 +53,21 @@ flowchart LR
 
 ## Agent Lab quick start
 
-Requirements: Linux, Python 3.12 or 3.13, and an NVIDIA R580+ driver for the
-default Warp build. CPU execution is also supported for tests.
+Requirements: Linux, Python 3.12 or 3.13, Node.js 22 with Corepack, and an
+NVIDIA R580+ driver for the default Warp build. CPU execution is also supported
+for tests.
 
 ```bash
 uv sync --extra dev --extra web
-pnpm --dir src/web install --frozen-lockfile
-pnpm --dir src/web build
+corepack pnpm --dir src/web install --frozen-lockfile
+corepack pnpm --dir src/web build
 uv run curious-robot web --open
 ```
 
 The browser opens the New Run screen without starting GPU work. Select **Run
 discovery demo** for the versioned seed/profile preset, or expand **Configure
-run** to set the seed, device, observation noise, randomized surface bounds,
-and recording options. For a scripted local demonstration:
+run** to set the seed, device, cube-mass bounds, randomized surface family,
+evaluator reveal, and recording options. For a scripted local demonstration:
 
 ```bash
 uv run curious-robot web --open --autorun --seed 7 --device cuda:0
@@ -144,9 +149,9 @@ The exact media contract and five required discovery moments are documented in
 
 ```bash
 uv run pytest
-pnpm --dir src/web typecheck
-pnpm --dir src/web test
-pnpm --dir src/web build
+corepack pnpm --dir src/web typecheck
+corepack pnpm --dir src/web test
+corepack pnpm --dir src/web build
 ```
 
 ## Honest scope
