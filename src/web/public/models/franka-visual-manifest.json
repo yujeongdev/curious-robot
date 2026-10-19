@@ -1,0 +1,13 @@
+{
+  "manifest_version": "1.0.0",
+  "coordinate_system": "newton-z-up",
+  "presentation_only": true,
+  "nodes": {
+    "panda_link0": "panda_link0",
+    "panda_link1": "panda_link1",
+    "panda_link2": "panda_link2",
+    "panda_link3": "panda_link3",
+    "panda_hand": "panda_hand",
+    "cube": "cube"
+  }
+}
