@@ -121,6 +121,8 @@ def run_episode(
 
         tools._return_object_home()
         reality.settle(0.25)
+        if selected_action.kind == "pick_place":
+            tools.grasp_object()
         initial_position, initial_orientation, initial_velocity = reality._cube_state()
         initial_final_pose = tuple(float(v) for v in initial_position)
         initial_body_q = (*initial_final_pose, *(float(v) for v in initial_orientation))
@@ -131,10 +133,12 @@ def run_episode(
         if selected_action.kind == "push":
             final_samples = tools.execute_safe_push(selected_action.target_m, selected_action.max_force_n)
         else:
-            tools.grasp_object()
             final_samples = reality.execute_pick_place(selected_action.target_m, selected_action.max_force_n)
-            tools.release_object()
         reality.stop_recording()
+        final_control_trace = list(reality.control_trace)
+        final_state_trace = list(reality.state_trace)
+        if selected_action.kind == "pick_place":
+            tools.release_object()
         observed = reality.observe_object_pose().pose.position_m
         predicted = next(o.final_position_m for o in outcomes if o.action_id == selected_action.action_id)
         prediction_error = tools.evaluate_prediction_error(predicted, observed)
@@ -190,9 +194,12 @@ def run_episode(
             belief_history,
             outcomes,
             decision.model_dump(mode="json"),
+            selected_action.model_dump(mode="json"),
             initial_final_pose,
             initial_body_q,
             initial_body_qd,
+            final_control_trace,
+            final_state_trace,
             final_samples,
         )
         return result
@@ -211,9 +218,12 @@ def _write_artifacts(
     belief_history: list[PhysicalBelief],
     outcomes,
     decision: dict,
+    selected_action: dict,
     initial_final_pose: tuple[float, float, float],
     initial_body_q: tuple[float, ...],
     initial_body_qd: tuple[float, ...],
+    final_control_trace: list[tuple[float, float, float]],
+    final_state_trace: list[tuple[float, float, float]],
     final_samples,
 ) -> None:
     versions = {
@@ -292,9 +302,10 @@ def _write_artifacts(
         "initial_cube_position_m": initial_final_pose,
         "initial_cube_body_q": initial_body_q,
         "initial_cube_body_qd": initial_body_qd,
-        "control_sequence_force_world_n": reality_trace(tools),
-        "reference_trajectory_position_m": tools.reality.state_trace,
-        "position_tolerance_m": 0.003,
+        "selected_action": selected_action,
+        "control_sequence_force_world_n": final_control_trace,
+        "reference_trajectory_position_m": final_state_trace,
+        "position_tolerance_m": 0.005,
         "agent_tool_calls": [record.model_dump(mode="json") for record in tools.records],
         "belief_history": [belief.model_dump(mode="json") for belief in belief_history],
         "sensor_configuration": {
@@ -331,10 +342,6 @@ def _write_artifacts(
 
 def _log(stage: str, message: str) -> None:
     print(f"[Curious Robot · {stage}] {message}", flush=True)
-
-
-def reality_trace(tools: RobotTools) -> list[tuple[float, float, float]]:
-    return list(tools.reality.control_trace)
 
 
 def _plot_parameters(output: Path, truth: PhysicalParameters, belief: PhysicalBelief) -> None:

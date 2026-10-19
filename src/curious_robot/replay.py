@@ -42,9 +42,12 @@ def verify_reexecution(manifest_path: str | Path) -> dict[str, object]:
             tuple(manifest["initial_cube_body_q"]),
             tuple(manifest["initial_cube_body_qd"]),
         )
-        for force in manifest["control_sequence_force_world_n"]:
-            sample = world.step(tuple(force))
-            actual.append(sample.position_m)
+        action = manifest["selected_action"]
+        if action["kind"] == "push":
+            world.execute_push(tuple(action["target_m"]), action["max_force_n"])
+        else:
+            world.execute_pick_place(tuple(action["target_m"]), action["max_force_n"])
+        actual = list(world.state_trace)
     finally:
         world.close()
     expected = np.asarray(manifest["reference_trajectory_position_m"], dtype=float)
