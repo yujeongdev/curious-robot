@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { CircleDot, Download, Radio, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commandRun, subscribeToRun } from "../api/events";
 import { EvidenceFeed } from "../components/evidence-feed";
 import { NewtonViewport } from "../components/newton-viewport";
@@ -11,6 +11,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Progress } from "../components/ui/progress";
 import { demoEvents } from "../fixtures/demo-run";
+import { parseAgentEvent } from "../generated/agent-events";
 import { formatElapsed } from "../lib/utils";
 import { useRunStore } from "../state/run-store";
 
@@ -27,7 +28,12 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
   const [connection, setConnection] = useState<"connecting" | "open" | "error">("connecting");
   const [fixturePlaying, setFixturePlaying] = useState(true);
   const cursor = useRef(0);
-  const isFixture = fixture || runId === "demo";
+  const captureEvents = useMemo(() => {
+    if (!window.__CURIOUS_CAPTURE_EVENTS__) return null;
+    return window.__CURIOUS_CAPTURE_EVENTS__.map(parseAgentEvent);
+  }, []);
+  const fixtureEvents = captureEvents ?? demoEvents;
+  const isFixture = fixture || runId === "demo" || captureEvents !== null;
 
   useEffect(() => {
     resetStore();
@@ -42,7 +48,7 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
   useEffect(() => {
     if (!isFixture || !fixturePlaying || mode === "replay") return;
     const timer = window.setInterval(() => {
-      const next = demoEvents[cursor.current];
+      const next = fixtureEvents[cursor.current];
       if (!next) {
         setFixturePlaying(false);
         return;
@@ -51,12 +57,12 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
       cursor.current += 1;
     }, 260);
     return () => window.clearInterval(timer);
-  }, [fixturePlaying, ingest, isFixture, mode]);
+  }, [fixtureEvents, fixturePlaying, ingest, isFixture, mode]);
 
   const setMode = (nextMode: "live" | "replay") => {
     if (nextMode === "replay") {
       setFixturePlaying(false);
-      loadReplay(isFixture ? demoEvents : sourceEvents);
+      loadReplay(isFixture ? fixtureEvents : sourceEvents);
       seek(1);
     } else {
       resetStore();
@@ -70,17 +76,17 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
       if (command === "pause") setFixturePlaying(false);
       if (command === "resume") setFixturePlaying(true);
       if (command === "step") {
-        const next = demoEvents[cursor.current];
+        const next = fixtureEvents[cursor.current];
         if (next) { ingest(next); cursor.current += 1; }
       }
       if (command === "cancel") setFixturePlaying(false);
       return;
     }
     await commandRun(runId, command);
-  }, [ingest, isFixture, runId]);
+  }, [fixtureEvents, ingest, isFixture, runId]);
 
   const controlStatus = isFixture && !fixturePlaying && run.status === "running" ? "paused" : run.status;
-  const progress = Math.round((run.lastSequence / Math.max(1, isFixture ? demoEvents.length : run.lastSequence + 8)) * 100);
+  const progress = Math.round((run.lastSequence / Math.max(1, isFixture ? fixtureEvents.length : run.lastSequence + 8)) * 100);
   return (
     <main className="agent-lab">
       <header className="lab-header">

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { chromium } from "@playwright/test";
 import { PNG } from "pngjs";
 
@@ -69,6 +69,14 @@ async function main() {
   assertCommand("ffmpeg", "Install ffmpeg and ensure it is on PATH.");
   if (!existsSync(resolve("dist/index.html"))) throw new Error("Frontend build missing. Run `corepack pnpm build` first.");
   const output = resolve(options.output);
+  const runDirectory = resolve(options.run);
+  const eventLog = join(runDirectory, "events.ndjson");
+  const fixtureMode = options.run.startsWith("fixture:");
+  if (!fixtureMode && !existsSync(eventLog)) throw new Error(`Committed event log not found: ${eventLog}`);
+  const captureEvents = fixtureMode
+    ? null
+    : readFileSync(eventLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as unknown);
+  if (captureEvents && captureEvents.length === 0) throw new Error(`Committed event log is empty: ${eventLog}`);
   const temporary = resolve(".capture-frames");
   rmSync(temporary, { recursive: true, force: true });
   mkdirSync(temporary, { recursive: true });
@@ -82,7 +90,13 @@ async function main() {
   });
   try {
     const page = await browser.newPage({ viewport: { width: options.width, height: options.height }, deviceScaleFactor: 1 });
-    await page.goto(`http://127.0.0.1:${port}/runs/demo?fixture=true`, { waitUntil: "networkidle" });
+    if (captureEvents) {
+      await page.addInitScript((events) => {
+        (globalThis as { __CURIOUS_CAPTURE_EVENTS__?: unknown[] }).__CURIOUS_CAPTURE_EVENTS__ = events as unknown[];
+      }, captureEvents);
+    }
+    const captureRunId = fixtureMode ? "demo" : basename(runDirectory);
+    await page.goto(`http://127.0.0.1:${port}/runs/${encodeURIComponent(captureRunId)}?fixture=true`, { waitUntil: "networkidle" });
     await page.evaluate("document.documentElement.setAttribute('data-capture', 'true')");
     await page.getByRole("tab", { name: "Replay" }).click();
     const slider = page.getByRole("slider", { name: "Replay sequence" });
