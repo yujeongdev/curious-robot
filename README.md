@@ -43,6 +43,9 @@ uv run curious-robot-replay artifacts/demo/reexecution.json --verify
 uv run pytest
 ```
 
+CI runs the deterministic planning/SysID/schema suite on CPU. GPU-tagged tests
+exercise Newton/MuJoCo Warp contact and run locally on NVIDIA hardware.
+
 Use `--device cpu` for a portable run. The run creates structured decisions,
 measurements, belief history, replay state, parameter and trajectory plots,
 and a final result summary under the output directory.
