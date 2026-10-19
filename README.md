@@ -13,14 +13,17 @@ The truth and belief environments are independent NVIDIA Newton simulations.
 Ground-truth mass and friction are owned by the evaluation harness and cannot
 be accessed through the robot's observation or planning interfaces.
 
-The design intent is to make the *discovery itself* the product. A successful
-run should be understandable without reading source: the CLI narrates every
-experiment and belief update, while an HTML timeline, plots, GIF, measurements,
-and replay preserve the evidence behind the final manipulation.
+The design intent is to make the *discovery itself* the product. Agent Lab
+synchronizes the Newton-driven scene, current discovery phase, measured
+evidence, belief updates, and telemetry. The headless CLI remains available for
+research runs and CI.
+
+> The browser is a presentation mirror. Newton/MuJoCo Warp remains the only
+> physics authority; React Three Fiber never simulates contacts or dynamics.
 
 ```mermaid
 flowchart LR
-  T[Hidden Newton truth] -->|observations + measured forces| A[Agent tools]
+  T[Hidden Newton truth] -->|observations + measured forces| A[Typed agent tools]
   A --> P[Active experiment planner]
   P --> C[Bounded deterministic controller]
   C --> T
@@ -28,19 +31,54 @@ flowchart LR
   S --> B[Independent Newton belief world]
   B --> D[Push vs pick rollouts]
   D --> C
-  T --> V[Verification + replay evidence]
+  T --> E[Append-only typed events]
+  A --> E
+  S --> E
+  E --> W[Agent Lab live + replay]
+  E --> R[Deterministic re-execution]
 ```
 
-## Quick start
+## Choose an experience
+
+| Mode | Use it for | What you see |
+| --- | --- | --- |
+| **Agent Lab** | The primary local demo and investigation workspace | Live Newton mirror, six-phase progress, evidence feed, telemetry, controls, and synchronized replay |
+| **Headless run** | Research automation, CI, or environments without a browser | Structured CLI stages and the complete artifact directory |
+| **Replay** | Reviewing a completed run without advancing its original physics | The same Agent Lab reducer for synchronized evidence, or Newton's independent visual recording |
+| **Re-execution** | Testing numerical reproducibility | A fresh physics computation compared with the recorded trajectory and explicit tolerances |
+
+## Agent Lab quick start
 
 Requirements: Linux, Python 3.12 or 3.13, and an NVIDIA R580+ driver for the
 default Warp build. CPU execution is also supported for tests.
 
 ```bash
+uv sync --extra dev --extra web
+pnpm --dir src/web install --frozen-lockfile
+pnpm --dir src/web build
+uv run curious-robot web --open
+```
+
+The browser opens the New Run screen without starting GPU work. Select **Run
+discovery demo** for the versioned seed/profile preset, or expand **Configure
+run** to set the seed, device, observation noise, randomized surface bounds,
+and recording options. For a scripted local demonstration:
+
+```bash
+uv run curious-robot web --open --autorun --seed 7 --device cuda:0
+```
+
+Agent Lab is an evidence workspace, not a chat façade. Its top rail shows six
+macro phases—Observe, Discover, Experiment, Calibrate, Decide, Execute—while
+the active phase names the precise repeated substep. The evidence feed exposes
+typed tool calls, measurements, bounded rationale, posterior deltas,
+predictions, and verification. It never presents private chain-of-thought.
+
+## Headless run
+
+```bash
 uv sync --extra dev
 uv run curious-robot run --seed 7 --device cuda:0 --output artifacts/demo
-uv run curious-robot-replay artifacts/demo/reexecution.json --verify
-uv run pytest
 ```
 
 CI runs the deterministic planning/SysID/schema suite on CPU. GPU-tagged tests
@@ -52,11 +90,16 @@ and a final result summary under the output directory.
 
 During a run the CLI emits stages such as `REASON`, `ACT / MEASURE`, `LEARN`,
 `PREDICT`, and `VERIFY`. Open `artifacts/demo/discovery_timeline.html` for the
-visual evidence trail, or view the generated `artifacts/demo/discovery.gif`.
+legacy static evidence trail, or view `artifacts/demo/discovery.gif`.
 
 ## Demo and replay
 
-Each run generates rather than checks in a stale demo:
+Agent Lab live and replay modes consume the same ordered event model and pure
+frontend reducer. Selecting a stage or evidence item seeks the corresponding
+Newton frame and telemetry cursor. The separate Newton ViewerFile remains an
+independent scientific diagnostic.
+
+Each headless run generates:
 
 - `discovery.gif` — animated prior-to-posterior parameter discovery;
 - `discovery_timeline.html` — inspectable belief and tool-call timeline;
@@ -66,13 +109,45 @@ Each run generates rather than checks in a stale demo:
 - `measurements.csv`, `decision_timeline.json`, and environment metadata.
 
 ```bash
+# Official Newton state playback; the CLI prints the supported viewer command.
 uv run curious-robot-replay --visual artifacts/demo/scene_replay.bin
+
+# Rebuild physics and compare the result numerically.
 uv run curious-robot-replay artifacts/demo/reexecution.json --verify
 ```
 
-For a portfolio video, capture the Newton replay beside
-`discovery_timeline.html`; the generated GIF is the lightweight README preview
-until a narrated full-scene recording is added under `docs/media/`.
+Visual playback and deterministic re-execution are deliberately different:
+playback seeks recorded states, while re-execution reconstructs the environment
+and applies the recorded action trace. See
+[`docs/reproducibility.md`](docs/reproducibility.md) for tolerances and the
+nondeterminism boundary.
+
+## Reproducible demo media
+
+The portfolio video records the complete Agent Lab composition—not just the 3D
+viewport—from a terminal event log on a fixed 30 fps replay clock:
+
+```bash
+scripts/record_agent_lab_demo.sh \
+  --run artifacts/<run_id> \
+  --output docs/media/curious-robot-demo.mp4
+```
+
+The capture waits for the event reducer, telemetry, and R3F frame barrier. It
+fails instead of publishing a missing/blank WebGL view, validates the encoded
+resolution, rate, and duration, and writes a SHA-256 sidecar. Commit the small
+GIF preview; attach the MP4 and full run evidence to a versioned GitHub Release.
+The exact media contract and five required discovery moments are documented in
+[`docs/media/README.md`](docs/media/README.md).
+
+## Verify the project
+
+```bash
+uv run pytest
+pnpm --dir src/web typecheck
+pnpm --dir src/web test
+pnpm --dir src/web build
+```
 
 ## Honest scope
 
@@ -83,5 +158,12 @@ calibration therefore uses bounded SciPy optimization. The wrist wrench is a
 documented virtual sensor derived from the bounded actuator/contact force path,
 not a readout of hidden object parameters.
 
-See `docs/architecture.md`, `docs/capabilities.json`, and
-`docs/reproducibility.md` for boundaries and evidence.
+The randomized surface and cube define one contact pair. From that interaction
+the agent estimates **effective cube–surface static and dynamic friction**; it
+does not claim to identify separate intrinsic cube and table coefficients from
+unidentifiable evidence.
+
+See [`docs/architecture.md`](docs/architecture.md),
+[`docs/capabilities.json`](docs/capabilities.json), the approved
+[`Agent Lab design`](docs/designs/agent-lab-ui.md), and
+[`DESIGN.md`](DESIGN.md) for boundaries, evidence, and UI decisions.
