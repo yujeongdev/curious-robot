@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
 import newton
 import numpy as np
@@ -66,6 +67,11 @@ class NewtonWorld:
         self._grasped = False
         self._compliance_enabled = False
         self._desired_force_n = np.zeros(3)
+        self.control_trace: list[tuple[float, float, float]] = []
+        self.state_trace: list[tuple[float, float, float]] = []
+        self._recorder = None
+        self._record_stride = 4
+        self._step_count = 0
         self._tool_pose = np.asarray(config.initial_position_m, dtype=float) + np.array([-0.08, 0.0, 0.03])
         self._build()
 
@@ -127,6 +133,7 @@ class NewtonWorld:
 
     def close(self) -> None:
         """Release large GPU references eagerly between black-box rollouts."""
+        self.stop_recording()
         for name in ("solver", "control", "state_0", "state_1", "model"):
             if hasattr(self, name):
                 delattr(self, name)
@@ -143,6 +150,22 @@ class NewtonWorld:
             state.clear_forces()
         self._sliding = False
         self._grasped = False
+
+    def set_cube_state(
+        self,
+        body_q: tuple[float, float, float, float, float, float, float],
+        body_qd: tuple[float, float, float, float, float, float],
+    ) -> None:
+        """Restore an explicitly recorded state for deterministic re-execution."""
+        for state in (self.state_0, self.state_1):
+            q = state.body_q.numpy()
+            q[self.cube_body] = body_q
+            state.body_q.assign(q)
+            qd = state.body_qd.numpy()
+            qd[self.cube_body] = body_qd
+            state.body_qd.assign(qd)
+            state.clear_forces()
+        self._sliding = float(np.linalg.norm(body_qd[:2])) > 0.010
 
     def _cube_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         q = self.state_0.body_q.numpy()[self.cube_body]
@@ -176,6 +199,13 @@ class NewtonWorld:
         self.sim_time_s += self.config.dt_s
         self.last_applied_force_n = applied
         pos, _, vel = self._cube_state()
+        self.control_trace.append(tuple(float(v) for v in applied))
+        self.state_trace.append(tuple(float(v) for v in pos))
+        if self._recorder is not None and self._step_count % self._record_stride == 0:
+            self._recorder.begin_frame(self.sim_time_s)
+            self._recorder.log_state(self.state_0)
+            self._recorder.end_frame()
+        self._step_count += 1
         measured = applied + self.rng.normal(0.0, self.config.force_noise_std, 3)
         return MotionSample(
             timestamp_s=self.sim_time_s,
@@ -184,6 +214,21 @@ class NewtonWorld:
             measured_force_n=tuple(float(v) for v in measured),
             normal_load_n=self._parameters.mass_kg * GRAVITY,
         )
+
+    def start_recording(self, output_path: str | Path, stride: int = 4) -> None:
+        self.stop_recording()
+        self._record_stride = max(1, stride)
+        self._recorder = newton.viewer.ViewerFile(str(output_path), auto_save=False)
+        self._recorder.set_model(self.model)
+
+    def stop_recording(self) -> None:
+        if self._recorder is not None:
+            self._recorder.close()
+            self._recorder = None
+
+    def clear_trace(self) -> None:
+        self.control_trace.clear()
+        self.state_trace.clear()
 
     def settle(self, seconds: float = 0.25) -> None:
         for _ in range(max(1, round(seconds / self.config.dt_s))):
