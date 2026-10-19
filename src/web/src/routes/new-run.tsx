@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, Cpu, FlaskConical, Play, RotateCw } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createRun, type CreateRunInput } from "../api/events";
 import { Button } from "../components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
@@ -12,17 +12,30 @@ const preset: CreateRunInput = {
   include_robot: true,
   recording: true,
   evaluator_mode: false,
-  material_bounds: {},
+  material_bounds: { mass_kg: [0.08, 0.45] },
 };
 
 export function NewRunRoute() {
   const navigate = useNavigate();
   const [config, setConfig] = useState(preset);
   const [customOpen, setCustomOpen] = useState(false);
+  const autorunStarted = useRef(false);
   const mutation = useMutation({
     mutationFn: createRun,
     onSuccess: ({ run_id }) => navigate({ to: "/runs/$runId", params: { runId: run_id } }),
   });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("autorun") !== "1" || autorunStarted.current) return;
+    autorunStarted.current = true;
+    const autorunConfig = {
+      ...preset,
+      seed: Number(params.get("seed") ?? preset.seed),
+      device: params.get("device") ?? preset.device,
+    };
+    mutation.mutate(autorunConfig);
+  }, [mutation]);
 
   const runDemo = () => mutation.mutate(config);
   const previewFixture = () => navigate({ to: "/runs/$runId", params: { runId: "demo" }, search: { fixture: true } });
@@ -75,6 +88,10 @@ export function NewRunRoute() {
             <label>Device<select value={config.device} onChange={(event) => setConfig({ ...config, device: event.target.value })}><option>cuda:0</option><option>cpu</option></select></label>
             <label className="check-row"><input type="checkbox" checked={config.include_robot} onChange={(event) => setConfig({ ...config, include_robot: event.target.checked })} /> Full Franka articulation</label>
             <label className="check-row"><input type="checkbox" checked={config.recording} onChange={(event) => setConfig({ ...config, recording: event.target.checked })} /> Record replay artifacts</label>
+            <label>Surface family<select value={String(config.material_bounds.surface_family ?? "random")} onChange={(event) => setConfig({ ...config, material_bounds: { ...config.material_bounds, surface_family: event.target.value === "random" ? null : event.target.value } })}><option value="random">Random material</option><option value="wood">Wood</option><option value="rubber_mat">Rubber mat</option><option value="coated_metal">Coated metal</option><option value="polymer">Polymer</option></select></label>
+            <label>Minimum mass (kg)<input type="number" min="0.02" max="2" step="0.01" value={(config.material_bounds.mass_kg as number[])[0]} onChange={(event) => setConfig({ ...config, material_bounds: { ...config.material_bounds, mass_kg: [Number(event.target.value), (config.material_bounds.mass_kg as number[])[1]] } })} /></label>
+            <label>Maximum mass (kg)<input type="number" min="0.02" max="2" step="0.01" value={(config.material_bounds.mass_kg as number[])[1]} onChange={(event) => setConfig({ ...config, material_bounds: { ...config.material_bounds, mass_kg: [(config.material_bounds.mass_kg as number[])[0], Number(event.target.value)] } })} /></label>
+            <label className="check-row"><input type="checkbox" checked={config.evaluator_mode} onChange={(event) => setConfig({ ...config, evaluator_mode: event.target.checked })} /> Reveal truth after terminal state</label>
           </div>
           <p className="desktop-note">Advanced material bounds and capture configuration are available on desktop.</p>
         </CollapsibleContent>

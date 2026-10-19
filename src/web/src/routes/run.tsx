@@ -24,6 +24,7 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
   const loadReplay = useRunStore((state) => state.loadReplay);
   const seek = useRunStore((state) => state.seek);
   const resetStore = useRunStore((state) => state.reset);
+  const returnToLive = useRunStore((state) => state.returnToLive);
   const sourceEvents = useRunStore((state) => state.sourceEvents);
   const mode = useRunStore((state) => state.mode);
   const selectedSequence = useRunStore((state) => state.selectedSequence);
@@ -67,9 +68,8 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
       loadReplay(isFixture ? fixtureEvents : sourceEvents);
       seek(1);
     } else {
-      resetStore();
-      cursor.current = 0;
-      setFixturePlaying(true);
+      returnToLive();
+      if (isFixture && cursor.current < fixtureEvents.length) setFixturePlaying(true);
     }
   };
 

@@ -97,12 +97,23 @@ positive_integer "--height" "$height"
 positive_integer "--fps" "$fps"
 
 [[ -d "$run_dir" ]] || die "run directory not found: $run_dir"
+run_dir="$(cd "$run_dir" && pwd)"
+web_dir="$(cd "$web_dir" && pwd)"
+output_parent="$(dirname "$output")"
+mkdir -p "$output_parent"
+output="$(cd "$output_parent" && pwd)/$(basename "$output")"
 [[ -s "$run_dir/events.ndjson" ]] || die \
   "missing or empty $run_dir/events.ndjson; record a terminal Agent Lab run first"
 [[ -f "$web_dir/package.json" ]] || die \
   "frontend workspace not found: $web_dir (build the Agent Lab frontend first)"
 
-require_command pnpm "Install pnpm, then run 'pnpm --dir src/web install --frozen-lockfile'."
+if command -v pnpm >/dev/null 2>&1; then
+  pnpm_command=(pnpm)
+elif command -v corepack >/dev/null 2>&1; then
+  pnpm_command=(corepack pnpm)
+else
+  die "missing pnpm/corepack. Install Node.js with Corepack, then run 'corepack pnpm --dir src/web install --frozen-lockfile'."
+fi
 require_command ffmpeg "Install ffmpeg with your system package manager."
 require_command ffprobe "Install ffprobe (normally included with ffmpeg)."
 
@@ -115,7 +126,6 @@ else
 fi
 
 output_dir="$(dirname "$output")"
-mkdir -p "$output_dir"
 pending="$(mktemp "${output_dir}/.agent-lab-capture.XXXXXX.mp4")"
 rm -f "$pending"
 
@@ -125,7 +135,7 @@ printf '  resolution: %sx%s @ %s fps\n' "$width" "$height" "$fps"
 printf '  pending:    %s\n' "$pending"
 
 set +e
-pnpm --dir "$web_dir" record:demo -- \
+"${pnpm_command[@]}" --dir "$web_dir" record:demo -- \
   --run "$run_dir" \
   --output "$pending" \
   --width "$width" \
@@ -184,11 +194,20 @@ fi
 rm -f "$black_log"
 
 checksum="$("${checksum_command[@]}" "$pending" | awk '{print $1}')"
+pending_gif="${pending%.mp4}.gif"
+pending_metadata="${pending}.json"
+output_gif="${output%.mp4}.gif"
+output_metadata="${output}.json"
 mv -f "$pending" "$output"
+[[ -s "$pending_gif" ]] || die "capture produced no GIF companion: $pending_gif"
+[[ -s "$pending_metadata" ]] || die "capture produced no metadata sidecar: $pending_metadata"
+mv -f "$pending_gif" "$output_gif"
+mv -f "$pending_metadata" "$output_metadata"
 printf '%s  %s\n' "$checksum" "$(basename "$output")" >"${output}.sha256"
 
 printf 'Validated Agent Lab media\n'
 printf '  output:     %s\n' "$output"
+printf '  gif:        %s\n' "$output_gif"
 printf '  duration:   %.3f s\n' "$duration"
 printf '  resolution: %sx%s @ %s fps\n' "$actual_width" "$actual_height" "$fps"
 printf '  sha256:     %s\n' "$checksum"

@@ -61,6 +61,7 @@ export const useRunStore = create<RunStore>((set, get) => ({
     const state = get();
     set({
       followingLive: true,
+      mode: "live",
       run: seekRun(state.sourceEvents, Number.POSITIVE_INFINITY),
       selectedSequence: state.sourceEvents.at(-1)?.sequence ?? null,
       bufferedCount: 0,

@@ -7,10 +7,11 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Tooltip } from "./ui/tooltip";
 import { ContactOverlays } from "./scene/contact-overlays";
+import { findCubeBody } from "./scene/body-mapping";
 import { FrankaMirror } from "./scene/franka";
 
 function Scene({ frame }: { frame: VisualFramePayload }) {
-  const cube = frame.bodies.find((body) => body.body_id === "cube");
+  const cube = findCubeBody(frame.bodies);
   return (
     <>
       <color attach="background" args={["#0a0e13"]} />
@@ -36,7 +37,7 @@ function Scene({ frame }: { frame: VisualFramePayload }) {
 }
 
 function SceneSummary({ frame }: { frame: VisualFramePayload | null }) {
-  const cube = frame?.bodies.find((body) => body.body_id === "cube");
+  const cube = frame ? findCubeBody(frame.bodies) : undefined;
   return (
     <div className="sr-only" aria-live="polite" data-testid="scene-summary">
       {frame ? `${frame.scene} scene, frame ${frame.frame_id}. Cube at ${cube?.position_m.join(", ") ?? "unknown"} meters. ${frame.contacts.length} contacts. Target region ${frame.target_region ? "visible" : "absent"}.` : "No visual frame received."}
@@ -64,7 +65,7 @@ export function NewtonViewport({ frame, disconnected = false }: { frame: VisualF
           </Tooltip>
         </div>
       </header>
-      <div className="canvas-shell">
+      <div className="canvas-shell" data-frame-id={frame?.frame_id ?? ""}>
         {frame ? (
           <Canvas shadows dpr={[1, 1.5]} frameloop="demand" gl={{ antialias: true, alpha: false }}>
             <Scene frame={frame} />

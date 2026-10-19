@@ -1,4 +1,5 @@
 import type { BodyTransform } from "../../generated/agent-events";
+import { isFrankaBody } from "./body-mapping";
 
 function RobotLink({ body }: { body: BodyTransform }) {
   const isHand = body.body_id.includes("hand");
@@ -25,7 +26,11 @@ function RobotLink({ body }: { body: BodyTransform }) {
 }
 
 export function FrankaMirror({ bodies }: { bodies: readonly BodyTransform[] }) {
-  const robotBodies = bodies.filter((body) => /panda|franka/i.test(`${body.body_id} ${body.label}`));
+  // Newton preserves the imported robot instance name in body identifiers.  The
+  // bundled Franka asset is named `fr3`, while alternate assets commonly use
+  // `franka` or `panda`.  Match all verified names at this presentation-only
+  // boundary; physics remains authoritative in the incoming transforms.
+  const robotBodies = bodies.filter(isFrankaBody);
   return (
     <group aria-label="Franka presentation mirror">
       {robotBodies.map((body) => <RobotLink key={body.body_id} body={body} />)}

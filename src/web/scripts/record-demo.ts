@@ -7,6 +7,28 @@ import { PNG } from "pngjs";
 
 type Options = { run: string; output: string; width: number; height: number; fps: number };
 
+const MAX_CAPTURE_STEPS = 300;
+
+function captureSequences(events: unknown[] | null, maxSequence: number): number[] {
+  if (!events || maxSequence <= MAX_CAPTURE_STEPS) {
+    return Array.from({ length: maxSequence }, (_, index) => index + 1);
+  }
+  const important = new Set<number>([1, maxSequence]);
+  for (const value of events) {
+    if (!value || typeof value !== "object") continue;
+    const event = value as { sequence?: unknown; type?: unknown };
+    if (typeof event.sequence !== "number" || typeof event.type !== "string") continue;
+    if (event.type.startsWith("stage.") || event.type === "belief.updated" || event.type.startsWith("action.") || event.type.startsWith("run.")) {
+      important.add(event.sequence);
+    }
+  }
+  const remaining = Math.max(0, MAX_CAPTURE_STEPS - important.size);
+  for (let index = 0; index < remaining; index += 1) {
+    important.add(Math.max(1, Math.round(1 + (index * (maxSequence - 1)) / Math.max(1, remaining - 1))));
+  }
+  return [...important].sort((left, right) => left - right).slice(0, MAX_CAPTURE_STEPS);
+}
+
 function args(): Options {
   const values = process.argv.slice(2);
   const get = (name: string, fallback?: string) => {
@@ -105,11 +127,26 @@ async function main() {
     let frameIndex = 0;
     let validatedViewports = 0;
     const holdFrames = Math.max(1, Math.round(options.fps * 0.12));
-    for (let sequence = 1; sequence <= max; sequence += 1) {
+    const sequences = captureSequences(captureEvents, max);
+    for (const sequence of sequences) {
       await slider.fill(String(sequence));
-      await page.waitForTimeout(35);
       const viewport = page.locator(".canvas-shell");
-      if ((sequence === Math.floor(max / 2) || sequence === max || validatedViewports === 0) && await viewport.locator("canvas").count() > 0) {
+      const expectedFrameId = captureEvents
+        ?.slice(0, sequence)
+        .reverse()
+        .find((value) => (value as { type?: unknown }).type === "simulation.visual_frame") as
+        | { payload?: { frame_id?: number } }
+        | undefined;
+      const expectedId = expectedFrameId?.payload?.frame_id;
+      await page.waitForFunction(
+        `(() => {
+          const sequenceLabel = document.querySelector('.replay-bar .mono')?.textContent ?? '';
+          const currentFrame = document.querySelector('.canvas-shell')?.getAttribute('data-frame-id') ?? '';
+          return sequenceLabel.includes('SEQ ${sequence} /') && (${expectedId === undefined ? "true" : `currentFrame === '${expectedId}'`});
+        })()`,
+      );
+      await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+      if ((sequence >= Math.floor(max / 2) || sequence === max || validatedViewports === 0) && validatedViewports < 3 && await viewport.locator("canvas").count() > 0) {
         assertNonBlankViewport(await viewport.screenshot(), sequence);
         validatedViewports += 1;
       }
