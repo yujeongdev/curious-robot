@@ -37,3 +37,16 @@ def test_compliance_rejects_unbounded_force(tools: RobotTools) -> None:
     tools.enable_cartesian_compliance()
     with pytest.raises(ValueError, match="15 N"):
         tools.set_desired_force((20.0, 0.0, 0.0))
+
+
+@pytest.mark.gpu
+def test_franka_cartesian_command_moves_articulation() -> None:
+    config = WorldConfig(device="cuda:0", include_robot=True, seed=5)
+    world = TruthEnvironment(PhysicalParameters(0.2, 0.5, 0.3), config)
+    try:
+        before = world.state_0.joint_q.numpy()[:7].copy()
+        world.command_cartesian((-0.10, 0.0, 0.15), duration_s=0.15)
+        after = world.state_0.joint_q.numpy()[:7]
+        assert abs(after - before).max() > 0.05
+    finally:
+        world.close()

@@ -127,6 +127,9 @@ def run_episode(
         initial_final_pose = tuple(float(v) for v in initial_position)
         initial_body_q = (*initial_final_pose, *(float(v) for v in initial_orientation))
         initial_body_qd = tuple(float(v) for v in initial_velocity)
+        initial_joint_q = tuple(float(v) for v in reality.state_0.joint_q.numpy())
+        initial_joint_qd = tuple(float(v) for v in reality.state_0.joint_qd.numpy())
+        initial_joint_target_q = tuple(float(v) for v in reality.control.joint_target_q.numpy())
         reality.clear_trace()
         replay_path = output / "scene_replay.bin"
         reality.start_recording(replay_path, stride=4)
@@ -198,6 +201,9 @@ def run_episode(
             initial_final_pose,
             initial_body_q,
             initial_body_qd,
+            initial_joint_q,
+            initial_joint_qd,
+            initial_joint_target_q,
             final_control_trace,
             final_state_trace,
             final_samples,
@@ -222,6 +228,9 @@ def _write_artifacts(
     initial_final_pose: tuple[float, float, float],
     initial_body_q: tuple[float, ...],
     initial_body_qd: tuple[float, ...],
+    initial_joint_q: tuple[float, ...],
+    initial_joint_qd: tuple[float, ...],
+    initial_joint_target_q: tuple[float, ...],
     final_control_trace: list[tuple[float, float, float]],
     final_state_trace: list[tuple[float, float, float]],
     final_samples,
@@ -302,6 +311,9 @@ def _write_artifacts(
         "initial_cube_position_m": initial_final_pose,
         "initial_cube_body_q": initial_body_q,
         "initial_cube_body_qd": initial_body_qd,
+        "initial_joint_q": initial_joint_q,
+        "initial_joint_qd": initial_joint_qd,
+        "initial_joint_target_q": initial_joint_target_q,
         "selected_action": selected_action,
         "control_sequence_force_world_n": final_control_trace,
         "reference_trajectory_position_m": final_state_trace,

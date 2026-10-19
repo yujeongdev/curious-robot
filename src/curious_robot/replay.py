@@ -42,6 +42,11 @@ def verify_reexecution(manifest_path: str | Path) -> dict[str, object]:
             tuple(manifest["initial_cube_body_q"]),
             tuple(manifest["initial_cube_body_qd"]),
         )
+        world.set_joint_state(
+            tuple(manifest["initial_joint_q"]),
+            tuple(manifest["initial_joint_qd"]),
+            tuple(manifest["initial_joint_target_q"]),
+        )
         action = manifest["selected_action"]
         if action["kind"] == "push":
             world.execute_push(tuple(action["target_m"]), action["max_force_n"])

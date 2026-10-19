@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 import math
 from dataclasses import dataclass
 from pathlib import Path
 
 import newton
+import newton.ik as ik
 import numpy as np
 import warp as wp
 
@@ -77,6 +79,7 @@ class NewtonWorld:
 
     def _build(self) -> None:
         builder = newton.ModelBuilder()
+        ik_builder = None
         material = newton.ModelBuilder.ShapeConfig(mu=self._parameters.static_friction)
         if self.config.include_robot:
             asset = newton.utils.download_asset("franka_emika_panda") / "urdf/fr3_franka_hand.urdf"
@@ -88,7 +91,9 @@ class NewtonWorld:
                 parse_visuals_as_colliders=True,
                 joint_damping_mode="passive",
             )
-            ready = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04]
+            ready = np.asarray([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04])
+            ready[:7] += np.random.default_rng(self.config.seed + 97).uniform(-0.02, 0.02, 7)
+            ready = ready.tolist()
             n = min(len(ready), len(builder.joint_q))
             builder.joint_q[:n] = ready[:n]
             builder.joint_target_q[:n] = ready[:n]
@@ -97,6 +102,7 @@ class NewtonWorld:
             if n >= 9:
                 builder.joint_target_ke[7:9] = [100.0, 100.0]
                 builder.joint_target_kd[7:9] = [10.0, 10.0]
+            ik_builder = copy.deepcopy(builder)
         density = self._parameters.mass_kg / CUBE_EDGE_M**3
         cube_material = newton.ModelBuilder.ShapeConfig(mu=self._parameters.static_friction, density=density)
         self.cube_body = builder.add_body(
@@ -130,6 +136,43 @@ class NewtonWorld:
             deterministic=wp.DeterministicMode.RUN_TO_RUN,
         )
         self._initial_joint_q = self.model.joint_q.numpy().copy()
+        if ik_builder is not None:
+            self._setup_ik(ik_builder)
+
+    def _setup_ik(self, builder: newton.ModelBuilder) -> None:
+        self._ik_model = builder.finalize(device=self.config.device)
+        ik_state = self._ik_model.state()
+        newton.eval_fk(self._ik_model, self._ik_model.joint_q, self._ik_model.joint_qd, ik_state)
+        self._ee_index = next(
+            index for index, label in enumerate(self._ik_model.body_label) if label.endswith("/fr3_hand_tcp")
+        )
+        ee_transform = ik_state.body_q.numpy()[self._ee_index]
+        self._ik_position = ik.IKObjectivePosition(
+            link_index=self._ee_index,
+            link_offset=wp.vec3(0.0, 0.0, 0.0),
+            target_positions=wp.array([ee_transform[:3]], dtype=wp.vec3, device=self.config.device),
+        )
+        self._ik_rotation = ik.IKObjectiveRotation(
+            link_index=self._ee_index,
+            link_offset_rotation=wp.quat_identity(),
+            target_rotations=wp.array([ee_transform[3:7]], dtype=wp.vec4, device=self.config.device),
+        )
+        joint_limits = ik.IKObjectiveJointLimit(
+            joint_limit_lower=self._ik_model.joint_limit_lower,
+            joint_limit_upper=self._ik_model.joint_limit_upper,
+        )
+        self._ik_q = wp.array(
+            self._ik_model.joint_q,
+            shape=(1, self._ik_model.joint_coord_count),
+            device=self.config.device,
+        )
+        self._ik_solver = ik.IKSolver(
+            model=self._ik_model,
+            n_problems=1,
+            objectives=[self._ik_position, self._ik_rotation, joint_limits],
+            lambda_initial=0.1,
+            jacobian_mode=ik.IKJacobianType.ANALYTIC,
+        )
 
     def close(self) -> None:
         """Release large GPU references eagerly between black-box rollouts."""
@@ -166,6 +209,19 @@ class NewtonWorld:
             state.body_qd.assign(qd)
             state.clear_forces()
         self._sliding = float(np.linalg.norm(body_qd[:2])) > 0.010
+
+    def set_joint_state(
+        self,
+        joint_q: tuple[float, ...],
+        joint_qd: tuple[float, ...],
+        joint_target_q: tuple[float, ...],
+    ) -> None:
+        """Restore robot and free-joint state recorded at an action boundary."""
+        for state in (self.state_0, self.state_1):
+            state.joint_q.assign(joint_q)
+            state.joint_qd.assign(joint_qd)
+            newton.eval_fk(self.model, state.joint_q, state.joint_qd, state)
+        self.control.joint_target_q.assign(joint_target_q)
 
     def _cube_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         q = self.state_0.body_q.numpy()[self.cube_body]
@@ -269,6 +325,24 @@ class NewtonWorld:
         self.control.joint_target_q.assign(target)
         for _ in range(max(1, round(duration_s / self.config.dt_s))):
             self.step()
+
+    def command_cartesian(self, target_m: tuple[float, float, float], duration_s: float) -> None:
+        """Solve Franka IK and execute the result through bounded joint PD targets."""
+        if not hasattr(self, "_ik_solver"):
+            for _ in range(max(1, round(duration_s / self.config.dt_s))):
+                self.step()
+            self._tool_pose = np.asarray(target_m, dtype=float)
+            return
+        current = self.state_0.joint_q.numpy()[: self._ik_model.joint_coord_count]
+        self._ik_q.assign(current.reshape(1, -1))
+        self._ik_position.set_target_positions(wp.array([target_m], dtype=wp.vec3, device=self.config.device))
+        self._ik_solver.step(self._ik_q, self._ik_q, iterations=32)
+        solution = self._ik_q.numpy()[0]
+        self.command_joint_targets(
+            {index: float(solution[index]) for index in range(min(7, len(solution)))},
+            duration_s,
+        )
+        self._tool_pose = np.asarray(target_m, dtype=float)
 
     def set_gripper(self, width_m: float) -> None:
         if self.model.joint_coord_count < 2:

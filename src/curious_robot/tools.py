@@ -123,9 +123,7 @@ class RobotTools:
         if speed_m_s <= 0 or speed_m_s > 0.15:
             raise ValueError("Cartesian speed must be in (0, 0.15] m/s")
         steps = max(1, math.ceil(distance / (speed_m_s * self.config.dt_s)))
-        for alpha in np.linspace(0.0, 1.0, steps):
-            self.reality._tool_pose = (1 - alpha) * start + alpha * end
-            self.reality.step()
+        self.reality.command_cartesian(target.position_m, steps * self.config.dt_s)
         self._record("move_cartesian", target.model_dump(), {"steps": steps})
         return target
 
