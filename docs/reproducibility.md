@@ -29,4 +29,6 @@ The verifier rebuilds a fresh Newton truth world, reapplies the recorded force
 trace, and writes `reexecution_report.json`. `RUN_TO_RUN` reduces nondeterminism
 on the same GPU, but bitwise identity across GPU architectures, drivers, or
 package versions is not promised. The explicit position tolerance is therefore
-part of the manifest and every report.
+part of the manifest and every report. The reduced cube-only verifier uses
+5 mm; the full articulated Franka/contact replay uses 15 mm because small GPU
+contact-order differences accumulate through its closed-loop IK/grasp rollout.

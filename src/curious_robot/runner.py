@@ -317,7 +317,7 @@ def _write_artifacts(
         "selected_action": selected_action,
         "control_sequence_force_world_n": final_control_trace,
         "reference_trajectory_position_m": final_state_trace,
-        "position_tolerance_m": 0.005,
+        "position_tolerance_m": 0.015 if config.include_robot else 0.005,
         "agent_tool_calls": [record.model_dump(mode="json") for record in tools.records],
         "belief_history": [belief.model_dump(mode="json") for belief in belief_history],
         "sensor_configuration": {
