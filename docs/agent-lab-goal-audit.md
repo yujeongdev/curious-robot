@@ -27,6 +27,10 @@ RTX 4080 SUPER with Newton 1.7.0, Warp 1.18.0, and MuJoCo 3.15.0.
   visual frames.
 - Truth remains absent from the public event stream. Evaluator comparison is a
   separate terminal-only artifact.
+- Exact low-level re-execution was attempted on the same GPU and package set:
+  942 samples, 0.0487 m RMSE, 0.1378 m maximum position error versus the
+  articulated tolerance of 0.015 m. The report is a transparent FAIL, not
+  confused with successful visual state playback.
 
 ## Honest limitations
 

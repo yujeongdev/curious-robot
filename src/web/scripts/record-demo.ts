@@ -7,7 +7,7 @@ import { PNG } from "pngjs";
 
 type Options = { run: string; output: string; width: number; height: number; fps: number };
 
-const MAX_CAPTURE_STEPS = 300;
+const MAX_CAPTURE_STEPS = 120;
 
 function captureSequences(events: unknown[] | null, maxSequence: number): number[] {
   if (!events || maxSequence <= MAX_CAPTURE_STEPS) {
@@ -126,7 +126,7 @@ async function main() {
     if (!Number.isFinite(max) || max < 2) throw new Error("Replay fixture did not load a valid event sequence.");
     let frameIndex = 0;
     let validatedViewports = 0;
-    const holdFrames = Math.max(1, Math.round(options.fps * 0.12));
+    const captureInputFps = Math.min(options.fps, 8);
     const sequences = captureSequences(captureEvents, max);
     for (const sequence of sequences) {
       await slider.fill(String(sequence));
@@ -150,17 +150,15 @@ async function main() {
         assertNonBlankViewport(await viewport.screenshot(), sequence);
         validatedViewports += 1;
       }
-      for (let hold = 0; hold < holdFrames; hold += 1) {
-        await page.screenshot({ path: join(temporary, `frame-${String(frameIndex).padStart(6, "0")}.jpg`), type: "jpeg", quality: 95 });
-        frameIndex += 1;
-      }
+      await page.screenshot({ path: join(temporary, `frame-${String(frameIndex).padStart(6, "0")}.jpg`), type: "jpeg", quality: 95 });
+      frameIndex += 1;
     }
     if (validatedViewports < 2) throw new Error(`WebGL viewport validation incomplete: only ${validatedViewports} checkpoints rendered.`);
-    execFileSync("ffmpeg", ["-y", "-framerate", String(options.fps), "-i", join(temporary, "frame-%06d.jpg"), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output], { stdio: "inherit" });
+    execFileSync("ffmpeg", ["-y", "-framerate", String(captureInputFps), "-i", join(temporary, "frame-%06d.jpg"), "-r", String(options.fps), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output], { stdio: "inherit" });
     const gif = output.replace(/\.mp4$/i, ".gif");
     execFileSync("ffmpeg", ["-y", "-i", output, "-vf", "fps=12,scale=960:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer", gif], { stdio: "inherit" });
     const bytes = readFileSync(output);
-    writeFileSync(`${output}.json`, JSON.stringify({ source_run: fixtureMode ? options.run : basename(runDirectory), width: options.width, height: options.height, fps: options.fps, frames: frameIndex, sha256: createHash("sha256").update(bytes).digest("hex") }, null, 2));
+    writeFileSync(`${output}.json`, JSON.stringify({ source_run: fixtureMode ? options.run : basename(runDirectory), width: options.width, height: options.height, fps: options.fps, source_frames: frameIndex, source_fps: captureInputFps, sha256: createHash("sha256").update(bytes).digest("hex") }, null, 2));
     rmSync(temporary, { recursive: true, force: true });
   } finally {
     await browser.close();

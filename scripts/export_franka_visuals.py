@@ -55,7 +55,9 @@ def main() -> None:
     asset_root = Path(newton.utils.download_asset("franka_emika_panda"))
     source_readme = (asset_root / "README.md").read_text()
     if SOURCE_COMMIT not in source_readme:
-        raise RuntimeError("Newton Franka asset revision changed; audit the new official source before export")
+        raise RuntimeError(
+            "Newton Franka asset revision changed; audit the new official source before export"
+        )
     arm_root = asset_root / "meshes/robot_arms/fr3/visual"
     hand_root = asset_root / "meshes/robot_ee/franka_hand_white/visual"
     args.output.mkdir(parents=True, exist_ok=True)

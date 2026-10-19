@@ -174,7 +174,9 @@ unidentifiable evidence.
 See [`docs/architecture.md`](docs/architecture.md),
 [`docs/capabilities.json`](docs/capabilities.json), the approved
 [`Agent Lab design`](docs/designs/agent-lab-ui.md), and
-[`DESIGN.md`](DESIGN.md) for boundaries, evidence, and UI decisions.
+[`DESIGN.md`](DESIGN.md) for boundaries, evidence, and UI decisions. The
+executed requirement mapping and honest replay result are in the
+[`Agent Lab goal audit`](docs/agent-lab-goal-audit.md).
 
 The official Franka visual asset provenance, per-link bounds, and SHA-256 are
 recorded in `src/web/public/models/franka/manifest.json`; regenerate them with
