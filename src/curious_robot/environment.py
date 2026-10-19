@@ -223,14 +223,28 @@ class NewtonWorld:
             newton.eval_fk(self.model, state.joint_q, state.joint_qd, state)
         self.control.joint_target_q.assign(joint_target_q)
 
-    def _cube_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def cube_controller_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return exact cube state for deterministic controller feedback.
+
+        This is a controller boundary, not an agent observation. Agent-facing
+        code must use :meth:`observe_object_pose`, which applies the configured
+        observation model.
+        """
         q = self.state_0.body_q.numpy()[self.cube_body]
         qd = self.state_0.body_qd.numpy()[self.cube_body]
         return q[:3].astype(float), q[3:7].astype(float), qd.astype(float)
 
+    def tool_controller_pose(self) -> Pose:
+        """Return the deterministic Cartesian controller target pose."""
+        return Pose(position_m=tuple(float(value) for value in self._tool_pose))
+
+    def set_grasp_active(self, active: bool) -> None:
+        """Set the compliant-grasp surrogate state through its controller API."""
+        self._grasped = active
+
     def step(self, force_world_n: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> MotionSample:
         self.state_0.clear_forces()
-        position, _, velocity = self._cube_state()
+        position, _, velocity = self.cube_controller_state()
         applied = np.asarray(force_world_n, dtype=float)
         planar_speed = float(np.linalg.norm(velocity[:2]))
         if self._sliding:
@@ -254,7 +268,7 @@ class NewtonWorld:
         self.state_0, self.state_1 = self.state_1, self.state_0
         self.sim_time_s += self.config.dt_s
         self.last_applied_force_n = applied
-        pos, _, vel = self._cube_state()
+        pos, _, vel = self.cube_controller_state()
         self.control_trace.append(tuple(float(v) for v in applied))
         self.state_trace.append(tuple(float(v) for v in pos))
         if self._recorder is not None and self._step_count % self._record_stride == 0:
@@ -268,7 +282,11 @@ class NewtonWorld:
             position_m=tuple(float(v) for v in pos),
             velocity_m_s=tuple(float(v) for v in vel[:3]),
             measured_force_n=tuple(float(v) for v in measured),
-            normal_load_n=self._parameters.mass_kg * GRAVITY,
+            # SolverMuJoCo currently has no validated normal-load producer in
+            # this MVP. Never substitute the hidden body mass for a sensor.
+            measured_normal_load_n=None,
+            normal_load_standard_deviation_n=None,
+            normal_load_producer=None,
         )
 
     def start_recording(self, output_path: str | Path, stride: int = 4) -> None:
@@ -291,7 +309,7 @@ class NewtonWorld:
             self.step()
 
     def observe_object_pose(self) -> ObjectPoseObservation:
-        position, quat, velocity = self._cube_state()
+        position, quat, velocity = self.cube_controller_state()
         noisy = position + self.rng.normal(0.0, self.config.observation_noise_std, 3)
         return ObjectPoseObservation(
             pose=Pose(position_m=tuple(noisy), orientation_xyzw=tuple(quat)),
@@ -374,7 +392,7 @@ class NewtonWorld:
         samples: list[MotionSample] = []
         kp, kd = 30.0, 4.0
         for _ in range(round(4.0 / self.config.dt_s)):
-            pos, _, vel = self._cube_state()
+            pos, _, vel = self.cube_controller_state()
             error = np.asarray(target_m[:2]) - pos[:2]
             if float(np.linalg.norm(error)) < 0.008 and float(np.linalg.norm(vel[:2])) < 0.03:
                 break
@@ -389,31 +407,38 @@ class NewtonWorld:
         return samples
 
     def execute_pick_place(
-        self, target_m: tuple[float, float, float], max_force_n: float = 12.0
+        self,
+        target_m: tuple[float, float, float],
+        max_force_n: float = 12.0,
+        *,
+        assumed_mass_kg: float,
     ) -> list[MotionSample]:
-        """Physical compliant-grasp surrogate: bounded spring forces, never pose teleportation."""
-        self._grasped = True
+        """Execute bounded compliant pick/place using belief-derived compensation."""
+        if not math.isfinite(assumed_mass_kg) or assumed_mass_kg <= 0.0:
+            raise ValueError("assumed_mass_kg must be finite and positive")
+        self.set_grasp_active(True)
         samples: list[MotionSample] = []
         lift_z = 0.12
+        initial_position, _, _ = self.cube_controller_state()
         waypoints = (
-            np.array([self._cube_state()[0][0], self._cube_state()[0][1], lift_z]),
+            np.array([initial_position[0], initial_position[1], lift_z]),
             np.array([target_m[0], target_m[1], lift_z]),
             np.array(target_m),
         )
         for waypoint in waypoints:
             for _ in range(round(2.5 / self.config.dt_s)):
-                pos, _, vel = self._cube_state()
+                pos, _, vel = self.cube_controller_state()
                 error = waypoint - pos
                 if float(np.linalg.norm(error)) < 0.006 and float(np.linalg.norm(vel[:3])) < 0.025:
                     break
                 force = (
-                    38.0 * error - 5.0 * vel[:3] + np.array([0.0, 0.0, self._parameters.mass_kg * GRAVITY])
+                    38.0 * error - 5.0 * vel[:3] + np.array([0.0, 0.0, assumed_mass_kg * GRAVITY])
                 )
                 magnitude = float(np.linalg.norm(force))
                 if magnitude > max_force_n:
                     force *= max_force_n / magnitude
                 samples.append(self.step(tuple(force)))
-        self._grasped = False
+        self.set_grasp_active(False)
         for _ in range(round(0.4 / self.config.dt_s)):
             samples.append(self.step())
         return samples
@@ -460,7 +485,11 @@ def rollout_candidate(
         if candidate.kind == "push":
             samples = world.execute_push(candidate.target_m, candidate.max_force_n)
         else:
-            samples = world.execute_pick_place(candidate.target_m, candidate.max_force_n)
+            samples = world.execute_pick_place(
+                candidate.target_m,
+                candidate.max_force_n,
+                assumed_mass_kg=belief.parameters[ParameterName.MASS].mean,
+            )
         observation = world.observe_object_pose()
         final = np.asarray(observation.pose.position_m)
         error = float(np.linalg.norm(final[:2] - np.asarray(candidate.target_m[:2])))

@@ -103,8 +103,28 @@ def estimate_dynamic_friction(
     velocity = np.asarray([s.velocity_m_s[0] for s in samples])
     acceleration = np.gradient(velocity, t)
     force = np.asarray([s.measured_force_n[0] for s in samples])
-    normal = np.asarray([s.normal_load_n for s in samples])
     m = mass.mean
+
+    measured_loads = [sample.measured_normal_load_n for sample in samples]
+    if all(load is not None for load in measured_loads):
+        normal = np.asarray(measured_loads, dtype=float)
+        normal_source = "measured normal load"
+        normal_assumptions = ("effective Coulomb sliding friction",)
+    elif all(load is None for load in measured_loads):
+        normal = np.full(len(samples), m * GRAVITY)
+        normal_source = "mass-posterior-derived normal load"
+        normal_assumptions = (
+            "effective Coulomb sliding friction",
+            "normal load derived from mass posterior on a horizontal table; no normal-force sensor",
+        )
+    else:
+        return _unidentifiable(
+            ParameterName.DYNAMIC_FRICTION,
+            (0.10, 0.60),
+            "1",
+            evidence,
+            "incomplete normal-load measurement series",
+        )
 
     def residual(x: np.ndarray) -> np.ndarray:
         return force - m * acceleration - x[0] * normal * np.sign(velocity)
@@ -114,7 +134,18 @@ def estimate_dynamic_friction(
     mu = float(fit.x[0])
     residual_std = float(np.std(residual(fit.x), ddof=1)) if len(samples) > 1 else 0.0
     info = float(np.sum(normal**2))
-    std = max(residual_std / math.sqrt(max(info, 1e-9)), 0.01)
+    fit_std = residual_std / math.sqrt(max(info, 1e-9))
+    if normal_source == "mass-posterior-derived normal load":
+        normal_relative_std = mass.std / max(mass.mean, 1e-9)
+    else:
+        load_stds = np.asarray(
+            [sample.normal_load_standard_deviation_n for sample in samples],
+            dtype=float,
+        )
+        normal_relative_std = float(
+            np.sqrt(np.mean(load_stds**2)) / max(float(np.mean(normal)), 1e-9)
+        )
+    std = max(math.hypot(fit_std, mu * normal_relative_std), 0.01)
     mismatch = ()
     if residual_std > max(0.15, 0.15 * float(np.median(np.abs(force)))):
         mismatch = ("Coulomb residual is structured or larger than the validation threshold",)
@@ -127,8 +158,8 @@ def estimate_dynamic_friction(
         units="1",
         status="identified",
         evidence_ids=(evidence.evidence_id,),
-        method="bounded robust least squares: F = m a + mu N sign(v)",
-        assumptions=("effective Coulomb sliding friction",),
+        method=f"bounded robust least squares: F = m a + mu N sign(v); {normal_source}",
+        assumptions=normal_assumptions,
         mismatch_notes=mismatch,
     )
 

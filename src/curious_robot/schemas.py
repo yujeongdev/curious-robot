@@ -72,7 +72,20 @@ class MotionSample(FrozenModel):
     position_m: Vec3
     velocity_m_s: Vec3
     measured_force_n: Vec3
-    normal_load_n: float
+    measured_normal_load_n: float | None = Field(default=None, ge=0.0)
+    normal_load_standard_deviation_n: float | None = Field(default=None, ge=0.0)
+    normal_load_producer: str | None = None
+
+    @model_validator(mode="after")
+    def validate_normal_load_measurement(self) -> MotionSample:
+        fields = (
+            self.measured_normal_load_n,
+            self.normal_load_standard_deviation_n,
+            self.normal_load_producer,
+        )
+        if any(value is not None for value in fields) and any(value is None for value in fields):
+            raise ValueError("normal-load value, uncertainty, and producer must be supplied together")
+        return self
 
 
 class ExperimentEvidence(FrozenModel):

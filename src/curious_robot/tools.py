@@ -97,7 +97,7 @@ class RobotTools:
                 velocity_rad_s=tuple(velocity),
                 timestamp_s=self.reality.sim_time_s,
             ),
-            end_effector_pose=Pose(position_m=tuple(self.reality._tool_pose)),
+            end_effector_pose=self.reality.tool_controller_pose(),
             gripper_width_m=0.08,
         )
         if record:
@@ -117,7 +117,7 @@ class RobotTools:
         return result
 
     def move_cartesian(self, target: Pose, speed_m_s: float = 0.05) -> Pose:
-        start = self.reality._tool_pose.copy()
+        start = np.asarray(self.reality.tool_controller_pose().position_m)
         end = np.asarray(target.position_m)
         distance = float(np.linalg.norm(end - start))
         if speed_m_s <= 0 or speed_m_s > 0.15:
@@ -141,12 +141,12 @@ class RobotTools:
         object_position = np.asarray(self.reality.observe_object_pose().pose.position_m)
         self.move_cartesian(Pose(position_m=tuple(object_position + np.array([0.0, 0.0, 0.04]))))
         self.close_gripper()
-        self.reality._grasped = True
+        self.reality.set_grasp_active(True)
         self._record("grasp_object", {}, {"bilateral_contact_model": "compliant-force surrogate"})
         return True
 
     def release_object(self) -> bool:
-        self.reality._grasped = False
+        self.reality.set_grasp_active(False)
         self.open_gripper()
         self._record("release_object", {}, {"released": True})
         return True
@@ -186,12 +186,12 @@ class RobotTools:
 
     # Experiments
     def weigh_object(self) -> ExperimentEvidence:
-        self._return_object_home()
+        self.return_object_home()
         self.reality.settle(0.25)
         samples = []
         target_z = 0.10
         for _ in range(round(2.0 / self.config.dt_s)):
-            pos, _, velocity = self.reality._cube_state()
+            pos, _, velocity = self.reality.cube_controller_state()
             force_z = float(np.clip(45.0 * (target_z - pos[2]) - 6.0 * velocity[2], 0.0, 12.0))
             samples.append(self.reality.step((0.0, 0.0, force_z)))
         stable = tuple(s for s in samples[-round(0.6 / self.config.dt_s) :] if abs(s.velocity_m_s[2]) < 0.01)
@@ -205,7 +205,7 @@ class RobotTools:
         # Lower through the same bounded force path; no privileged state reset.
         home = self.config.initial_position_m
         for _ in range(round(1.5 / self.config.dt_s)):
-            pos, _, velocity = self.reality._cube_state()
+            pos, _, velocity = self.reality.cube_controller_state()
             error_z = home[2] - pos[2]
             if abs(error_z) < 0.003 and abs(velocity[2]) < 0.02:
                 break
@@ -216,7 +216,7 @@ class RobotTools:
         return evidence
 
     def probe_static_friction(self) -> ExperimentEvidence:
-        self._return_object_home()
+        self.return_object_home()
         self.reality.settle(0.25)
         samples = []
         moved_frames = 0
@@ -241,7 +241,7 @@ class RobotTools:
         return evidence
 
     def probe_dynamic_friction(self) -> ExperimentEvidence:
-        self._return_object_home()
+        self.return_object_home()
         self.reality.settle(0.25)
         samples = []
         target_velocity = 0.04
@@ -250,7 +250,7 @@ class RobotTools:
         mu_prior = self.belief.parameters[ParameterName.DYNAMIC_FRICTION].mean
         feedforward = mass * 9.81 * mu_prior
         for index in range(round(2.0 / self.config.dt_s)):
-            _, _, velocity = self.reality._cube_state()
+            _, _, velocity = self.reality.cube_controller_state()
             sliding_established = sliding_established or velocity[0] > 0.02
             if sliding_established:
                 force_x = float(np.clip(feedforward + 30.0 * (target_velocity - velocity[0]), 0.0, 8.0))
@@ -265,14 +265,27 @@ class RobotTools:
         )
         self.evidence.append(evidence)
         self._record("probe_dynamic_friction", {}, {"evidence_id": evidence.evidence_id})
-        self._return_object_home()
+        self.return_object_home()
         return evidence
 
-    def _return_object_home(self) -> None:
+    def return_object_home(self) -> None:
+        """Restore the object through the same belief-parameterized controller."""
         position = np.asarray(self.reality.observe_object_pose().pose.position_m)
         home = np.asarray(self.config.initial_position_m)
+        restored = False
         if np.linalg.norm(position[:2] - home[:2]) > 0.01 or position[2] > home[2] + 0.01:
-            self.reality.execute_pick_place(tuple(home), max_force_n=12.0)
+            assumed_mass_kg = self.belief.parameters[ParameterName.MASS].mean
+            self.reality.execute_pick_place(
+                tuple(home),
+                max_force_n=12.0,
+                assumed_mass_kg=assumed_mass_kg,
+            )
+            restored = True
+        self._record(
+            "return_object_home",
+            {"target_m": tuple(home)},
+            {"restored": restored, "controller_mass_source": "belief_posterior"},
+        )
 
     def estimate_center_of_mass(self) -> ParameterEstimate:
         estimate = ParameterEstimate(
