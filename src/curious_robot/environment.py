@@ -6,6 +6,8 @@ import copy
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Literal, Protocol
+from uuid import uuid4
 
 import newton
 import newton.ik as ik
@@ -28,6 +30,14 @@ CUBE_EDGE_M = 0.05
 TABLE_HEIGHT_M = 0.0
 
 
+class StepControl(Protocol):
+    def before_step(self) -> None: ...
+
+
+class EventIntentSink(Protocol):
+    def emit(self, intent: dict[str, Any]) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class PhysicalParameters:
     """Scene-construction parameters. Truth instances stay private to TruthEnvironment."""
@@ -36,6 +46,7 @@ class PhysicalParameters:
     static_friction: float
     dynamic_friction: float
     com_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    restitution: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +69,17 @@ class NewtonWorld:
     Newton's ShapeConfig exposes one Coulomb ``mu``.
     """
 
-    def __init__(self, parameters: PhysicalParameters, config: WorldConfig):
+    def __init__(
+        self,
+        parameters: PhysicalParameters,
+        config: WorldConfig,
+        *,
+        control_gate: StepControl | None = None,
+        event_sink: EventIntentSink | None = None,
+        scene: Literal["truth", "belief"] = "truth",
+        scenario_id: str | None = None,
+        belief_revision: int | None = None,
+    ):
         self._parameters = parameters
         self.config = config
         self.rng = np.random.default_rng(config.seed)
@@ -69,6 +90,12 @@ class NewtonWorld:
         self._grasped = False
         self._compliance_enabled = False
         self._desired_force_n = np.zeros(3)
+        self.control_gate = control_gate
+        self.event_sink = event_sink
+        self.scene = scene
+        self.scenario_id = scenario_id
+        self.belief_revision = belief_revision
+        self.world_instance_id = str(uuid4())
         self.control_trace: list[tuple[float, float, float]] = []
         self.state_trace: list[tuple[float, float, float]] = []
         self._recorder = None
@@ -80,7 +107,10 @@ class NewtonWorld:
     def _build(self) -> None:
         builder = newton.ModelBuilder()
         ik_builder = None
-        material = newton.ModelBuilder.ShapeConfig(mu=self._parameters.static_friction)
+        material = newton.ModelBuilder.ShapeConfig(
+            mu=self._parameters.static_friction,
+            restitution=self._parameters.restitution,
+        )
         if self.config.include_robot:
             asset = newton.utils.download_asset("franka_emika_panda") / "urdf/fr3_franka_hand.urdf"
             builder.add_urdf(
@@ -104,7 +134,11 @@ class NewtonWorld:
                 builder.joint_target_kd[7:9] = [10.0, 10.0]
             ik_builder = copy.deepcopy(builder)
         density = self._parameters.mass_kg / CUBE_EDGE_M**3
-        cube_material = newton.ModelBuilder.ShapeConfig(mu=self._parameters.static_friction, density=density)
+        cube_material = newton.ModelBuilder.ShapeConfig(
+            mu=self._parameters.static_friction,
+            density=density,
+            restitution=self._parameters.restitution,
+        )
         self.cube_body = builder.add_body(
             xform=wp.transform(wp.vec3(*self.config.initial_position_m), wp.quat_identity()),
             label="unknown_cube",
@@ -243,6 +277,8 @@ class NewtonWorld:
         self._grasped = active
 
     def step(self, force_world_n: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> MotionSample:
+        if self.control_gate is not None:
+            self.control_gate.before_step()
         self.state_0.clear_forces()
         position, _, velocity = self.cube_controller_state()
         applied = np.asarray(force_world_n, dtype=float)
@@ -276,6 +312,8 @@ class NewtonWorld:
             self._recorder.log_state(self.state_0)
             self._recorder.end_frame()
         self._step_count += 1
+        if self.event_sink is not None and self._step_count % 8 == 0:
+            self._emit_visual_frame(pos)
         measured = applied + self.rng.normal(0.0, self.config.force_noise_std, 3)
         return MotionSample(
             timestamp_s=self.sim_time_s,
@@ -287,6 +325,61 @@ class NewtonWorld:
             measured_normal_load_n=None,
             normal_load_standard_deviation_n=None,
             normal_load_producer=None,
+        )
+
+    def _emit_visual_frame(self, cube_position: np.ndarray) -> None:
+        body_q = self.state_0.body_q.numpy()
+        labels = tuple(self.model.body_label)
+        bodies = []
+        for body_index, transform in enumerate(body_q):
+            label = labels[body_index] if body_index < len(labels) else f"body_{body_index}"
+            stable_label = label.strip("/").replace("/", "__") or f"body_{body_index}"
+            bodies.append(
+                {
+                    "body_id": stable_label,
+                    "label": label,
+                    "asset_node_id": stable_label,
+                    "position_m": tuple(float(value) for value in transform[:3]),
+                    "orientation_xyzw": tuple(float(value) for value in transform[3:7]),
+                }
+            )
+        frame_id = self._step_count // 8
+        self.event_sink.emit(
+            {
+                "type": "simulation.visual_frame",
+                "sim_time_s": self.sim_time_s,
+                "frame_id": frame_id,
+                "payload": {
+                    "frame_id": frame_id,
+                    "source_state_sequence": 0,
+                    "scene": self.scene,
+                    "world_instance_id": self.world_instance_id,
+                    "scenario_id": self.scenario_id,
+                    "action_id": self.scenario_id,
+                    "belief_revision": self.belief_revision,
+                    "body_manifest_id": ("franka-cube-v1" if self.config.include_robot else "cube-only-v1"),
+                    "sim_time_s": self.sim_time_s,
+                    "presentation_time_s": self.sim_time_s,
+                    "bodies": bodies,
+                    "vectors": (
+                        {
+                            "vector_id": f"force-{frame_id}",
+                            "kind": "commanded_force",
+                            "origin_m": tuple(float(value) for value in cube_position),
+                            "vector": tuple(float(value) for value in self.last_applied_force_n),
+                            "frame": "world",
+                            "units": "N",
+                            "label": "bounded external force command",
+                        },
+                    ),
+                    "target_region": {
+                        "center_m": self.config.target_position_m,
+                        "radius_m": 0.035,
+                        "label": "target",
+                    },
+                    "camera_hint": {"preset": "tabletop", "target_m": self.config.target_position_m},
+                },
+            }
         )
 
     def start_recording(self, output_path: str | Path, stride: int = 4) -> None:
@@ -431,9 +524,7 @@ class NewtonWorld:
                 error = waypoint - pos
                 if float(np.linalg.norm(error)) < 0.006 and float(np.linalg.norm(vel[:3])) < 0.025:
                     break
-                force = (
-                    38.0 * error - 5.0 * vel[:3] + np.array([0.0, 0.0, assumed_mass_kg * GRAVITY])
-                )
+                force = 38.0 * error - 5.0 * vel[:3] + np.array([0.0, 0.0, assumed_mass_kg * GRAVITY])
                 magnitude = float(np.linalg.norm(force))
                 if magnitude > max_force_n:
                     force *= max_force_n / magnitude
@@ -450,7 +541,15 @@ class TruthEnvironment(NewtonWorld):
 
 class BeliefEnvironment(NewtonWorld):
     @classmethod
-    def from_belief(cls, belief: PhysicalBelief, config: WorldConfig) -> BeliefEnvironment:
+    def from_belief(
+        cls,
+        belief: PhysicalBelief,
+        config: WorldConfig,
+        *,
+        control_gate: StepControl | None = None,
+        event_sink: EventIntentSink | None = None,
+        scenario_id: str | None = None,
+    ) -> BeliefEnvironment:
         return cls(
             PhysicalParameters(
                 mass_kg=belief.parameters[ParameterName.MASS].mean,
@@ -463,11 +562,21 @@ class BeliefEnvironment(NewtonWorld):
                 ),
             ),
             config,
+            control_gate=control_gate,
+            event_sink=event_sink,
+            scene="belief",
+            scenario_id=scenario_id,
+            belief_revision=belief.revision,
         )
 
 
 def rollout_candidate(
-    belief: PhysicalBelief, candidate: ActionCandidate, config: WorldConfig
+    belief: PhysicalBelief,
+    candidate: ActionCandidate,
+    config: WorldConfig,
+    *,
+    control_gate: StepControl | None = None,
+    event_sink: EventIntentSink | None = None,
 ) -> PredictedOutcome:
     rollout_config = WorldConfig(
         device=config.device,
@@ -479,7 +588,13 @@ def rollout_candidate(
         include_robot=False,
         seed=config.seed,
     )
-    world = BeliefEnvironment.from_belief(belief, rollout_config)
+    world = BeliefEnvironment.from_belief(
+        belief,
+        rollout_config,
+        control_gate=control_gate,
+        event_sink=event_sink,
+        scenario_id=candidate.action_id,
+    )
     try:
         world.settle()
         if candidate.kind == "push":

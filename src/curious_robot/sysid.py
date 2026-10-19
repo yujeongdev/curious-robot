@@ -142,9 +142,7 @@ def estimate_dynamic_friction(
             [sample.normal_load_standard_deviation_n for sample in samples],
             dtype=float,
         )
-        normal_relative_std = float(
-            np.sqrt(np.mean(load_stds**2)) / max(float(np.mean(normal)), 1e-9)
-        )
+        normal_relative_std = float(np.sqrt(np.mean(load_stds**2)) / max(float(np.mean(normal)), 1e-9))
     std = max(math.hypot(fit_std, mu * normal_relative_std), 0.01)
     mismatch = ()
     if residual_std > max(0.15, 0.15 * float(np.median(np.abs(force)))):

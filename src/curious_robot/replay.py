@@ -33,6 +33,7 @@ def verify_reexecution(manifest_path: str | Path) -> dict[str, object]:
             static_friction=truth["static_friction"],
             dynamic_friction=truth["dynamic_friction"],
             com_m=tuple(truth["com_m"]),
+            restitution=truth.get("restitution", 0.0),
         ),
         config,
     )
@@ -47,11 +48,11 @@ def verify_reexecution(manifest_path: str | Path) -> dict[str, object]:
             tuple(manifest["initial_joint_qd"]),
             tuple(manifest["initial_joint_target_q"]),
         )
-        action = manifest["selected_action"]
-        if action["kind"] == "push":
-            world.execute_push(tuple(action["target_m"]), action["max_force_n"])
-        else:
-            world.execute_pick_place(tuple(action["target_m"]), action["max_force_n"])
+        control_trace = manifest.get("control_sequence_force_world_n")
+        if not isinstance(control_trace, list):
+            raise ValueError("reexecution manifest is missing the low-level control trace")
+        for force_world_n in control_trace:
+            world.step(tuple(float(value) for value in force_world_n))
         actual = list(world.state_trace)
     finally:
         world.close()

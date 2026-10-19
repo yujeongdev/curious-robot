@@ -307,7 +307,12 @@ class RobotTools:
         if self.belief_world is not None:
             self.belief_world.close()
         belief_config = replace(self.config, include_robot=False, seed=self.config.seed + 1000)
-        self.belief_world = BeliefEnvironment.from_belief(self.belief, belief_config)
+        self.belief_world = BeliefEnvironment.from_belief(
+            self.belief,
+            belief_config,
+            control_gate=self.reality.control_gate,
+            event_sink=self.reality.event_sink,
+        )
         self._record("create_belief_simulation", {}, {"revision": self.belief.revision})
         return self.belief_world
 
@@ -319,7 +324,13 @@ class RobotTools:
         return self.belief
 
     def simulate_candidate_action(self, candidate: ActionCandidate) -> PredictedOutcome:
-        outcome = rollout_candidate(self.belief, candidate, self.config)
+        outcome = rollout_candidate(
+            self.belief,
+            candidate,
+            self.config,
+            control_gate=self.reality.control_gate,
+            event_sink=self.reality.event_sink,
+        )
         self._record("simulate_candidate_action", candidate.model_dump(), outcome.model_dump())
         return outcome
 

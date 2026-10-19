@@ -150,21 +150,23 @@ def candidate_actions(target_m: tuple[float, float, float]) -> tuple[ActionCandi
     )
 
 
+def action_utility(outcome: PredictedOutcome) -> float:
+    """Return the inspectable multi-term utility used for action selection."""
+    return (
+        outcome.success_probability
+        - 4.0 * outcome.target_error_m
+        - 0.010 * outcome.peak_force_n
+        - 0.015 * outcome.duration_s
+        + 0.05 * max(outcome.tipping_margin, -1.0)
+    )
+
+
 def select_next_action(outcomes: Sequence[PredictedOutcome]) -> ActionDecision:
     feasible = [o for o in outcomes if o.feasible]
     if not feasible:
         raise RuntimeError("no feasible manipulation action")
 
-    def utility(o: PredictedOutcome) -> float:
-        return (
-            o.success_probability
-            - 4.0 * o.target_error_m
-            - 0.010 * o.peak_force_n
-            - 0.015 * o.duration_s
-            + 0.05 * max(o.tipping_margin, -1.0)
-        )
-
-    selected = sorted(feasible, key=lambda o: (-utility(o), o.action_id))[0]
+    selected = sorted(feasible, key=lambda o: (-action_utility(o), o.action_id))[0]
     return ActionDecision(
         selected_action_id=selected.action_id,
         outcomes=tuple(outcomes),

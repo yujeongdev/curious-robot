@@ -32,9 +32,7 @@ def test_newton_experiments_identify_hidden_parameters_without_truth_api(tools: 
     assert dynamic.mean == pytest.approx(0.34, abs=0.06)
     assert all("truth" not in record.model_dump_json() for record in tools.records)
     assert all(
-        sample.measured_normal_load_n is None
-        for evidence in tools.evidence
-        for sample in evidence.samples
+        sample.measured_normal_load_n is None for evidence in tools.evidence for sample in evidence.samples
     )
     assert any(record.tool == "return_object_home" for record in tools.records)
 
@@ -68,8 +66,7 @@ def test_motion_samples_do_not_expose_hidden_mass_as_normal_load() -> None:
 def test_pick_place_gravity_compensation_uses_assumed_mass() -> None:
     config = WorldConfig(device="cuda:0", include_robot=False, seed=23, force_noise_std=0.0)
     worlds = [
-        TruthEnvironment(PhysicalParameters(hidden_mass, 0.58, 0.34), config)
-        for hidden_mass in (0.12, 0.41)
+        TruthEnvironment(PhysicalParameters(hidden_mass, 0.58, 0.34), config) for hidden_mass in (0.12, 0.41)
     ]
     try:
         first_forces = [
