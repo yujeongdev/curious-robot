@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "verified_on": "2026-10-20",
+  "runtime": {
+    "newton": "1.7.0",
+    "warp": "1.18.0",
+    "mujoco": "3.15.0",
+    "mujoco_warp": "3.15.0",
+    "gpu": "NVIDIA GeForce RTX 4080 SUPER",
+    "driver": "580.173.02",
+    "python": "3.12.11"
+  },
+  "capabilities": [
+    {
+      "name": "rigid_articulation_and_contact",
+      "reference": "newton/_src/solvers/mujoco/solver_mujoco.py@v1.7.0",
+      "entry_point": "newton.solvers.SolverMuJoCo",
+      "status": "verified_gpu",
+      "limitations": "DISTANCE joints are dropped; ROD joints are unsupported.",
+      "chosen_implementation": "MuJoCo Warp native contacts in independent truth and belief worlds"
+    },
+    {
+      "name": "franka_panda_with_gripper",
+      "reference": "newton/examples/robot/example_robot_panda_hydro.py@v1.7.0",
+      "entry_point": "ModelBuilder.add_urdf(download_asset('franka_emika_panda'))",
+      "status": "verified_gpu",
+      "limitations": "IK finds a configuration but does not prove collision-free dynamic feasibility.",
+      "chosen_implementation": "FR3 URDF, PD joint targets, independently commanded finger joints"
+    },
+    {
+      "name": "contact_force_sensing",
+      "reference": "newton/_src/sensors/sensor_contact.py@v1.7.0",
+      "entry_point": "Solver observables CONTACT_F and SensorContact.total_force",
+      "status": "native_experimental",
+      "limitations": "SensorContact aggregates linear force, not a complete wrist moment.",
+      "chosen_implementation": "bounded actuator-reaction virtual sensor with explicit producer metadata"
+    },
+    {
+      "name": "wrist_joint_wrench",
+      "reference": "docs/concepts/solver_observables.rst@v1.7.0",
+      "entry_point": "SolverMuJoCo ObservableKind.BODY_PARENT_F",
+      "status": "supported",
+      "limitations": "Joint wrench requires tare, sign, and frame validation.",
+      "chosen_implementation": "application sensor boundary; actuator reaction is the MVP fallback"
+    },
+    {
+      "name": "separate_static_dynamic_friction",
+      "reference": "newton/_src/sim/builder.py ShapeConfig@v1.7.0",
+      "entry_point": "ShapeConfig.mu plus state.body_f correction",
+      "status": "fallback_implemented",
+      "limitations": "Newton exposes one surface mu; correction has one-substep state latency.",
+      "chosen_implementation": "native mu_static breakaway plus velocity-dependent Warp-compatible external correction"
+    },
+    {
+      "name": "differentiable_mujoco_contact",
+      "reference": "docs/solvers/index.rst@v1.7.0",
+      "entry_point": null,
+      "status": "unsupported",
+      "limitations": "SolverMuJoCo is marked non-differentiable.",
+      "chosen_implementation": "bounded SciPy robust least squares and finite-difference/black-box calibration"
+    },
+    {
+      "name": "visual_state_replay",
+      "reference": "newton/_src/viewer/viewer_file.py@v1.7.0",
+      "entry_point": "newton.viewer.ViewerFile",
+      "status": "verified",
+      "limitations": "State playback does not reproduce solver computation.",
+      "chosen_implementation": "scene_replay.bin plus official replay_viewer UI"
+    },
+    {
+      "name": "deterministic_reexecution",
+      "reference": "warp.DeterministicMode.RUN_TO_RUN",
+      "entry_point": "curious_robot.replay.verify_reexecution",
+      "status": "implemented",
+      "limitations": "Cross-GPU and cross-driver bitwise identity is not promised.",
+      "chosen_implementation": "versioned manifest, exact control trace, trajectory tolerances, empirical report"
+    }
+  ]
+}

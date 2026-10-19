@@ -13,6 +13,24 @@ The truth and belief environments are independent NVIDIA Newton simulations.
 Ground-truth mass and friction are owned by the evaluation harness and cannot
 be accessed through the robot's observation or planning interfaces.
 
+The design intent is to make the *discovery itself* the product. A successful
+run should be understandable without reading source: the CLI narrates every
+experiment and belief update, while an HTML timeline, plots, GIF, measurements,
+and replay preserve the evidence behind the final manipulation.
+
+```mermaid
+flowchart LR
+  T[Hidden Newton truth] -->|observations + measured forces| A[Agent tools]
+  A --> P[Active experiment planner]
+  P --> C[Bounded deterministic controller]
+  C --> T
+  A --> S[System identification]
+  S --> B[Independent Newton belief world]
+  B --> D[Push vs pick rollouts]
+  D --> C
+  T --> V[Verification + replay evidence]
+```
+
 ## Quick start
 
 Requirements: Linux, Python 3.12 or 3.13, and an NVIDIA R580+ driver for the
@@ -28,6 +46,30 @@ uv run pytest
 Use `--device cpu` for a portable run. The run creates structured decisions,
 measurements, belief history, replay state, parameter and trajectory plots,
 and a final result summary under the output directory.
+
+During a run the CLI emits stages such as `REASON`, `ACT / MEASURE`, `LEARN`,
+`PREDICT`, and `VERIFY`. Open `artifacts/demo/discovery_timeline.html` for the
+visual evidence trail, or view the generated `artifacts/demo/discovery.gif`.
+
+## Demo and replay
+
+Each run generates rather than checks in a stale demo:
+
+- `discovery.gif` — animated prior-to-posterior parameter discovery;
+- `discovery_timeline.html` — inspectable belief and tool-call timeline;
+- `scene_replay.bin` — Newton visual replay with pause, seek, and frame step;
+- `reexecution.json` — deterministic physics re-execution manifest;
+- `estimated_vs_true.png`, `predicted_vs_observed.png`, `final_result.png`;
+- `measurements.csv`, `decision_timeline.json`, and environment metadata.
+
+```bash
+uv run curious-robot-replay --visual artifacts/demo/scene_replay.bin
+uv run curious-robot-replay artifacts/demo/reexecution.json --verify
+```
+
+For a portfolio video, capture the Newton replay beside
+`discovery_timeline.html`; the generated GIF is the lightweight README preview
+until a narrated full-scene recording is added under `docs/media/`.
 
 ## Honest scope
 
