@@ -17,16 +17,15 @@ def verify_reexecution(manifest_path: str | Path) -> dict[str, object]:
     manifest = json.loads(path.read_text())
     truth = manifest["evaluation_truth"]
     world_config = manifest["world_config"]
-    config = WorldConfig(
-        device=world_config["device"],
-        dt_s=world_config["dt_s"],
+    config_fields = WorldConfig.__dataclass_fields__
+    config_values = {key: value for key, value in world_config.items() if key in config_fields}
+    config_values.update(
         initial_position_m=tuple(manifest["initial_cube_position_m"]),
-        target_position_m=tuple(world_config["target_position_m"]),
         observation_noise_std=0.0,
         force_noise_std=0.0,
-        include_robot=world_config["include_robot"],
         seed=manifest["seed"],
     )
+    config = WorldConfig(**config_values)
     world = TruthEnvironment(
         PhysicalParameters(
             mass_kg=truth["mass_kg"],
@@ -48,11 +47,12 @@ def verify_reexecution(manifest_path: str | Path) -> dict[str, object]:
             tuple(manifest["initial_joint_qd"]),
             tuple(manifest["initial_joint_target_q"]),
         )
-        control_trace = manifest.get("control_sequence_force_world_n")
+        control_trace = manifest.get("control_sequence_joint_target_q")
         if not isinstance(control_trace, list):
-            raise ValueError("reexecution manifest is missing the low-level control trace")
-        for force_world_n in control_trace:
-            world.step(tuple(float(value) for value in force_world_n))
+            raise ValueError("reexecution manifest is missing the low-level joint-target trace")
+        for joint_target_q in control_trace:
+            world.control.joint_target_q.assign(tuple(float(value) for value in joint_target_q))
+            world.step()
         actual = list(world.state_trace)
     finally:
         world.close()

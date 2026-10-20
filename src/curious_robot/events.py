@@ -271,6 +271,11 @@ class PredictionPayload(PublicModel):
     tipping_margin: float
     feasible: bool
     reasons: tuple[str, ...] = ()
+    world_instance_id: UUID | None = None
+    world_config_id: str | None = None
+    experiment_protocol_id: str | None = None
+    belief_revision: int | None = Field(default=None, ge=0)
+    belief_snapshot_id: str | None = None
 
 
 class ActionSelectedPayload(PublicModel):

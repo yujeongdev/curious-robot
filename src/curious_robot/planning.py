@@ -18,16 +18,6 @@ from .schemas import (
 
 DEFAULT_EXPERIMENTS = (
     ExperimentCandidate(
-        candidate_id="weigh_quasistatic",
-        experiment="weigh",
-        targets=(ParameterName.MASS,),
-        expected_std_fraction=0.12,
-        duration_s=2.5,
-        cost=0.10,
-        risk=0.12,
-        max_force_n=12.0,
-    ),
-    ExperimentCandidate(
         candidate_id="static_breakaway_ramp",
         experiment="probe_static",
         targets=(ParameterName.STATIC_FRICTION,),
@@ -42,10 +32,10 @@ DEFAULT_EXPERIMENTS = (
         experiment="probe_dynamic",
         targets=(ParameterName.DYNAMIC_FRICTION,),
         expected_std_fraction=0.20,
-        duration_s=2.2,
-        cost=0.10,
-        risk=0.10,
-        max_force_n=8.0,
+        duration_s=4.0,
+        cost=0.14,
+        risk=0.12,
+        max_force_n=12.0,
     ),
     ExperimentCandidate(
         candidate_id="multi_orientation_com",
@@ -137,7 +127,7 @@ def candidate_actions(target_m: tuple[float, float, float]) -> tuple[ActionCandi
             kind="push",
             target_m=target_m,
             speed_m_s=0.04,
-            max_force_n=12.0,
+            max_force_n=15.0,
             push_height_m=0.015,
         ),
         ActionCandidate(
@@ -177,10 +167,15 @@ def select_next_action(outcomes: Sequence[PredictedOutcome]) -> ActionDecision:
     )
 
 
-def task_relevance_for_actions(actions: Sequence[ActionCandidate]) -> dict[ParameterName, float]:
+def task_relevance_for_actions(
+    actions: Sequence[ActionCandidate],
+    *,
+    available_kinds: frozenset[str] | None = None,
+) -> dict[ParameterName, float]:
     """Finite-difference-inspired baseline relevance for currently available actions."""
-    has_push = any(a.kind == "push" for a in actions)
-    has_pick = any(a.kind == "pick_place" for a in actions)
+    available = available_kinds or frozenset(action.kind for action in actions)
+    has_push = "push" in available and any(action.kind == "push" for action in actions)
+    has_pick = "pick_place" in available and any(action.kind == "pick_place" for action in actions)
     return {
         ParameterName.MASS: 0.65 if has_pick else 0.15,
         ParameterName.STATIC_FRICTION: 1.0 if has_push else 0.10,

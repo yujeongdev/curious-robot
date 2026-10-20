@@ -14,6 +14,10 @@ def sample(t: float, *, force_x: float = 0.0, force_z: float = 0.0, vx: float = 
         position_m=(t * vx, 0.0, 0.025),
         velocity_m_s=(vx, 0.0, 0.0),
         measured_force_n=(force_x, 0.0, force_z),
+        contact_valid=True,
+        contact_pair=("fixture_pusher", "fixture_cube"),
+        contact_position_m=(t * vx, 0.0, 0.025),
+        contact_force_producer="validated fixture contact sensor",
     )
 
 
@@ -88,6 +92,10 @@ def test_dynamic_friction_uses_validated_normal_load_measurements_when_available
                 measured_normal_load_n=measured_normal_load,
                 normal_load_standard_deviation_n=0.01,
                 normal_load_producer="validated fixture load cell",
+                contact_valid=True,
+                contact_pair=("fixture_pusher", "fixture_cube"),
+                contact_position_m=(i * 0.002, 0.0, 0.025),
+                contact_force_producer="validated fixture contact sensor",
             )
             for i in range(20)
         ),
@@ -137,6 +145,10 @@ def test_black_box_surrogate_calibration_reports_holdout_error() -> None:
                 position_m=(position, 0.0, 0.025),
                 velocity_m_s=(velocity, 0.0, 0.0),
                 measured_force_n=(force, 0.0, 0.0),
+                contact_valid=True,
+                contact_pair=("fixture_pusher", "fixture_cube"),
+                contact_position_m=(position, 0.0, 0.025),
+                contact_force_producer="validated fixture contact sensor",
             )
         )
         velocity += (force - mu * mass * GRAVITY) / mass * dt
@@ -148,6 +160,29 @@ def test_black_box_surrogate_calibration_reports_holdout_error() -> None:
     assert result["success"]
     assert result["effective_dynamic_friction"] == pytest_approx(mu, abs=0.02)
     assert "validation_position_rmse_m" in result
+
+
+def test_dynamic_friction_rejects_insufficient_contact_coverage() -> None:
+    mass = estimate(ParameterName.MASS, 0.2, 0.02, (0.08, 0.45))
+    static = estimate(ParameterName.STATIC_FRICTION, 0.62, 0.01, (0.2, 0.9))
+    samples = [sample(i * 0.05, force_x=0.7, vx=0.04) for i in range(20)]
+    samples[:12] = [item.model_copy(update={"contact_valid": False}) for item in samples[:12]]
+    evidence = ExperimentEvidence(
+        evidence_id="dynamic-contact-loss",
+        experiment="dynamic_friction",
+        samples=tuple(samples),
+        metadata={
+            "contact_coverage_fraction": 0.4,
+            "minimum_contact_coverage_fraction": 0.8,
+            "minimum_valid_contact_samples": 5,
+        },
+        quality_flags=("insufficient_contact_coverage",),
+    )
+
+    result = estimate_dynamic_friction(evidence, mass, static)
+
+    assert result.status == "unidentifiable"
+    assert "maintained robot-cube contact coverage" in result.mismatch_notes[0]
 
 
 def pytest_approx(value: float, **kwargs: float):

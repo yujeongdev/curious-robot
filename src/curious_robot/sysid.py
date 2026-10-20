@@ -40,10 +40,22 @@ def estimate_mass(evidence: ExperimentEvidence, noise_floor_fraction: float = 0.
 
 def estimate_static_friction(evidence: ExperimentEvidence, mass: ParameterEstimate) -> ParameterEstimate:
     """Return an interval-censored coefficient from measured breakaway force."""
+    samples = [sample for sample in evidence.samples if sample.contact_valid]
+    minimum_samples = int(evidence.metadata.get("minimum_valid_contact_samples", 1))
+    coverage = float(evidence.metadata.get("contact_coverage_fraction", 1.0))
+    minimum_coverage = float(evidence.metadata.get("minimum_contact_coverage_fraction", 0.0))
+    if len(samples) < minimum_samples or coverage < minimum_coverage:
+        return _unidentifiable(
+            ParameterName.STATIC_FRICTION,
+            (0.20, 0.90),
+            "1",
+            evidence,
+            "insufficient validated robot-cube contact coverage",
+        )
     motion_threshold = float(evidence.metadata.get("motion_threshold_m_s", 0.01))
-    moving = [i for i, s in enumerate(evidence.samples) if abs(s.velocity_m_s[0]) >= motion_threshold]
+    moving = [i for i, s in enumerate(samples) if abs(s.velocity_m_s[0]) >= motion_threshold]
     if not moving:
-        hold = max((abs(s.measured_force_n[0]) for s in evidence.samples), default=0.0)
+        hold = max((abs(s.measured_force_n[0]) for s in samples), default=0.0)
         lo = float(np.clip(hold / (mass.interval95[1] * GRAVITY), 0.2, 0.9))
         return ParameterEstimate(
             name=ParameterName.STATIC_FRICTION,
@@ -58,18 +70,29 @@ def estimate_static_friction(evidence: ExperimentEvidence, mass: ParameterEstima
             assumptions=("horizontal table",),
         )
     first = moving[0]
-    pre = evidence.samples[:first]
+    pre = samples[:first]
     hold = max((abs(s.measured_force_n[0]) for s in pre), default=0.0)
-    brk = abs(evidence.samples[first].measured_force_n[0])
+    brk = abs(samples[first].measured_force_n[0])
     # Preserve coverage under finite force increments and sensor noise rather
     # than reporting an unjustifiably sharp contact-event boundary.
     discretization_margin = float(evidence.metadata.get("force_increment_n", 0.0)) / (
         max(mass.mean, 1e-6) * GRAVITY
     )
-    lo = float(np.clip(hold / (mass.interval95[1] * GRAVITY) - discretization_margin, 0.2, 0.9))
+    model_margin = (
+        float(evidence.metadata.get("force_model_discrepancy_fraction", 0.0))
+        * brk
+        / (max(mass.mean, 1e-6) * GRAVITY)
+    )
+    lo = float(
+        np.clip(
+            hold / (mass.interval95[1] * GRAVITY) - discretization_margin - model_margin,
+            0.2,
+            0.9,
+        )
+    )
     hi = float(
         np.clip(
-            brk / (max(mass.interval95[0], 1e-6) * GRAVITY) + discretization_margin,
+            brk / (max(mass.interval95[0], 1e-6) * GRAVITY) + discretization_margin + model_margin,
             lo,
             0.9,
         )
@@ -94,10 +117,25 @@ def estimate_dynamic_friction(
     mass: ParameterEstimate,
     static_friction: ParameterEstimate,
 ) -> ParameterEstimate:
-    samples = [s for s in evidence.samples if abs(s.velocity_m_s[0]) > 0.015]
-    if len(samples) < 5:
+    minimum_samples = int(evidence.metadata.get("minimum_valid_contact_samples", 5))
+    coverage = float(evidence.metadata.get("contact_coverage_fraction", 1.0))
+    minimum_coverage = float(evidence.metadata.get("minimum_contact_coverage_fraction", 0.0))
+    if coverage < minimum_coverage:
         return _unidentifiable(
-            ParameterName.DYNAMIC_FRICTION, (0.10, 0.60), "1", evidence, "insufficient sliding samples"
+            ParameterName.DYNAMIC_FRICTION,
+            (0.10, 0.60),
+            "1",
+            evidence,
+            "insufficient maintained robot-cube contact coverage",
+        )
+    samples = [s for s in evidence.samples if s.contact_valid and abs(s.velocity_m_s[0]) > 0.015]
+    if len(samples) < minimum_samples:
+        return _unidentifiable(
+            ParameterName.DYNAMIC_FRICTION,
+            (0.10, 0.60),
+            "1",
+            evidence,
+            "insufficient validated-contact sliding samples",
         )
     t = np.asarray([s.timestamp_s for s in samples])
     velocity = np.asarray([s.velocity_m_s[0] for s in samples])
@@ -154,7 +192,7 @@ def estimate_dynamic_friction(
         interval95=(max(0.10, mu - 1.96 * std), min(upper, mu + 1.96 * std)),
         physical_bounds=(0.10, 0.60),
         units="1",
-        status="identified",
+        status="bounded" if mismatch else "identified",
         evidence_ids=(evidence.evidence_id,),
         method=f"bounded robust least squares: F = m a + mu N sign(v); {normal_source}",
         assumptions=normal_assumptions,
@@ -191,7 +229,9 @@ def calibrate_coulomb_surrogate(
     surrogate integrates the measured actuator force through a Coulomb model;
     SciPy supplies finite-difference Jacobians for a bounded robust fit.
     """
-    samples = [sample for sample in evidence.samples if sample.velocity_m_s[0] > 0.015]
+    samples = [
+        sample for sample in evidence.samples if sample.contact_valid and sample.velocity_m_s[0] > 0.015
+    ]
     if len(samples) < 12:
         return {"success": False, "reason": "insufficient sliding samples"}
     split = max(8, int(len(samples) * 2 / 3))

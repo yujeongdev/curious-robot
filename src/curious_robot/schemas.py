@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -72,6 +73,13 @@ class MotionSample(FrozenModel):
     position_m: Vec3
     velocity_m_s: Vec3
     measured_force_n: Vec3
+    contact_valid: bool = False
+    contact_pair: tuple[str, str] | None = None
+    contact_position_m: Vec3 | None = None
+    contact_force_producer: str | None = None
+    experiment_id: str | None = None
+    command_id: str | None = None
+    experiment_phase: Literal["unassigned", "approach", "contact", "contact_lost"] = "unassigned"
     measured_normal_load_n: float | None = Field(default=None, ge=0.0)
     normal_load_standard_deviation_n: float | None = Field(default=None, ge=0.0)
     normal_load_producer: str | None = None
@@ -85,6 +93,9 @@ class MotionSample(FrozenModel):
         )
         if any(value is not None for value in fields) and any(value is None for value in fields):
             raise ValueError("normal-load value, uncertainty, and producer must be supplied together")
+        contact_fields = (self.contact_pair, self.contact_position_m, self.contact_force_producer)
+        if self.contact_valid and any(value is None for value in contact_fields):
+            raise ValueError("valid contact requires pair, position, and force producer")
         return self
 
 
@@ -177,6 +188,12 @@ class PredictedOutcome(FrozenModel):
     duration_s: float
     feasible: bool
     rationale: str
+    scenario_id: str | None = None
+    world_instance_id: UUID | None = None
+    world_config_id: str | None = None
+    experiment_protocol_id: str | None = None
+    belief_revision: int | None = Field(default=None, ge=0)
+    belief_snapshot_id: str | None = None
 
 
 class ActionDecision(FrozenModel):

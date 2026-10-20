@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import importlib.metadata
 import json
+import os
 import platform
+import secrets
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID, uuid4
@@ -25,6 +28,8 @@ from .environment import PhysicalParameters, StepControl, TruthEnvironment, Worl
 from .events import DiscoveryStage
 from .planner_adapters import DeterministicPlannerAdapter, PlannerAdapter
 from .planning import action_utility, candidate_actions
+from .ports import RobotRealityAdapter
+from .protocol import protocol_sha256
 from .schemas import ActionResult, EpisodeResult, ParameterName, PhysicalBelief
 from .surface import SurfaceFamily, SurfaceProfile, sample_surface_profile
 from .sysid import (
@@ -143,7 +148,16 @@ def run_episode(
 ) -> EpisodeResult:
     output = Path(output_directory)
     output.mkdir(parents=True, exist_ok=True)
-    rng = np.random.default_rng(seed)
+    # Public seeds control controllers and observation noise. Hidden scenario
+    # physics uses independent entropy so an open-source agent cannot derive
+    # truth values from the public run configuration.
+    private_seed_override = os.environ.get("CURIOUS_ROBOT_EVALUATOR_SCENARIO_SEED")
+    scenario_seed = (
+        int(private_seed_override, 10) if private_seed_override is not None else secrets.randbits(63)
+    )
+    if not 0 <= scenario_seed < 2**63:
+        raise ValueError("CURIOUS_ROBOT_EVALUATOR_SCENARIO_SEED must be in [0, 2**63)")
+    scenario_rng = np.random.default_rng(scenario_seed)
     bounds = material_bounds or {}
     mass_range = bounds.get("mass_kg", (0.08, 0.45))
     if not isinstance(mass_range, (list, tuple)) or len(mass_range) != 2:
@@ -153,16 +167,31 @@ def run_episode(
         raise ValueError("material_bounds.mass_kg must satisfy 0.02 <= min <= max <= 2.0")
     family_value = bounds.get("surface_family")
     surface_family = SurfaceFamily(str(family_value)) if family_value else None
-    mass = float(rng.uniform(mass_low, mass_high))
-    surface = sample_surface_profile(seed + 1_000, surface_family)
-    initial = (float(rng.uniform(-0.16, -0.10)), float(rng.uniform(-0.03, 0.03)), 0.025)
+    mass = float(scenario_rng.uniform(mass_low, mass_high))
+    surface = sample_surface_profile(scenario_seed + 1_000, surface_family)
+    initial = (
+        float(scenario_rng.uniform(-0.16, -0.10)),
+        float(scenario_rng.uniform(-0.03, 0.03)),
+        0.025,
+    )
     truth = PhysicalParameters(
         mass,
         surface.effective_static_friction,
         surface.effective_dynamic_friction,
         restitution=surface.restitution,
     )
-    config = WorldConfig(
+    scenario_commitment = hashlib.sha256(
+        json.dumps(
+            {
+                "scenario_seed": scenario_seed,
+                "truth": asdict(truth),
+                "surface": asdict(surface),
+                "initial_position_m": initial,
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    truth_config = WorldConfig(
         device=device,
         initial_position_m=initial,
         include_robot=include_robot,
@@ -171,13 +200,21 @@ def run_episode(
     episode_events = _EpisodeEvents(event_sink)
     reality = TruthEnvironment(
         truth,
-        config,
+        truth_config,
         control_gate=control_gate,
         event_sink=event_sink,
         scene="truth",
         scenario_id="simulated-reality",
     )
-    tools = RobotTools(reality, initial_belief(), config)
+    initial_observation = reality.observe_object_pose()
+    config = replace(truth_config, initial_position_m=initial_observation.pose.position_m)
+    tools = RobotTools(
+        RobotRealityAdapter(reality),
+        initial_belief(),
+        config,
+        control_gate=control_gate,
+        event_sink=event_sink,
+    )
     planner = planner or DeterministicPlannerAdapter()
     belief_history: list[PhysicalBelief] = [tools.belief]
     completed: set[str] = set()
@@ -234,19 +271,23 @@ def run_episode(
             )
             episode_events.enter(DiscoveryStage.MEASURE)
             if selected == "weigh_quasistatic":
-                estimate = estimate_mass(tools.weigh_object())
+                estimates = [estimate_mass(tools.weigh_object())]
             elif selected == "static_breakaway_ramp":
-                estimate = estimate_static_friction(
-                    tools.probe_static_friction(), tools.belief.parameters[ParameterName.MASS]
-                )
+                estimates = [
+                    estimate_static_friction(
+                        tools.probe_static_friction(), tools.belief.parameters[ParameterName.MASS]
+                    )
+                ]
             elif selected == "dynamic_controlled_slide":
-                estimate = estimate_dynamic_friction(
-                    tools.probe_dynamic_friction(),
-                    tools.belief.parameters[ParameterName.MASS],
-                    tools.belief.parameters[ParameterName.STATIC_FRICTION],
-                )
+                estimates = [
+                    estimate_dynamic_friction(
+                        tools.probe_dynamic_friction(),
+                        tools.belief.parameters[ParameterName.MASS],
+                        tools.belief.parameters[ParameterName.STATIC_FRICTION],
+                    )
+                ]
             else:
-                estimate = tools.estimate_center_of_mass()
+                estimates = [tools.estimate_center_of_mass()]
             evidence = tools.evidence[-1] if tools.evidence else None
             episode_events.emit(
                 "tool.completed",
@@ -261,6 +302,7 @@ def run_episode(
                 },
             )
             if evidence is not None:
+                accepted_samples = [sample for sample in evidence.samples if sample.contact_valid]
                 sample_count = min(40, len(evidence.samples))
                 sample_indices = np.linspace(0, len(evidence.samples) - 1, sample_count, dtype=int)
                 for sample_index in dict.fromkeys(int(index) for index in sample_indices):
@@ -270,8 +312,10 @@ def run_episode(
                         "measurement.sampled",
                         {
                             "evidence_id": evidence.evidence_id,
-                            "sensor_kind": "virtual_tool_wrench_and_pose",
-                            "producer": "bounded actuator reaction plus configured sensor noise",
+                            "sensor_kind": "native_contact_force_and_camera_pose",
+                            "producer": evidence.metadata.get(
+                                "producer", "Newton SensorContact robot-tool ↔ cube"
+                            ),
                             "frame": "world",
                             "units": "SI",
                             "values": {
@@ -279,7 +323,7 @@ def run_episode(
                                 "object_position_m": float(sample.position_m[0]),
                                 "object_velocity_mps": float(sample.velocity_m_s[0]),
                             },
-                            "valid": True,
+                            "valid": sample.contact_valid,
                         },
                         sim_time_s=sample.timestamp_s,
                     )
@@ -287,35 +331,40 @@ def run_episode(
                     "measurement.summary",
                     {
                         "evidence_id": evidence.evidence_id,
-                        "accepted_count": len(evidence.samples),
-                        "rejected_count": 0,
+                        "accepted_count": sum(sample.contact_valid for sample in evidence.samples),
+                        "rejected_count": sum(not sample.contact_valid for sample in evidence.samples),
                         "aggregate_values": {
                             "median_force_n": float(
                                 np.median(
-                                    [np.linalg.norm(sample.measured_force_n) for sample in evidence.samples]
+                                    [np.linalg.norm(sample.measured_force_n) for sample in accepted_samples]
                                 )
                             )
+                            if accepted_samples
+                            else 0.0
                         },
                         "quality_flags": list(evidence.quality_flags),
                     },
                 )
             episode_events.enter(DiscoveryStage.SYSTEM_IDENTIFICATION)
-            prior_estimate = tools.belief.parameters[estimate.name]
-            tools.update_physical_parameters([estimate])
+            prior_estimates = {
+                estimate.name: tools.belief.parameters[estimate.name] for estimate in estimates
+            }
+            tools.update_physical_parameters(estimates)
             belief_history.append(tools.belief)
-            episode_events.emit(
-                "belief.updated",
-                {
-                    "revision": tools.belief.revision,
-                    "parameter_name": estimate.name.value,
-                    "prior": _distribution(prior_estimate),
-                    "posterior": _distribution(estimate),
-                    "method": estimate.method,
-                    "evidence_ids": list(estimate.evidence_ids),
-                    "assumptions": list(estimate.assumptions),
-                    "mismatch_notes": list(estimate.mismatch_notes),
-                },
-            )
+            for estimate in estimates:
+                episode_events.emit(
+                    "belief.updated",
+                    {
+                        "revision": tools.belief.revision,
+                        "parameter_name": estimate.name.value,
+                        "prior": _distribution(prior_estimates[estimate.name]),
+                        "posterior": _distribution(estimate),
+                        "method": estimate.method,
+                        "evidence_ids": list(estimate.evidence_ids),
+                        "assumptions": list(estimate.assumptions),
+                        "mismatch_notes": list(estimate.mismatch_notes),
+                    },
+                )
             episode_events.enter(DiscoveryStage.UPDATE_SIMULATION)
             if tools.belief_world is not None:
                 episode_events.emit(
@@ -323,15 +372,16 @@ def run_episode(
                     {
                         "belief_revision": tools.belief.revision,
                         "world_instance_id": tools.belief_world.world_instance_id,
-                        "body_manifest_id": "cube-only-v1",
+                        "body_manifest_id": "franka-cube-v1",
                         "parameter_names": [parameter.value for parameter in ParameterName],
                     },
                 )
-            _log(
-                "LEARN",
-                f"{estimate.name.value}={estimate.mean:.4f} ± {1.96 * estimate.std:.4f}; "
-                f"belief revision={tools.belief.revision}",
-            )
+            for estimate in estimates:
+                _log(
+                    "LEARN",
+                    f"{estimate.name.value}={estimate.mean:.4f} ± {1.96 * estimate.std:.4f}; "
+                    f"belief revision={tools.belief.revision}",
+                )
             experiment_iteration += 1
 
         episode_events.enter(DiscoveryStage.PREDICT, iteration=experiment_iteration)
@@ -351,6 +401,13 @@ def run_episode(
                     "tipping_margin": outcome.tipping_margin,
                     "feasible": outcome.feasible,
                     "reasons": [outcome.rationale],
+                    "world_instance_id": (
+                        str(outcome.world_instance_id) if outcome.world_instance_id is not None else None
+                    ),
+                    "world_config_id": outcome.world_config_id,
+                    "experiment_protocol_id": outcome.experiment_protocol_id,
+                    "belief_revision": outcome.belief_revision,
+                    "belief_snapshot_id": outcome.belief_snapshot_id,
                 },
             )
             _log(
@@ -424,13 +481,17 @@ def run_episode(
         prediction_error = tools.evaluate_prediction_error(predicted, observed)
         episode_events.enter(DiscoveryStage.VERIFY)
         success = tools.verify_task_success()
+        verification = tools.records[-1].result_summary
         episode_events.emit(
             "verification.completed",
             {
                 "success": success,
-                "goal_predicates": {"target_region": success, "stable": success},
+                "goal_predicates": {
+                    "target_region": bool(verification["target_region"]),
+                    "stable": bool(verification["stable"]),
+                },
                 "prediction_residual_m": prediction_error,
-                "tolerance_m": 0.03,
+                "tolerance_m": config.target_radius_m,
             },
         )
         _log(
@@ -438,7 +499,7 @@ def run_episode(
             f"success={success}, prediction_error={prediction_error:.4f} m, observed_position={observed}",
         )
         episode_events.enter(DiscoveryStage.LEARN)
-        if prediction_error > 0.03:
+        if prediction_error > config.prediction_residual_tolerance_m:
             affected = (
                 ParameterName.DYNAMIC_FRICTION if selected_action.kind == "push" else ParameterName.MASS
             )
@@ -453,7 +514,9 @@ def run_episode(
                     ),
                     "mismatch_notes": (
                         *old.mismatch_notes,
-                        f"final action prediction residual {prediction_error:.4f} m exceeded 0.03 m",
+                        "final action prediction residual "
+                        f"{prediction_error:.4f} m exceeded configured "
+                        f"{config.prediction_residual_tolerance_m:.4f} m",
                     ),
                 }
             )
@@ -517,6 +580,8 @@ def run_episode(
             final_control_trace,
             final_state_trace,
             final_samples,
+            scenario_seed,
+            scenario_commitment,
         )
         episode_events.finish()
         return result
@@ -543,9 +608,11 @@ def _write_artifacts(
     initial_joint_q: tuple[float, ...],
     initial_joint_qd: tuple[float, ...],
     initial_joint_target_q: tuple[float, ...],
-    final_control_trace: list[tuple[float, float, float]],
+    final_control_trace: list[tuple[float, ...]],
     final_state_trace: list[tuple[float, float, float]],
     final_samples,
+    scenario_seed: int,
+    scenario_commitment: str,
 ) -> None:
     versions = {
         name: importlib.metadata.version(name)
@@ -559,6 +626,9 @@ def _write_artifacts(
         "solver": "newton.solvers.SolverMuJoCo / MuJoCo Warp",
         "dt_s": config.dt_s,
         "deterministic_mode": "RUN_TO_RUN",
+        "scenario_commitment": scenario_commitment,
+        "world_config": asdict(config),
+        "experiment_protocol": tools.protocol.model_dump(mode="json"),
         "limitations": [
             "GPU reductions may not be bitwise deterministic across hardware or driver versions",
             "MuJoCo contact dynamics are calibrated by black-box optimization, not autodiff",
@@ -590,6 +660,17 @@ def _write_artifacts(
                 "vx_m_s",
                 "force_x_n",
                 "measured_normal_n",
+                "contact_valid",
+                "contact_pair",
+                "contact_x_m",
+                "contact_y_m",
+                "contact_z_m",
+                "contact_force_producer",
+                "experiment_correlation_id",
+                "command_id",
+                "experiment_phase",
+                "protocol_schema_version",
+                "protocol_sha256",
             ]
         )
         for evidence in tools.evidence:
@@ -603,6 +684,15 @@ def _write_artifacts(
                         sample.velocity_m_s[0],
                         sample.measured_force_n[0],
                         sample.measured_normal_load_n,
+                        sample.contact_valid,
+                        "|".join(sample.contact_pair) if sample.contact_pair else None,
+                        *(sample.contact_position_m or (None, None, None)),
+                        sample.contact_force_producer,
+                        sample.experiment_id,
+                        sample.command_id,
+                        sample.experiment_phase,
+                        evidence.metadata.get("protocol_schema_version"),
+                        evidence.metadata.get("protocol_sha256"),
                     ]
                 )
     evaluator_truth = asdict(truth)
@@ -611,16 +701,10 @@ def _write_artifacts(
         "schema_version": 1,
         "seed": config.seed,
         "metadata": metadata,
-        "world_config": {
-            "device": config.device,
-            "dt_s": config.dt_s,
-            "target_position_m": config.target_position_m,
-            "include_robot": config.include_robot,
-            "solver_iterations": 20,
-            "nconmax": 256,
-            "njmax": 512,
-        },
+        "world_config": asdict(config),
+        "solver_config": {"iterations": 20, "nconmax": 256, "njmax": 512},
         "evaluation_truth": evaluator_truth,
+        "private_scenario_seed": scenario_seed,
         "initial_cube_position_m": initial_final_pose,
         "initial_cube_body_q": initial_body_q,
         "initial_cube_body_qd": initial_body_qd,
@@ -631,7 +715,7 @@ def _write_artifacts(
         "action_controller": {
             "assumed_mass_kg": result.final_belief.parameters[ParameterName.MASS].mean,
         },
-        "control_sequence_force_world_n": final_control_trace,
+        "control_sequence_joint_target_q": final_control_trace,
         "reference_trajectory_position_m": final_state_trace,
         "position_tolerance_m": 0.015 if config.include_robot else 0.005,
         "agent_tool_calls": [record.model_dump(mode="json") for record in tools.records],
@@ -639,11 +723,149 @@ def _write_artifacts(
         "sensor_configuration": {
             "pose_noise_std_m": config.observation_noise_std,
             "force_noise_std_n": config.force_noise_std,
-            "force_producer": "bounded actuator reaction",
+            "force_producer": "Newton SensorContact CONTACT_F robot-tool ↔ cube",
         },
     }
     (output / "reexecution.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    (output / "experiment_protocol.json").write_text(
+        json.dumps(tools.protocol.model_dump(mode="json"), indent=2) + "\n"
+    )
+    rollout_revision = next(
+        (outcome.belief_revision for outcome in outcomes if outcome.belief_revision is not None),
+        result.final_belief.revision,
+    )
+    rollout_belief = next(belief for belief in belief_history if belief.revision == rollout_revision)
+    rollout_records = [
+        {
+            "arguments": record.arguments,
+            "outcome": record.result_summary,
+        }
+        for record in tools.records
+        if record.tool == "simulate_candidate_action"
+    ]
+    (output / "belief_simulation_config.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "physical_parameters_source": "posterior",
+                "known_scene_and_numerical_config_source": "versioned WorldConfig",
+                "belief_revision": rollout_belief.revision,
+                "physical_belief": rollout_belief.model_dump(mode="json"),
+                "candidate_rollouts": rollout_records,
+                "post_execution_belief": result.final_belief.model_dump(mode="json"),
+                "world_config": asdict(config),
+                "solver": {
+                    "name": "SolverMuJoCo",
+                    "iterations": 20,
+                    "contact_capacity": 256,
+                    "constraint_capacity": 512,
+                },
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    (output / "value_provenance.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "known_model_constants": {
+                    "role": "versioned assumptions; never inferred from an episode",
+                    "examples": [
+                        "cube geometry",
+                        "gravity convention",
+                        "Franka kinematic description",
+                    ],
+                    "runtime_values_artifact": "metadata.json#/world_config",
+                },
+                "experiment_protocol": {
+                    "role": "operator-selected, bounded robot procedure; not a learned physical property",
+                    "source": "src/curious_robot/configs/physical_experiments.json",
+                    "run_snapshot": "experiment_protocol.json",
+                    "schema_version": tools.protocol.schema_version,
+                    "sha256": protocol_sha256(tools.protocol),
+                },
+                "learned_physical_parameters": {
+                    "role": "derived only from recorded robot observations by system identification",
+                    "runtime_input": "in-memory typed ExperimentEvidence records",
+                    "serialized_evidence": "measurements.csv",
+                    "posterior": "belief_simulation_config.json#/physical_belief",
+                    "belief_world_input": "belief_simulation_config.json",
+                },
+                "evaluator_only_hidden_parameters": {
+                    "role": "sampled simulated-reality secret; forbidden from agent/controller/SysID inputs",
+                    "location": "reexecution.json#/evaluation_truth",
+                    "availability": "terminal evaluator artifact only",
+                },
+                "dataflow": [
+                    "experiment_protocol.json -> robot joint targets",
+                    "robot observations -> measurements.csv",
+                    "typed ExperimentEvidence -> posterior belief",
+                    "posterior belief -> belief_simulation_config.json -> independent Newton belief world",
+                ],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    report_lines = [
+        "# Robot physical experiment report",
+        "",
+        f"- Run seed: `{result.seed}`",
+        "- Reality boundary: hidden-parameter Newton plant standing in for the future physical workspace",
+        "- Agent boundary: robot commands, camera/object pose, joint/FK state, and native contact force only",
+        "- Belief boundary: independently constructed Newton model from posterior estimates",
+        "",
+        "## Experiments",
+        "",
+    ]
+    for evidence in tools.evidence:
+        accepted_samples = [sample for sample in evidence.samples if sample.contact_valid]
+        forces = [abs(sample.measured_force_n[0]) for sample in accepted_samples]
+        displacement = (
+            evidence.samples[-1].position_m[0] - evidence.samples[0].position_m[0]
+            if evidence.samples
+            else 0.0
+        )
+        report_lines.extend(
+            [
+                f"### {evidence.experiment} — `{evidence.evidence_id}`",
+                "",
+                f"- Producer: {evidence.metadata.get('producer', 'declared in sensor configuration')}",
+                f"- Controller: {evidence.metadata.get('controller', 'n/a')}",
+                f"- Raw samples: {len(evidence.samples)}",
+                f"- Accepted native-contact samples: {len(accepted_samples)}",
+                f"- Rejected non-contact samples: {len(evidence.samples) - len(accepted_samples)}",
+                f"- Contact coverage: {len(accepted_samples) / max(len(evidence.samples), 1):.1%}",
+                f"- Peak measured horizontal contact force: {max(forces, default=0.0):.3f} N",
+                f"- Observed horizontal displacement: {displacement:.4f} m",
+                f"- Quality flags: {', '.join(evidence.quality_flags) or 'none'}",
+                "",
+            ]
+        )
+    report_lines.extend(["## Posterior", ""])
+    for name, estimate in result.final_belief.parameters.items():
+        report_lines.append(
+            f"- `{name.value}`: {estimate.mean:.4f} ± {1.96 * estimate.std:.4f} {estimate.units}; "
+            f"status={estimate.status}; method={estimate.method}"
+        )
+        for mismatch in estimate.mismatch_notes:
+            report_lines.append(f"  - Model mismatch: {mismatch}")
+    report_lines.extend(
+        [
+            "",
+            "## Decision and verification",
+            "",
+            f"- Selected action: `{result.selected_action}`",
+            f"- Task success: `{result.success}`",
+            f"- Prediction residual: {result.action_result.prediction_error_m:.4f} m",
+            "",
+            "> Ground-truth values are intentionally excluded from this agent-facing report. "
+            "They exist only in terminal evaluator artifacts.",
+        ]
+    )
+    (output / "experiment_report.md").write_text("\n".join(report_lines) + "\n")
     dynamic_evidence = next(
         (evidence for evidence in reversed(tools.evidence) if evidence.experiment == "dynamic_friction"),
         None,

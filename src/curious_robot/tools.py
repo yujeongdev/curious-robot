@@ -7,9 +7,10 @@ import uuid
 from dataclasses import dataclass, field, replace
 
 import numpy as np
+from pydantic_core import to_jsonable_python
 
 from .belief import update_belief
-from .environment import BeliefEnvironment, NewtonWorld, WorldConfig, rollout_candidate
+from .environment import BeliefEnvironment, EventIntentSink, StepControl, WorldConfig, rollout_candidate
 from .planning import (
     candidate_actions,
     task_relevance_for_actions,
@@ -26,6 +27,8 @@ from .planning import (
 from .planning import (
     select_next_action as choose_action,
 )
+from .ports import RobotRealityPort
+from .protocol import PhysicalExperimentProtocol, PushProtocol, load_default_protocol, protocol_sha256
 from .schemas import (
     ActionCandidate,
     ActionDecision,
@@ -34,6 +37,7 @@ from .schemas import (
     ExperimentPlan,
     ExperimentScore,
     JointState,
+    MotionSample,
     ParameterEstimate,
     ParameterName,
     PhysicalBelief,
@@ -51,13 +55,27 @@ from .sysid import estimate_dynamic_friction, estimate_mass, estimate_static_fri
 class RobotTools:
     """Only this façade is available to the agent; it contains no truth getter."""
 
-    reality: NewtonWorld
+    reality: RobotRealityPort
     belief: PhysicalBelief
     config: WorldConfig
     records: list[ToolCallRecord] = field(default_factory=list)
     evidence: list[ExperimentEvidence] = field(default_factory=list)
     belief_world: BeliefEnvironment | None = None
+    protocol: PhysicalExperimentProtocol = field(default_factory=load_default_protocol)
+    control_gate: StepControl | None = None
+    event_sink: EventIntentSink | None = None
     _sequence: int = 0
+
+    def __post_init__(self) -> None:
+        privileged = tuple(
+            name for name in ("_parameters", "state_0", "model") if hasattr(self.reality, name)
+        )
+        if privileged:
+            names = ", ".join(privileged)
+            raise TypeError(
+                "RobotTools requires a narrow RobotRealityPort adapter; "
+                f"privileged plant attributes exposed: {names}"
+            )
 
     def _record(self, tool: str, arguments: dict, result: dict) -> None:
         self.records.append(
@@ -65,8 +83,8 @@ class RobotTools:
                 sequence=self._sequence,
                 timestamp_s=self.reality.sim_time_s,
                 tool=tool,
-                arguments=arguments,
-                result_summary=result,
+                arguments=to_jsonable_python(arguments),
+                result_summary=to_jsonable_python(result),
             )
         )
         self._sequence += 1
@@ -76,7 +94,7 @@ class RobotTools:
         result = SceneObservation(
             object=self.reality.observe_object_pose(),
             target_center_m=self.config.target_position_m,
-            target_radius_m=0.035,
+            target_radius_m=self.config.target_radius_m,
             table_height_m=0.0,
             robot=self.get_robot_state(record=False),
         )
@@ -97,8 +115,8 @@ class RobotTools:
                 velocity_rad_s=tuple(velocity),
                 timestamp_s=self.reality.sim_time_s,
             ),
-            end_effector_pose=self.reality.tool_controller_pose(),
-            gripper_width_m=0.08,
+            end_effector_pose=self.reality.observe_tool_pose(),
+            gripper_width_m=float(sum(position[7:9])) if len(position) >= 9 else 0.0,
         )
         if record:
             self._record("get_robot_state", {}, {"joint_count": len(position)})
@@ -138,23 +156,21 @@ class RobotTools:
         return self.get_robot_state(record=False)
 
     def grasp_object(self) -> bool:
-        object_position = np.asarray(self.reality.observe_object_pose().pose.position_m)
-        self.move_cartesian(Pose(position_m=tuple(object_position + np.array([0.0, 0.0, 0.04]))))
-        self.close_gripper()
-        self.reality.set_grasp_active(True)
-        self._record("grasp_object", {}, {"bilateral_contact_model": "compliant-force surrogate"})
-        return True
+        raise RuntimeError("grasp unavailable: bilateral physical contact has not passed validation")
 
     def release_object(self) -> bool:
-        self.reality.set_grasp_active(False)
         self.open_gripper()
         self._record("release_object", {}, {"released": True})
         return True
 
     def execute_safe_push(self, target_m: tuple[float, float, float], max_force_n: float = 12.0):
-        if max_force_n > 15.0:
+        if max_force_n > self.config.maximum_tool_force_n:
             raise ValueError("force exceeds safety limit")
-        result = self.reality.execute_push(target_m, max_force_n)
+        result = self.reality.execute_push(
+            target_m,
+            max_force_n,
+            protocol=self.protocol.final_push,
+        )
         self._record("execute_safe_push", {"target_m": target_m}, {"sample_count": len(result)})
         return result
 
@@ -186,105 +202,210 @@ class RobotTools:
 
     # Experiments
     def weigh_object(self) -> ExperimentEvidence:
-        self.return_object_home()
-        self.reality.settle(0.25)
-        samples = []
-        target_z = 0.10
-        for _ in range(round(2.0 / self.config.dt_s)):
-            pos, _, velocity = self.reality.cube_controller_state()
-            force_z = float(np.clip(45.0 * (target_z - pos[2]) - 6.0 * velocity[2], 0.0, 12.0))
-            samples.append(self.reality.step((0.0, 0.0, force_z)))
-        stable = tuple(s for s in samples[-round(0.6 / self.config.dt_s) :] if abs(s.velocity_m_s[2]) < 0.01)
+        """Return an explicit non-result until bilateral physical grasp is validated."""
         evidence = ExperimentEvidence(
             evidence_id=f"weigh-{uuid.uuid4().hex[:8]}",
             experiment="weigh",
-            samples=stable,
-            metadata={"tare_force_z_n": 0.0, "controller": "vertical spring-damper", "target_z_m": target_z},
-            quality_flags=() if len(stable) >= 3 else ("insufficient_quasistatic_samples",),
+            samples=(),
+            metadata={
+                "producer": "unavailable",
+                "reason": "bilateral finger-contact lift has not passed the physical grasp gate",
+            },
+            quality_flags=("physical_grasp_not_validated",),
         )
-        # Lower through the same bounded force path; no privileged state reset.
-        home = self.config.initial_position_m
-        for _ in range(round(1.5 / self.config.dt_s)):
-            pos, _, velocity = self.reality.cube_controller_state()
-            error_z = home[2] - pos[2]
-            if abs(error_z) < 0.003 and abs(velocity[2]) < 0.02:
-                break
-            force_z = float(np.clip(35.0 * error_z - 5.0 * velocity[2], 0.0, 12.0))
-            self.reality.step((0.0, 0.0, force_z))
         self.evidence.append(evidence)
-        self._record("weigh_object", {}, {"evidence_id": evidence.evidence_id, "samples": len(stable)})
+        self._record("weigh_object", {}, {"evidence_id": evidence.evidence_id, "samples": 0})
         return evidence
 
+    def _prepare_physical_pusher(self, protocol: PushProtocol) -> tuple[float, float, float]:
+        if not self.config.include_robot:
+            raise RuntimeError("physical experiments require the Franka articulation")
+        cube = self.reality.observe_object_pose().pose.position_m
+        tool = self.reality.observe_tool_pose().position_m
+        self.close_gripper()
+        self.move_cartesian(
+            Pose(position_m=(tool[0], tool[1], protocol.safe_height_m)),
+            speed_m_s=protocol.approach_speed_m_s,
+        )
+        self.move_cartesian(
+            Pose(
+                position_m=(
+                    cube[0] - protocol.precontact_offset_m,
+                    cube[1] + protocol.lateral_ik_compensation_m,
+                    protocol.safe_height_m,
+                )
+            ),
+            speed_m_s=protocol.approach_speed_m_s,
+        )
+        self.move_cartesian(
+            Pose(
+                position_m=(
+                    cube[0] - protocol.precontact_offset_m,
+                    cube[1] + protocol.lateral_ik_compensation_m,
+                    cube[2] + protocol.push_height_offset_m,
+                )
+            ),
+            speed_m_s=protocol.contact_speed_m_s,
+        )
+        return cube
+
+    def _sample_contact_push(
+        self,
+        *,
+        start_x_m: float,
+        end_x_m: float,
+        y_m: float,
+        z_m: float,
+        increment_m: float,
+        substeps: int,
+        stop_after_breakaway: bool,
+        protocol: PushProtocol,
+        experiment_id: str,
+    ) -> list[MotionSample]:
+        samples: list[MotionSample] = []
+        initial_x = self.reality.observe_object_pose().pose.position_m[0]
+        moving_frames = 0
+        contact_seen = False
+        for command_index, target_x in enumerate(
+            np.arange(start_x_m, end_x_m + increment_m / 2, increment_m)
+        ):
+            self.reality.set_cartesian_target((float(target_x), y_m, z_m))
+            for _ in range(substeps):
+                raw_sample = self.reality.step()
+                phase = (
+                    "contact"
+                    if raw_sample.contact_valid
+                    else ("contact_lost" if contact_seen else "approach")
+                )
+                contact_seen = contact_seen or raw_sample.contact_valid
+                sample = raw_sample.model_copy(
+                    update={
+                        "experiment_id": experiment_id,
+                        "command_id": f"{experiment_id}:cartesian-target:{command_index}",
+                        "experiment_phase": phase,
+                    }
+                )
+                samples.append(sample)
+                horizontal_force = abs(sample.measured_force_n[0])
+                if horizontal_force > protocol.maximum_horizontal_force_n:
+                    return samples
+                moved = (
+                    abs(sample.position_m[0] - initial_x) > protocol.breakaway_displacement_m
+                    and abs(sample.velocity_m_s[0]) > protocol.breakaway_velocity_m_s
+                )
+                moving_frames = moving_frames + 1 if moved else 0
+                if stop_after_breakaway and moving_frames >= protocol.breakaway_consecutive_frames:
+                    return samples
+        return samples
+
     def probe_static_friction(self) -> ExperimentEvidence:
-        self.return_object_home()
-        self.reality.settle(0.25)
-        samples = []
-        moved_frames = 0
-        for force in np.arange(0.0, 8.01, 0.10):
-            for _ in range(6):
-                s = self.reality.step((float(force), 0.0, 0.0))
-                samples.append(s)
-                moved_frames = moved_frames + 1 if abs(s.velocity_m_s[0]) >= 0.01 else 0
-                if moved_frames >= 3:
-                    break
-            if moved_frames >= 3:
-                break
+        protocol = self.protocol.static_probe
+        evidence_id = f"static-{uuid.uuid4().hex[:8]}"
+        cube = self._prepare_physical_pusher(protocol)
+        samples = self._sample_contact_push(
+            start_x_m=cube[0] - protocol.precontact_offset_m,
+            end_x_m=cube[0] - protocol.precontact_offset_m + protocol.maximum_travel_m,
+            y_m=cube[1] + protocol.lateral_ik_compensation_m,
+            z_m=cube[2] + protocol.push_height_offset_m,
+            increment_m=protocol.command_increment_m,
+            substeps=protocol.physics_substeps_per_command,
+            stop_after_breakaway=True,
+            protocol=protocol,
+            experiment_id=evidence_id,
+        )
+        moved_frames = sum(
+            sample.contact_valid
+            and abs(sample.position_m[0] - samples[0].position_m[0]) > protocol.breakaway_displacement_m
+            and abs(sample.velocity_m_s[0]) > protocol.breakaway_velocity_m_s
+            for sample in samples[-protocol.breakaway_consecutive_frames :]
+        )
+        contact_count = sum(sample.contact_valid for sample in samples)
+        contact_coverage = contact_count / max(len(samples), 1)
+        quality_flags = []
+        if moved_frames < protocol.breakaway_consecutive_frames:
+            quality_flags.append("right_censored_no_breakaway")
+        if contact_count < protocol.minimum_valid_contact_samples:
+            quality_flags.append("insufficient_native_contact_samples")
+        if contact_coverage < protocol.minimum_contact_coverage_fraction:
+            quality_flags.append("insufficient_contact_coverage")
         evidence = ExperimentEvidence(
-            evidence_id=f"static-{uuid.uuid4().hex[:8]}",
+            evidence_id=evidence_id,
             experiment="static_friction",
             samples=tuple(samples),
-            metadata={"motion_threshold_m_s": 0.01, "force_increment_n": 0.10},
-            quality_flags=() if moved_frames >= 3 else ("right_censored_no_breakaway",),
+            metadata={
+                "motion_threshold_m_s": protocol.breakaway_velocity_m_s,
+                "position_increment_m": protocol.command_increment_m,
+                "force_model_discrepancy_fraction": protocol.force_model_discrepancy_fraction,
+                "producer": "Newton SensorContact hand/fingers/pusher ↔ cube",
+                "controller": "Franka IK joint-target contact ramp",
+                "protocol_schema_version": self.protocol.schema_version,
+                "protocol_sha256": protocol_sha256(self.protocol),
+                "experiment_correlation_id": evidence_id,
+                "raw_sample_count": len(samples),
+                "accepted_contact_sample_count": contact_count,
+                "rejected_noncontact_sample_count": len(samples) - contact_count,
+                "contact_coverage_fraction": contact_coverage,
+                "minimum_contact_coverage_fraction": protocol.minimum_contact_coverage_fraction,
+                "minimum_valid_contact_samples": protocol.minimum_valid_contact_samples,
+            },
+            quality_flags=tuple(quality_flags),
         )
         self.evidence.append(evidence)
         self._record("probe_static_friction", {}, {"evidence_id": evidence.evidence_id})
         return evidence
 
     def probe_dynamic_friction(self) -> ExperimentEvidence:
-        self.return_object_home()
-        self.reality.settle(0.25)
-        samples = []
-        target_velocity = 0.04
-        sliding_established = False
-        mass = self.belief.parameters[ParameterName.MASS].mean
-        mu_prior = self.belief.parameters[ParameterName.DYNAMIC_FRICTION].mean
-        feedforward = mass * 9.81 * mu_prior
-        for index in range(round(2.0 / self.config.dt_s)):
-            _, _, velocity = self.reality.cube_controller_state()
-            sliding_established = sliding_established or velocity[0] > 0.02
-            if sliding_established:
-                force_x = float(np.clip(feedforward + 30.0 * (target_velocity - velocity[0]), 0.0, 8.0))
-            else:
-                force_x = float(min(8.0, 0.5 + 4.0 * index * self.config.dt_s))
-            samples.append(self.reality.step((force_x, 0.0, 0.0)))
+        protocol = self.protocol.dynamic_probe
+        evidence_id = f"dynamic-{uuid.uuid4().hex[:8]}"
+        cube = self._prepare_physical_pusher(protocol)
+        samples = self._sample_contact_push(
+            start_x_m=cube[0] - protocol.precontact_offset_m,
+            end_x_m=cube[0] - protocol.precontact_offset_m + protocol.maximum_travel_m,
+            y_m=cube[1] + protocol.lateral_ik_compensation_m,
+            z_m=cube[2] + protocol.push_height_offset_m,
+            increment_m=protocol.command_increment_m,
+            substeps=protocol.physics_substeps_per_command,
+            stop_after_breakaway=False,
+            protocol=protocol,
+            experiment_id=evidence_id,
+        )
+        contact_count = sum(sample.contact_valid for sample in samples)
+        contact_coverage = contact_count / max(len(samples), 1)
+        quality_flags = []
+        if contact_count < protocol.minimum_valid_contact_samples:
+            quality_flags.append("insufficient_native_contact_samples")
+        if contact_coverage < protocol.minimum_contact_coverage_fraction:
+            quality_flags.append("insufficient_contact_coverage")
         evidence = ExperimentEvidence(
-            evidence_id=f"dynamic-{uuid.uuid4().hex[:8]}",
+            evidence_id=evidence_id,
             experiment="dynamic_friction",
             samples=tuple(samples),
-            metadata={"target_velocity_m_s": target_velocity, "controller": "bounded velocity feedback"},
+            metadata={
+                "target_velocity_m_s": protocol.contact_speed_m_s,
+                "producer": "Newton SensorContact hand/fingers/pusher ↔ cube",
+                "controller": "Franka IK joint-target maintained-contact slide",
+                "protocol_schema_version": self.protocol.schema_version,
+                "protocol_sha256": protocol_sha256(self.protocol),
+                "experiment_correlation_id": evidence_id,
+                "raw_sample_count": len(samples),
+                "accepted_contact_sample_count": contact_count,
+                "rejected_noncontact_sample_count": len(samples) - contact_count,
+                "contact_coverage_fraction": contact_coverage,
+                "minimum_contact_coverage_fraction": protocol.minimum_contact_coverage_fraction,
+                "minimum_valid_contact_samples": protocol.minimum_valid_contact_samples,
+            },
+            quality_flags=tuple(quality_flags),
         )
         self.evidence.append(evidence)
         self._record("probe_dynamic_friction", {}, {"evidence_id": evidence.evidence_id})
-        self.return_object_home()
         return evidence
 
     def return_object_home(self) -> None:
-        """Restore the object through the same belief-parameterized controller."""
-        position = np.asarray(self.reality.observe_object_pose().pose.position_m)
-        home = np.asarray(self.config.initial_position_m)
-        restored = False
-        if np.linalg.norm(position[:2] - home[:2]) > 0.01 or position[2] > home[2] + 0.01:
-            assumed_mass_kg = self.belief.parameters[ParameterName.MASS].mean
-            self.reality.execute_pick_place(
-                tuple(home),
-                max_force_n=12.0,
-                assumed_mass_kg=assumed_mass_kg,
-            )
-            restored = True
+        """Do not teleport or directly actuate the object across experiments."""
         self._record(
             "return_object_home",
-            {"target_m": tuple(home)},
-            {"restored": restored, "controller_mass_source": "belief_posterior"},
+            {},
+            {"restored": False, "reason": "object reset is forbidden across physical experiments"},
         )
 
     def estimate_center_of_mass(self) -> ParameterEstimate:
@@ -306,12 +427,12 @@ class RobotTools:
     def create_belief_simulation(self) -> BeliefEnvironment:
         if self.belief_world is not None:
             self.belief_world.close()
-        belief_config = replace(self.config, include_robot=False, seed=self.config.seed + 1000)
+        belief_config = self.config
         self.belief_world = BeliefEnvironment.from_belief(
             self.belief,
             belief_config,
-            control_gate=self.reality.control_gate,
-            event_sink=self.reality.event_sink,
+            control_gate=self.control_gate,
+            event_sink=self.event_sink,
         )
         self._record("create_belief_simulation", {}, {"revision": self.belief.revision})
         return self.belief_world
@@ -324,14 +445,27 @@ class RobotTools:
         return self.belief
 
     def simulate_candidate_action(self, candidate: ActionCandidate) -> PredictedOutcome:
+        observed_start = self.reality.observe_object_pose().pose.position_m
+        rollout_config = replace(self.config, initial_position_m=observed_start)
         outcome = rollout_candidate(
             self.belief,
             candidate,
-            self.config,
-            control_gate=self.reality.control_gate,
-            event_sink=self.reality.event_sink,
+            rollout_config,
+            self.protocol,
+            control_gate=self.control_gate,
+            event_sink=self.event_sink,
         )
-        self._record("simulate_candidate_action", candidate.model_dump(), outcome.model_dump())
+        self._record(
+            "simulate_candidate_action",
+            {
+                **candidate.model_dump(mode="json"),
+                "rollout_initial_position_m": observed_start,
+                "world_config_id": rollout_config.config_id,
+                "experiment_protocol_id": f"physical-experiment:{protocol_sha256(self.protocol)}",
+                "belief_revision": self.belief.revision,
+            },
+            outcome.model_dump(mode="json"),
+        )
         return outcome
 
     def evaluate_prediction_error(
@@ -358,7 +492,11 @@ class RobotTools:
 
     def propose_experiment(self, completed: set[str]) -> ExperimentPlan:
         actions = candidate_actions(self.config.target_position_m)
-        result = plan_experiment(self.belief, task_relevance_for_actions(actions), completed)
+        result = plan_experiment(
+            self.belief,
+            task_relevance_for_actions(actions, available_kinds=frozenset({"push"})),
+            completed,
+        )
         self._record("propose_experiment", {"completed": sorted(completed)}, result.model_dump())
         return result
 
@@ -373,8 +511,18 @@ class RobotTools:
         target = np.asarray(self.config.target_position_m)
         planar_error = float(np.linalg.norm(position[:2] - target[:2]))
         stable = np.linalg.norm(observation.linear_velocity_m_s) < 0.02
-        success = bool(planar_error <= 0.03 and bool(stable) and position[2] >= 0.015)
-        self._record("verify_task_success", {}, {"success": success, "target_error_m": planar_error})
+        target_region = bool(planar_error <= self.config.target_radius_m and position[2] >= 0.015)
+        success = bool(target_region and stable)
+        self._record(
+            "verify_task_success",
+            {},
+            {
+                "success": success,
+                "target_error_m": planar_error,
+                "target_region": target_region,
+                "stable": bool(stable),
+            },
+        )
         return success
 
 
