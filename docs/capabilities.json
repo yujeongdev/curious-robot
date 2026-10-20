@@ -31,9 +31,9 @@
       "name": "contact_force_sensing",
       "reference": "newton/_src/sensors/sensor_contact.py@v1.7.0",
       "entry_point": "Solver observables CONTACT_F and SensorContact.total_force",
-      "status": "native_experimental",
+      "status": "verified_gpu",
       "limitations": "SensorContact aggregates linear force, not a complete wrist moment.",
-      "chosen_implementation": "bounded actuator-reaction virtual sensor with explicit producer metadata"
+      "chosen_implementation": "SolverMuJoCo CONTACT_F observables aggregated by SensorContact for robot-tool to cube pairs, followed by a configured 10 Hz sensor filter"
     },
     {
       "name": "wrist_joint_wrench",
@@ -41,7 +41,7 @@
       "entry_point": "SolverMuJoCo ObservableKind.BODY_PARENT_F",
       "status": "supported",
       "limitations": "Joint wrench requires tare, sign, and frame validation.",
-      "chosen_implementation": "application sensor boundary; actuator reaction is the MVP fallback"
+      "chosen_implementation": "deferred; SensorContact linear force is used and explicitly not called a complete wrist wrench"
     },
     {
       "name": "separate_static_dynamic_friction",

@@ -4,8 +4,8 @@
 
 Curious Robot is an open-source, simulation-only research vertical slice for
 active physical system identification and autonomous manipulation. A Franka
-Panda agent observes an unknown cube, chooses bounded experiments, estimates
-the parameters relevant to its task, calibrates a separate belief simulation,
+Panda agent observes an unknown cube, chooses bounded experiments, derives
+contact-gated physical constraints relevant to its task, calibrates a separate belief simulation,
 compares push and pick-and-place candidates, executes the selected action in a
 hidden truth simulation, and explains the result.
 
@@ -115,6 +115,9 @@ Each headless run generates:
 - `reexecution.json` — deterministic physics re-execution manifest;
 - `estimated_vs_true.png`, `predicted_vs_observed.png`, `final_result.png`;
 - `measurements.csv`, `decision_timeline.json`, and environment metadata.
+- `experiment_protocol.json` — the versioned procedure chosen before the run;
+- `belief_simulation_config.json` — learned posterior values passed to the independent belief world;
+- `value_provenance.json` — machine-readable ownership and dataflow for constants, config, learned values, and evaluator-only truth.
 
 ```bash
 # Official Newton state playback; the CLI prints the supported viewer command.
@@ -162,12 +165,29 @@ corepack pnpm --dir src/web build
 This repository demonstrates simulated-real → system identification → belief
 simulation → action planning → simulated-real. It does **not** claim a hardware
 experiment. MuJoCo Warp contact is treated as non-differentiable here; physics
-calibration therefore uses bounded SciPy optimization. The wrist wrench is a
-documented virtual sensor derived from the bounded actuator/contact force path,
-not a readout of hidden object parameters.
+calibration therefore uses bounded SciPy optimization. The current force
+producer is Newton `SensorContact` over native MuJoCo Warp robot-tool ↔ cube
+contacts. It measures linear contact force, not a complete strain-gauge wrist
+moment, and never reads hidden object parameters.
+
+The validated MVP manipulation path is physical robot pushing. Pick-and-place
+and quasi-static weighing remain visible candidates but are rejected until a
+bilateral finger-contact lift passes its acceptance gate; the system does not
+substitute a weld, teleport, or direct cube-force surrogate.
+
+Executed evidence is available as the
+[`physical experiment report`](docs/evidence/physical-experiment-report.md),
+the exact [`experiment protocol`](docs/evidence/physical-experiment-protocol.json),
+and the posterior-only
+[`belief simulation config`](docs/evidence/physical-belief-simulation-config.json).
+Their machine-readable ownership chain is captured in
+[`physical-value-provenance.json`](docs/evidence/physical-value-provenance.json).
+The reference joint-command trace also passes a fresh-world
+[`physics re-execution check`](docs/evidence/reference-reexecution-report.json)
+within its declared 15 mm tolerance.
 
 The randomized surface and cube define one contact pair. From that interaction
-the agent estimates **effective cube–surface static and dynamic friction**; it
+the agent infers **bounded effective cube–surface static and dynamic friction**; it
 does not claim to identify separate intrinsic cube and table coefficients from
 unidentifiable evidence.
 

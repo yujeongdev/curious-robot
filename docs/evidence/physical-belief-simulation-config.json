@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "physical_parameters_source": "posterior",
+  "known_scene_and_numerical_config_source": "versioned WorldConfig",
+  "belief_revision": 2,
+  "physical_belief": {
+    "revision": 2,
+    "parameters": {
+      "mass_kg": {
+        "name": "mass_kg",
+        "mean": 0.265,
+        "std": 0.107,
+        "interval95": [
+          0.08,
+          0.45
+        ],
+        "physical_bounds": [
+          0.08,
+          0.45
+        ],
+        "units": "kg",
+        "status": "prior",
+        "evidence_ids": [],
+        "method": "bounded uniform prior",
+        "assumptions": [],
+        "mismatch_notes": []
+      },
+      "mu_static": {
+        "name": "mu_static",
+        "mean": 0.6496507765021634,
+        "std": 0.14453919157788978,
+        "interval95": [
+          0.39930155300432685,
+          0.9
+        ],
+        "physical_bounds": [
+          0.2,
+          0.9
+        ],
+        "units": "1",
+        "status": "bounded",
+        "evidence_ids": [
+          "static-2cf88d3e"
+        ],
+        "method": "interval-censored measured breakaway force / normal load",
+        "assumptions": [
+          "Coulomb breakaway",
+          "horizontal push"
+        ],
+        "mismatch_notes": []
+      },
+      "mu_dynamic": {
+        "name": "mu_dynamic",
+        "mean": 0.4602538975074773,
+        "std": 0.18607993224546113,
+        "interval95": [
+          0.1,
+          0.6
+        ],
+        "physical_bounds": [
+          0.1,
+          0.6
+        ],
+        "units": "1",
+        "status": "bounded",
+        "evidence_ids": [
+          "dynamic-9914969f"
+        ],
+        "method": "bounded robust least squares: F = m a + mu N sign(v); mass-posterior-derived normal load",
+        "assumptions": [
+          "effective Coulomb sliding friction",
+          "normal load derived from mass posterior on a horizontal table; no normal-force sensor"
+        ],
+        "mismatch_notes": [
+          "Coulomb residual is structured or larger than the validation threshold"
+        ]
+      },
+      "com_x_m": {
+        "name": "com_x_m",
+        "mean": 0.0,
+        "std": 0.005,
+        "interval95": [
+          -0.015,
+          0.015
+        ],
+        "physical_bounds": [
+          -0.015,
+          0.015
+        ],
+        "units": "m",
+        "status": "prior",
+        "evidence_ids": [],
+        "method": "bounded uniform prior",
+        "assumptions": [],
+        "mismatch_notes": []
+      },
+      "com_y_m": {
+        "name": "com_y_m",
+        "mean": 0.0,
+        "std": 0.005,
+        "interval95": [
+          -0.015,
+          0.015
+        ],
+        "physical_bounds": [
+          -0.015,
+          0.015
+        ],
+        "units": "m",
+        "status": "prior",
+        "evidence_ids": [],
+        "method": "bounded uniform prior",
+        "assumptions": [],
+        "mismatch_notes": []
+      },
+      "com_z_m": {
+        "name": "com_z_m",
+        "mean": 0.0,
+        "std": 0.003,
+        "interval95": [
+          -0.01,
+          0.01
+        ],
+        "physical_bounds": [
+          -0.01,
+          0.01
+        ],
+        "units": "m",
+        "status": "prior",
+        "evidence_ids": [],
+        "method": "bounded uniform prior",
+        "assumptions": [],
+        "mismatch_notes": []
+      }
+    },
+    "supporting_evidence_ids": [
+      "static-2cf88d3e",
+      "dynamic-9914969f"
+    ],
+    "assumptions": [
+      "rigid cube with known geometry",
+      "horizontal stationary table",
+      "Coulomb friction is an effective model"
+    ]
+  },
+  "world_config": {
+    "device": "cuda:0",
+    "dt_s": 0.004166666666666667,
+    "initial_position_m": [
+      -0.10616692884506473,
+      0.01660089112415094,
+      0.024945172801456587
+    ],
+    "target_position_m": [
+      0.15,
+      0.0,
+      0.025
+    ],
+    "target_radius_m": 0.06,
+    "observation_noise_std": 0.0002,
+    "force_noise_std": 0.015,
+    "include_robot": true,
+    "seed": 7,
+    "arm_position_stiffness": 250.0,
+    "arm_position_damping": 30.0,
+    "gripper_position_stiffness": 100.0,
+    "gripper_position_damping": 10.0,
+    "pusher_radius_m": 0.012,
+    "pusher_density_kg_m3": 100.0,
+    "pusher_friction": 0.5,
+    "maximum_tool_force_n": 15.0,
+    "contact_sensor_cutoff_hz": 10.0,
+    "prediction_residual_tolerance_m": 0.03
+  },
+  "solver": {
+    "name": "SolverMuJoCo",
+    "iterations": 20,
+    "contact_capacity": 256,
+    "constraint_capacity": 512
+  }
+}

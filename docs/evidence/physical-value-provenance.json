@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "reference_run": "physical-boundary-v9",
+  "known_model_constants": {
+    "role": "versioned assumptions; never inferred from an episode",
+    "runtime_values_artifact": "physical-belief-simulation-config.json#/world_config"
+  },
+  "experiment_protocol": {
+    "role": "operator-selected bounded procedure; not a learned physical property",
+    "run_snapshot": "physical-experiment-protocol.json"
+  },
+  "learned_physical_parameters": {
+    "role": "derived only from recorded robot observations by system identification",
+    "posterior_and_belief_world_input": "physical-belief-simulation-config.json#/physical_belief"
+  },
+  "evaluator_only_hidden_parameters": {
+    "role": "sampled simulated-reality secret; forbidden from agent, controller, and SysID inputs",
+    "included_here": false
+  },
+  "dataflow": [
+    "physical-experiment-protocol.json -> Franka joint targets",
+    "robot pose and SensorContact observations -> experiment evidence",
+    "experiment evidence -> posterior belief",
+    "posterior belief -> physical-belief-simulation-config.json -> independent Newton belief world"
+  ]
+}

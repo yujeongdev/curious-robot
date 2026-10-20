@@ -1,10 +1,10 @@
 {
-  "run_id": "043d2785-9ab3-452e-966a-1c66760522a0",
-  "passed": false,
-  "max_position_error_m": 0.13782445976567545,
-  "rmse_position_m": 0.04867856261692956,
+  "run_id": "physical-boundary-v9",
+  "passed": true,
+  "max_position_error_m": 0.0007518751713596726,
+  "rmse_position_m": 0.000445176327791359,
   "position_tolerance_m": 0.015,
-  "samples": 942,
+  "samples": 5088,
   "determinism_scope": "same GPU, driver, packages, solver settings, and control trace",
-  "interpretation": "Visual playback passes independently; exact physics re-execution exceeds tolerance because fresh public state reconstruction omits solver-private contact warm-start state."
+  "interpretation": "The fresh Newton world reproduced the recorded joint-target control trace within the declared position tolerance. This is physics re-execution, separate from exact visual state playback."
 }
