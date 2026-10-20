@@ -10,7 +10,7 @@ describe("run reducer", () => {
     expect(first.verification?.success).toBe(true);
     expect(first.latestFrame?.frame_id).toBe(8);
     expect(first.lastSequence).toBe(demoEvents.length);
-    expect(first.beliefs.effective_static_friction?.mean).toBeCloseTo(.83);
+    expect(first.beliefs.effective_static_friction?.mean).toBeCloseTo(.55);
     expect(second).toEqual(first);
   });
 

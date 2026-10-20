@@ -54,13 +54,13 @@ export function NewRunRoute() {
             <Button variant="primary" onClick={runDemo} disabled={mutation.isPending}>
               {mutation.isPending ? <RotateCw className="spin" /> : <Play />} {mutation.isPending ? "Preparing Newton…" : "Run discovery demo"}
             </Button>
-            <Button variant="secondary" onClick={previewFixture}><FlaskConical /> Preview recorded fixture</Button>
+            <Button variant="secondary" onClick={previewFixture}><FlaskConical /> Preview synthetic example</Button>
           </div>
           {mutation.isError && (
             <div className="inline-error" role="alert">
               <strong>Could not reach the Newton control plane.</strong>
               <span>{mutation.error.message}</span>
-              <Button variant="secondary" size="compact" onClick={previewFixture}>Open fixture workspace</Button>
+              <Button variant="secondary" size="compact" onClick={previewFixture}>Open synthetic preview</Button>
             </div>
           )}
           <p className="preset-line"><Cpu /> Preset <strong>discovery-demo-v1</strong> · seed 7 · cuda:0 · recording on</p>

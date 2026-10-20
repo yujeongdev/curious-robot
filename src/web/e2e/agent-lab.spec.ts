@@ -1,12 +1,16 @@
 import { expect, test } from "@playwright/test";
 
-test("quick fixture demonstrates the discovery loop", async ({ page }) => {
+test("synthetic preview identifies its illustrative provenance", async ({ page }) => {
   await page.goto("/runs/new");
   await expect(page.getByRole("heading", { name: /turn contact into physical knowledge/i })).toBeVisible();
-  await page.getByRole("button", { name: /preview recorded fixture/i }).click();
+  await page.getByRole("button", { name: /preview synthetic example/i }).click();
+  await expect(page.getByRole("note", { name: "Preview provenance" })).toHaveText(/Synthetic preview.*No Newton episode was executed/i);
+  await expect(page.getByRole("tab", { name: "Preview", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("heading", { name: "Simulation" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Discovery phases" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Agent evidence" })).toBeVisible();
+  await page.getByRole("tab", { name: "Replay", exact: true }).click();
+  await expect(page.getByRole("note", { name: "Preview provenance" })).toBeVisible();
 });
 
 test("mobile companion keeps safe stop reachable", async ({ page }, testInfo) => {

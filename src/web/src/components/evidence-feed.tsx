@@ -10,7 +10,7 @@ import { Button } from "./ui/button";
 function eventTitle(event: AgentEvent): string {
   const payload = event.payload;
   const titles: Partial<Record<AgentEvent["type"], string>> = {
-    "run.started": "Newton worker initializing",
+    "run.started": payload.data_provenance === "synthetic_illustration" ? "Synthetic preview loaded" : "Newton worker initializing",
     "stage.entered": `Entered ${event.stage?.replaceAll("_", " ") ?? "stage"}`,
     "stage.completed": `${event.stage?.replaceAll("_", " ") ?? "Stage"} complete`,
     "rationale.published": "Agent rationale",
@@ -74,7 +74,7 @@ function EventSummary({ event }: { event: AgentEvent }) {
     return <p>{payload.success ? "All goal predicates passed." : "Goal predicate failed."} Residual <strong className="mono">{formatValue(payload.prediction_residual_m, 3)} m</strong>.</p>;
   }
   if (event.type === "tool.started") return <p>Validated bounded arguments. The controller owns every physics step.</p>;
-  if (event.type === "run.started") return <p>Preparing GPU, Newton world, assets, and public event stream.</p>;
+  if (event.type === "run.started") return <p>{payload.data_provenance === "synthetic_illustration" ? String(payload.reason) : "Preparing GPU, Newton world, assets, and public event stream."}</p>;
   return <p>{String(payload.reason ?? payload.follow_up_decision ?? payload.controller_result ?? payload.outcome ?? "Committed to the run event log.")}</p>;
 }
 

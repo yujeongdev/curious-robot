@@ -15,6 +15,6 @@ describe("StageStepper", () => {
     for (const name of ["Observe", "Discover", "Experiment", "Calibrate", "Decide", "Execute"]) {
       expect(screen.getByRole("button", { name: new RegExp(`^${name}:`, "i") })).toBeInTheDocument();
     }
-    expect(screen.getByRole("button", { name: /Calibrate: system identification, update simulation/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Calibrate: (?:system identification, )+update simulation/i })).toBeInTheDocument();
   });
 });

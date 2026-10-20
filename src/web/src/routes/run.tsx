@@ -12,7 +12,7 @@ import { TelemetryDock } from "../components/telemetry-dock";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Progress } from "../components/ui/progress";
-import { demoEvents } from "../fixtures/demo-run";
+import { demoEvents, demoPreviewNotice } from "../fixtures/demo-run";
 import { parseAgentEvent } from "../generated/agent-events";
 import { formatElapsed } from "../lib/utils";
 import { useRunStore } from "../state/run-store";
@@ -36,7 +36,8 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
     return window.__CURIOUS_CAPTURE_EVENTS__.map(parseAgentEvent);
   }, []);
   const fixtureEvents = captureEvents ?? demoEvents;
-  const isFixture = fixture || runId === "demo" || captureEvents !== null;
+  const isSyntheticPreview = captureEvents === null && (fixture || runId === "demo");
+  const isFixture = isSyntheticPreview || captureEvents !== null;
 
   useEffect(() => {
     resetStore();
@@ -96,11 +97,11 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
         <Link to="/runs/new" className="brand"><span className="brand-mark">CR</span><span>Curious Robot<small>Agent Lab</small></span></Link>
         <div className="run-identity">
           <span className="eyebrow">Run</span>
-          <strong className="mono">{runId === "demo" ? "DEMO-0007" : runId.slice(0, 12)}</strong>
-          <span className="mono metadata">seed 7 · cuda:0</span>
+          <strong className="mono">{isSyntheticPreview ? "SYNTHETIC PREVIEW" : runId.slice(0, 12)}</strong>
+          <span className="mono metadata">{isSyntheticPreview ? "illustrative data · no GPU execution" : "seed 7 · cuda:0"}</span>
         </div>
         <div className="mode-tabs" role="tablist" aria-label="Workspace mode">
-          <button role="tab" aria-selected={mode === "live"} onClick={() => setMode("live")}><Radio /> Live</button>
+          <button role="tab" aria-selected={mode === "live"} onClick={() => setMode("live")}><Radio /> {isSyntheticPreview ? "Preview" : "Live"}</button>
           <button role="tab" aria-selected={mode === "replay"} onClick={() => setMode("replay")}><CircleDot /> Replay</button>
         </div>
         <div className="run-state">
@@ -111,8 +112,9 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
         <RunControls status={controlStatus} onCommand={control} onReset={() => navigate({ to: "/runs/new" })} />
       </header>
       <Progress value={progress} label="Run progress" />
+      {isSyntheticPreview && <div className="system-banner" role="note" aria-label="Preview provenance">{demoPreviewNotice}</div>}
       {(run.status === "preparing" || run.status === "idle") && sourceEvents.length > 0 && (
-        <div className="system-banner"><span className="spin-dot" /> Preparing Newton · validating assets and body manifest</div>
+        <div className="system-banner"><span className="spin-dot" /> {isSyntheticPreview ? "Loading synthetic preview" : "Preparing Newton · validating assets and body manifest"}</div>
       )}
       {viewerDisconnected && <div className="degraded-banner" role="status">Visual connection interrupted. Committed evidence remains available; no run state has been fabricated.</div>}
       <StageStepper run={run} />
