@@ -33,9 +33,27 @@ from .hardware_backends import (
 from .hardware_interfaces import (
     FrankaHardwareTransport,
     HardwareEpisode,
+    HardwareMotionPreflight,
     HardwareObservation,
     HardwarePerception,
     HardwarePushResult,
+)
+from .hardware_motion import (
+    FrankaPushCalibration,
+    HardwareToolPose,
+    compile_franka_push_plan,
+    transform_capability_position,
+)
+
+REQUIRED_PREFLIGHT_CHECKS = frozenset(
+    {
+        "ik",
+        "joint_limits",
+        "singularity",
+        "self_collision",
+        "environment_collision",
+        "orientation",
+    }
 )
 
 
@@ -66,13 +84,12 @@ class FrankaHardwareReality:
         transport: FrankaHardwareTransport,
         perception: HardwarePerception,
         artifact_store: ScopedArtifactStore,
-        command_timeout_s: float = 30.0,
+        push_calibration: FrankaPushCalibration,
+        command_timeout_s: float = 60.0,
         perception_timeout_s: float = 2.0,
         observation_max_age_s: float = 0.25,
         observation_max_covariance_trace_m2: float = 0.0001,
-        expected_frame_id: str = "world",
         expected_perception_source_id: str = "external-perception",
-        expected_object_id: str = "cube",
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         canonical = CANONICAL_BACKEND_CONTRACTS.get(probe.contract.kind)
@@ -82,6 +99,8 @@ class FrankaHardwareReality:
             raise ValueError(f"hardware backend is not ready: {probe.blockers}")
         if probe.contract.kind.value != transport.backend_name:
             raise ValueError("selected backend and transport do not match")
+        if probe.readiness.approved_calibration_id != push_calibration.calibration_id:
+            raise ValueError("readiness evidence does not approve this calibration")
         if command_timeout_s <= 0 or not math.isfinite(command_timeout_s):
             raise ValueError("command timeout must be finite and positive")
         if perception_timeout_s <= 0 or not math.isfinite(perception_timeout_s):
@@ -93,23 +112,20 @@ class FrankaHardwareReality:
             or not math.isfinite(observation_max_covariance_trace_m2)
         ):
             raise ValueError("observation covariance limit must be finite and non-negative")
-        if (
-            not expected_frame_id
-            or not expected_perception_source_id
-            or not expected_object_id
-        ):
-            raise ValueError("expected frame, source, and object must not be empty")
+        if not expected_perception_source_id:
+            raise ValueError("expected perception source must not be empty")
         self.probe = probe
         self.transport = transport
         self.perception = perception
         self.store = artifact_store
+        self.push_calibration = push_calibration
         self.command_timeout_s = command_timeout_s
         self.perception_timeout_s = perception_timeout_s
         self.observation_max_age_s = observation_max_age_s
         self.observation_max_covariance_trace_m2 = observation_max_covariance_trace_m2
-        self.expected_frame_id = expected_frame_id
+        self.expected_frame_id = push_calibration.hardware_frame_id
         self.expected_perception_source_id = expected_perception_source_id
-        self.expected_object_id = expected_object_id
+        self.expected_object_id = push_calibration.object_id
         self._monotonic = monotonic
         self.identity = _hardware_identity(probe.contract)
         self._sessions: dict[str, _HardwareSession] = {}
@@ -188,28 +204,67 @@ class FrankaHardwareReality:
             active_session = session
             if session.closed or invocation.attempt_index != session.next_attempt:
                 raise ValueError("hardware capability attempt was replayed or reset")
+            expected_initial_position = transform_capability_position(
+                skill.payload.applicability.validated_initial_position_m,
+                self.push_calibration,
+            )
             if math.dist(
                 session.episode.initial_observation.position_m,
-                skill.payload.applicability.validated_initial_position_m,
+                expected_initial_position,
             ) > skill.payload.applicability.initial_position_tolerance_m:
                 raise ValueError("hardware initial pose is outside capability applicability")
+            precommand_observation = (
+                session.episode.initial_observation
+                if invocation.attempt_index == 1
+                else self.perception.observe_object_position(self.perception_timeout_s)
+            )
+            self._validate_observation(
+                precommand_observation,
+                expected_episode_id=session.episode.episode_id,
+            )
+            tool_pose = self.transport.read_tool_pose(self.perception_timeout_s)
+            self._validate_tool_pose(tool_pose)
+            motion_plan = compile_franka_push_plan(
+                action=skill.payload.action_template,
+                protocol=skill.payload.protocol.final_push,
+                capability_frame_id=skill.payload.applicability.frame_id,
+                capability_object_id=skill.payload.applicability.object_id,
+                current_object_position_m=precommand_observation.position_m,
+                current_object_orientation_xyzw=precommand_observation.orientation_xyzw,
+                current_tool_pose=tool_pose,
+                calibration=self.push_calibration,
+                maximum_force_n=skill.payload.safety.maximum_force_n,
+                maximum_speed_m_s=skill.payload.safety.maximum_speed_m_s,
+                command_timeout_s=self.command_timeout_s,
+            )
+            preflight = self.transport.validate_motion_plan(
+                motion_plan,
+                self.perception_timeout_s,
+            )
+            _validate_preflight(preflight, motion_plan.plan_id)
             watchdog_token = self.transport.arm_watchdog(self.command_timeout_s)
             if not watchdog_token:
                 raise ValueError("hardware transport did not arm an independent watchdog")
             result = self.transport.execute_bounded_push(
-                action=skill.payload.action_template,
-                protocol=skill.payload.protocol,
-                maximum_force_n=skill.payload.safety.maximum_force_n,
+                motion_plan=motion_plan,
+                maximum_force_n=motion_plan.maximum_force_n,
                 maximum_speed_m_s=skill.payload.safety.maximum_speed_m_s,
                 command_timeout_s=self.command_timeout_s,
             )
             self._require_open()
             _validate_push_result(
                 result,
-                maximum_force_n=skill.payload.safety.maximum_force_n,
+                maximum_force_n=motion_plan.maximum_force_n,
                 maximum_speed_m_s=skill.payload.safety.maximum_speed_m_s,
                 command_timeout_s=self.command_timeout_s,
                 watchdog_token=watchdog_token,
+                motion_plan_id=motion_plan.plan_id,
+                calibration_id=motion_plan.calibration_id,
+                maximum_acceleration_m_s2=motion_plan.maximum_linear_acceleration_m_s2,
+                maximum_angular_speed_rad_s=motion_plan.maximum_angular_speed_rad_s,
+                maximum_angular_acceleration_rad_s2=(
+                    motion_plan.maximum_angular_acceleration_rad_s2
+                ),
             )
             self.transport.disarm_watchdog(watchdog_token)
             watchdog_token = None
@@ -221,9 +276,13 @@ class FrankaHardwareReality:
                 expected_episode_id=session.episode.episode_id,
             )
             final_position = final_observation.position_m
+            hardware_target = transform_capability_position(
+                skill.payload.applicability.validated_target_m,
+                self.push_calibration,
+            )
             target_error = math.dist(
                 final_position[:2],
-                skill.payload.applicability.validated_target_m[:2],
+                hardware_target[:2],
             )
             session.attempts.append(
                 {
@@ -251,12 +310,27 @@ class FrankaHardwareReality:
                 invocation_id=invocation.invocation_id,
                 attempt_index=invocation.attempt_index,
                 fresh_episode=True,
+                frame_id=self.push_calibration.hardware_frame_id,
+                object_id=self.push_calibration.object_id,
+                motion_plan_id=motion_plan.plan_id,
+                calibration_id=motion_plan.calibration_id,
+                maximum_measured_speed_m_s=result.maximum_measured_speed_m_s,
+                maximum_measured_acceleration_m_s2=(
+                    result.maximum_measured_acceleration_m_s2
+                ),
+                maximum_measured_angular_speed_rad_s=(
+                    result.maximum_measured_angular_speed_rad_s
+                ),
+                maximum_measured_angular_acceleration_rad_s2=(
+                    result.maximum_measured_angular_acceleration_rad_s2
+                ),
+                motion_elapsed_s=result.elapsed_s,
                 observed_final_position_m=final_position,
                 peak_contact_force_n=session.peak_force_n,
                 prediction_target_error_m=target_error,
                 runtime_process_id=self.identity.process_id,
                 safety_tripped=result.safety_tripped,
-                target_position_m=skill.payload.applicability.validated_target_m,
+                target_position_m=hardware_target,
                 target_radius_m=skill.payload.applicability.validated_target_radius_m,
                 terminal=True,
                 world_instance_id=session.episode.episode_id,
@@ -302,6 +376,17 @@ class FrankaHardwareReality:
             raise ValueError("hardware perception episode does not match")
         if observation.covariance_trace_m2 > self.observation_max_covariance_trace_m2:
             raise ValueError("hardware perception uncertainty exceeds the bound")
+
+    def _validate_tool_pose(self, pose: HardwareToolPose) -> None:
+        age_s = self._monotonic() - pose.captured_monotonic_s
+        if age_s < 0 or age_s > self.observation_max_age_s:
+            raise ValueError("hardware tool pose is stale or future-dated")
+        if pose.frame_id != self.push_calibration.hardware_frame_id:
+            raise ValueError("hardware tool pose frame does not match calibration")
+        if pose.tool_id != self.push_calibration.tool_id:
+            raise ValueError("hardware tool identity does not match calibration")
+        if pose.calibration_id != self.push_calibration.calibration_id:
+            raise ValueError("hardware tool pose uses another calibration")
 
     def _is_open(self) -> bool:
         with self._lifecycle_lock:
@@ -419,7 +504,14 @@ def _validate_push_result(
     maximum_speed_m_s: float,
     command_timeout_s: float,
     watchdog_token: str,
+    motion_plan_id: str,
+    calibration_id: str,
+    maximum_acceleration_m_s2: float,
+    maximum_angular_speed_rad_s: float,
+    maximum_angular_acceleration_rad_s2: float,
 ) -> None:
+    if result.motion_plan_id != motion_plan_id or result.calibration_id != calibration_id:
+        raise ValueError("hardware transport result attests another plan or calibration")
     if not result.deadline_enforced or result.watchdog_token != watchdog_token:
         raise ValueError("hardware transport did not attest the armed deadline")
     if result.elapsed_s > command_timeout_s:
@@ -428,9 +520,30 @@ def _validate_push_result(
         raise ValueError("hardware transport exceeded the capability force limit")
     if result.maximum_measured_speed_m_s > maximum_speed_m_s:
         raise ValueError("hardware transport exceeded the capability speed limit")
+    if result.maximum_measured_acceleration_m_s2 > maximum_acceleration_m_s2:
+        raise ValueError("hardware transport exceeded the calibrated acceleration limit")
+    if result.maximum_measured_angular_speed_rad_s > maximum_angular_speed_rad_s:
+        raise ValueError("hardware transport exceeded the calibrated angular speed limit")
+    if (
+        result.maximum_measured_angular_acceleration_rad_s2
+        > maximum_angular_acceleration_rad_s2
+    ):
+        raise ValueError("hardware transport exceeded the calibrated angular acceleration limit")
     expected_trip = result.controller_outcome == "safety_stopped"
     if result.safety_tripped != expected_trip:
         raise ValueError("hardware transport returned inconsistent safety status")
+
+
+def _validate_preflight(preflight: HardwareMotionPreflight, plan_id: str) -> None:
+    if preflight.plan_id != plan_id:
+        raise ValueError("hardware preflight attests another motion plan")
+    if (
+        frozenset(preflight.checks) != REQUIRED_PREFLIGHT_CHECKS
+        or len(preflight.checks) != len(REQUIRED_PREFLIGHT_CHECKS)
+    ):
+        raise ValueError("hardware preflight did not perform every required check")
+    if not preflight.feasible or preflight.errors:
+        raise ValueError("hardware motion plan failed transport preflight")
 
 
 def _reference(artifact_id: str, kind: str) -> ArtifactRef:

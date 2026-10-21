@@ -152,11 +152,15 @@ class DeterministicFrictionSkill:
             or payload.safety.maximum_force_n != source_action.max_force_n
             or payload.safety.maximum_speed_m_s != source_action.speed_m_s
             or source_deployment.action_id != source_action.action_id
+            or source_deployment.frame_id != payload.applicability.frame_id
+            or source_deployment.object_id != payload.applicability.object_id
             or source_deployment.target_position_m != source_action.target_m
             or source_deployment.target_radius_m
             != payload.applicability.validated_target_radius_m
             or payload.applicability.validated_initial_position_m
             != dataset.public_geometry.initial_position_m
+            or payload.applicability.frame_id != dataset.task.frame_id
+            or payload.applicability.object_id != dataset.task.object_id
             or payload.applicability.initial_position_tolerance_m != expected_tolerance
             or payload.applicability.workspace_min_m != expected_workspace_min
             or payload.applicability.workspace_max_m != expected_workspace_max

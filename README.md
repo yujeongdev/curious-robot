@@ -221,7 +221,9 @@ robot. It prefers official `pylibfranka` direct FCI and falls back to ROS 2
 Jazzy `franka_hardware` only when canonical readiness evidence and a usable
 transport plugin are present. It requires an independent transport watchdog,
 auditable motion bounds, fresh framed perception, serialized commands, and
-safe-stop cleanup. Concrete SDK transports remain deployment plugins; no result
+safe-stop cleanup. Hardware pushes compile to an operator-approved,
+frame-transformed tool-tip plan with contact geometry and transport-side
+IK/joint-limit/collision preflight. Concrete SDK transports remain deployment plugins; no result
 in this repository is labeled as a physical hardware trial.
 
 The validated MVP manipulation path is physical robot pushing. Pick-and-place

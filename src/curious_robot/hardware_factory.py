@@ -17,6 +17,7 @@ from .hardware_backends import (
     is_canonical_probe,
 )
 from .hardware_interfaces import FrankaHardwareTransport, HardwarePerception
+from .hardware_motion import FrankaPushCalibration
 from .hardware_reality import FrankaHardwareReality
 
 
@@ -29,13 +30,12 @@ def build_franka_hardware_reality(
         Callable[[], FrankaHardwareTransport],
     ],
     perception: HardwarePerception,
-    command_timeout_s: float = 30.0,
+    push_calibration: FrankaPushCalibration,
+    command_timeout_s: float = 60.0,
     perception_timeout_s: float = 2.0,
     observation_max_age_s: float = 0.25,
     observation_max_covariance_trace_m2: float = 0.0001,
-    expected_frame_id: str = "world",
     expected_perception_source_id: str = "external-perception",
-    expected_object_id: str = "cube",
     monotonic: Callable[[], float] = time.monotonic,
 ) -> FrankaHardwareReality:
     """Select direct FCI first, then ROS 2, and construct the shared adapter."""
@@ -53,6 +53,9 @@ def build_franka_hardware_reality(
             continue
         if not probe.ready:
             failures.append(f"{kind.value}: {', '.join(probe.blockers)}")
+            continue
+        if probe.readiness.approved_calibration_id != push_calibration.calibration_id:
+            failures.append(f"{kind.value}: calibration is not approved")
             continue
         factory = transport_factories.get(kind)
         if factory is None:
@@ -98,13 +101,12 @@ def build_franka_hardware_reality(
             transport=transport,
             perception=perception,
             artifact_store=store,
+            push_calibration=push_calibration,
             command_timeout_s=command_timeout_s,
             perception_timeout_s=perception_timeout_s,
             observation_max_age_s=observation_max_age_s,
             observation_max_covariance_trace_m2=observation_max_covariance_trace_m2,
-            expected_frame_id=expected_frame_id,
             expected_perception_source_id=expected_perception_source_id,
-            expected_object_id=expected_object_id,
             monotonic=monotonic,
         )
     except Exception as error:
