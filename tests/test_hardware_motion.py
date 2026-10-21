@@ -40,6 +40,7 @@ def _calibration(**updates) -> FrankaPushCalibration:  # noqa: ANN003
         "maximum_linear_acceleration_m_s2": 0.5,
         "maximum_angular_speed_rad_s": 0.5,
         "maximum_angular_acceleration_rad_s2": 1.0,
+        "tool_orientation_tolerance_rad": 0.02,
     }
     values.update(updates)
     return FrankaPushCalibration(**values)
@@ -312,3 +313,76 @@ def test_nonidentity_transform_preserves_object_local_support_and_safe_height() 
         for point in (segment.start_position_m, segment.end_position_m)
     )
     assert maximum_z == pytest.approx(0.38)
+
+
+def _rotated_about_x(orientation_xyzw, angle_rad: float):  # noqa: ANN001, ANN202
+    """Return ``orientation`` composed with a small rotation about the world x axis."""
+
+    half = angle_rad / 2.0
+    ax, aw = math.sin(half), math.cos(half)
+    x, y, z, w = orientation_xyzw
+    return (
+        aw * x + ax * w,
+        aw * y - ax * z,
+        aw * z + ax * y,
+        aw * w - ax * x,
+    )
+
+
+def test_plan_moves_to_protocol_safe_plane_before_transit() -> None:
+    calibration = _calibration()
+    high_tool = HardwareToolPose(
+        frame_id=calibration.hardware_frame_id,
+        tool_id=calibration.tool_id,
+        calibration_id=calibration.calibration_id,
+        tip_position_m=(0.02, 0.0, 0.47),
+        tip_orientation_xyzw=calibration.required_tip_orientation_xyzw,
+        captured_monotonic_s=100.0,
+    )
+    safe_height_m = load_default_protocol().final_push.safe_height_m
+
+    plan = _compile(current_tool_pose=high_tool, command_timeout_s=60.0)
+
+    entry = plan.segments[0]
+    assert entry.phase is HardwareMotionPhase.SAFE_PLANE_ENTRY
+    assert entry.start_position_m == high_tool.tip_position_m
+    assert entry.end_position_m == pytest.approx((0.02, 0.0, safe_height_m))
+    transit = plan.segments[1]
+    assert transit.phase is HardwareMotionPhase.PRECONTACT_TRANSIT
+    assert transit.start_position_m[2] == pytest.approx(safe_height_m)
+    assert transit.end_position_m[2] == pytest.approx(safe_height_m)
+    assert plan.segments[-1].end_position_m[2] == pytest.approx(safe_height_m)
+
+
+def test_tool_orientation_gate_uses_calibrated_tolerance() -> None:
+    calibration = _calibration()
+
+    def pose(angle_rad: float) -> HardwareToolPose:
+        return HardwareToolPose(
+            frame_id=calibration.hardware_frame_id,
+            tool_id=calibration.tool_id,
+            calibration_id=calibration.calibration_id,
+            tip_position_m=(0.02, 0.0, 0.18),
+            tip_orientation_xyzw=_rotated_about_x(
+                calibration.required_tip_orientation_xyzw, angle_rad
+            ),
+            captured_monotonic_s=100.0,
+        )
+
+    plan = _compile(current_tool_pose=pose(0.5 * calibration.tool_orientation_tolerance_rad))
+    assert plan.orientation_tolerance_rad == calibration.tool_orientation_tolerance_rad
+    with pytest.raises(ValueError, match="push orientation"):
+        _compile(current_tool_pose=pose(1.5 * calibration.tool_orientation_tolerance_rad))
+
+
+@pytest.mark.parametrize("tolerance", [0.0, -0.01, 0.2])
+def test_calibration_requires_bounded_orientation_tolerance(tolerance: float) -> None:
+    with pytest.raises(ValueError):
+        _calibration(tool_orientation_tolerance_rad=tolerance)
+
+
+def test_orientation_tolerance_is_part_of_calibration_identity() -> None:
+    assert (
+        _calibration(tool_orientation_tolerance_rad=0.01).calibration_id
+        != _calibration(tool_orientation_tolerance_rad=0.02).calibration_id
+    )

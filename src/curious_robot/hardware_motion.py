@@ -15,6 +15,9 @@ from curious_robot.trajectory import minimum_jerk_blend, minimum_jerk_duration_s
 Vec3 = tuple[float, float, float]
 Quat = tuple[float, float, float, float]
 MINIMUM_JERK_PEAK_ACCELERATION_FACTOR = 10.0 / math.sqrt(3.0)
+# Upper bound on an operator-approved tool-orientation tolerance (about 5.7 deg).
+# Beyond this the fixed-orientation contact-support geometry no longer holds.
+MAXIMUM_TOOL_ORIENTATION_TOLERANCE_RAD = 0.1
 
 
 class _MotionModel(BaseModel):
@@ -22,7 +25,7 @@ class _MotionModel(BaseModel):
 
 
 class HardwareMotionPhase(StrEnum):
-    SAFE_LIFT = "safe_lift"
+    SAFE_PLANE_ENTRY = "safe_plane_entry"
     PRECONTACT_TRANSIT = "precontact_transit"
     CONTACT_DESCENT = "contact_descent"
     CONTACT_APPROACH = "contact_approach"
@@ -65,6 +68,9 @@ class FrankaPushCalibration(_MotionModel):
     maximum_linear_acceleration_m_s2: float = Field(gt=0.0)
     maximum_angular_speed_rad_s: float = Field(gt=0.0)
     maximum_angular_acceleration_rad_s2: float = Field(gt=0.0)
+    tool_orientation_tolerance_rad: float = Field(
+        gt=0.0, le=MAXIMUM_TOOL_ORIENTATION_TOLERANCE_RAD
+    )
 
     @model_validator(mode="after")
     def validate_calibration(self) -> FrankaPushCalibration:
@@ -131,6 +137,7 @@ class FrankaPushMotionPlan(_MotionModel):
     maximum_linear_acceleration_m_s2: float = Field(gt=0.0)
     maximum_angular_speed_rad_s: float = Field(gt=0.0)
     maximum_angular_acceleration_rad_s2: float = Field(gt=0.0)
+    orientation_tolerance_rad: float = Field(gt=0.0)
     command_timeout_s: float = Field(gt=0.0)
     planned_duration_s: float = Field(gt=0.0)
     waypoint_count: int = Field(gt=0)
@@ -232,7 +239,10 @@ def compile_franka_push_plan(
     hardware_safe_z = (
         protocol.safe_height_m + calibration.capability_to_hardware_translation_m[2]
     )
-    safe_z = max(hardware_safe_z, current_tool_pose.tip_position_m[2], push_z)
+    # Enter the protocol safe plane vertically before any lateral motion, even when
+    # the tool starts above it: a long contact-speed descent from an arbitrary
+    # start height is slow and folds the arm through IK discontinuities.
+    safe_z = max(hardware_safe_z, push_z)
     required_push_travel_m = protocol.precontact_offset_m + object_travel_m
     if required_push_travel_m > protocol.maximum_travel_m:
         raise ValueError("hardware push goal exceeds protocol maximum travel")
@@ -268,7 +278,7 @@ def compile_franka_push_plan(
     retreat_safe = (retreat_end[0], retreat_end[1], safe_z)
     points = (
         (
-            HardwareMotionPhase.SAFE_LIFT,
+            HardwareMotionPhase.SAFE_PLANE_ENTRY,
             current_tool_pose.tip_position_m,
             current_safe,
             approach_speed,
@@ -353,6 +363,7 @@ def compile_franka_push_plan(
         maximum_linear_acceleration_m_s2=calibration.maximum_linear_acceleration_m_s2,
         maximum_angular_speed_rad_s=calibration.maximum_angular_speed_rad_s,
         maximum_angular_acceleration_rad_s2=calibration.maximum_angular_acceleration_rad_s2,
+        orientation_tolerance_rad=calibration.tool_orientation_tolerance_rad,
         command_timeout_s=command_timeout_s,
         planned_duration_s=duration_s,
         waypoint_count=waypoint_count,
@@ -453,7 +464,7 @@ def _validate_identities(
             )
         )
     )
-    if not math.isclose(orientation_dot, 1.0, abs_tol=1e-6):
+    if _quaternion_angle_rad_from_dot(orientation_dot) > calibration.tool_orientation_tolerance_rad:
         raise ValueError("tool pose is not at the calibrated push orientation")
 
 
@@ -470,6 +481,12 @@ def _require_inside_workspace(position_m: Vec3, calibration: FrankaPushCalibrati
         )
     ):
         raise ValueError("hardware tool-tip waypoint is outside the calibrated workspace")
+
+
+def _quaternion_angle_rad_from_dot(dot: float) -> float:
+    """Return the rotation angle between two unit quaternions given their dot product."""
+
+    return 2.0 * math.acos(min(1.0, abs(dot)))
 
 
 def _require_unit_quaternion(value: Quat) -> None:

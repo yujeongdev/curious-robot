@@ -179,7 +179,7 @@ factory 자체가 정리해야 한다.
 
 Hardware command는 raw target을 SDK에 바로 넘기지 않는다. frame/object가 명시된
 attested action과 protocol, attempt별 fresh object pose, typed tool-tip pose,
-content-fingerprinted public calibration으로 safe lift → pre-contact transit → contact
+content-fingerprinted public calibration으로 safe-plane entry → pre-contact transit → contact
 descent → guarded contact acquisition → bounded push → contact release → retreat
 lift의 연속 Cartesian plan을 먼저
 만든다. Calibration은 capability→hardware transform, TCP→tip transform,
@@ -194,7 +194,10 @@ singularity, self/environment collision, orientation preflight를 attest해야 �
 Local deployment에서는 operator/factory가 TCB이며 readiness가 robot/tool serial과
 approval revision을 포함한 exact calibration hash를 승인해야 한다. Transport
 result와 deployment artifact도 exact plan ID와 calibration ID를 함께 보존한다.
-또한 measured linear speed/acceleration과 angular speed/acceleration maxima를
+Safe-plane entry는 tool이 protocol safe height보다 높든 낮든 수평 이동 전에 그 높이로
+수직 이동한다. Calibration은 명시적 tool orientation tolerance(최대 0.1 rad)를 hash에
+포함하고, 시작 tool pose gate와 실행 중 측정 orientation 오차 상한이 같은 값을 쓴다.
+또한 measured linear speed/acceleration, angular speed/acceleration, orientation error maxima를
 plan limit과 대조하고 deployment evidence에 보존한다.
 
 ## Acceptance evidence

@@ -93,14 +93,16 @@ trial.
 
 Before a transport receives a command, `compile_franka_push_plan` converts the
 frame-bound attested action, exact experiment protocol, fresh per-attempt object
-pose, and typed current tool-tip pose into a continuous seven-phase Cartesian path: safe lift,
-pre-contact transit, contact descent, guarded contact acquisition, bounded push,
+pose, and typed current tool-tip pose into a continuous seven-phase Cartesian path: safe-plane
+entry, pre-contact transit, contact descent, guarded contact acquisition, bounded push,
 contact release, and retreat lift.
 Every segment keeps the independent force guard active and has a quantized
 minimum-jerk duration whose peak speed and acceleration stay within the
-capability/calibration limits. The content-fingerprinted calibration binds the
+capability/calibration limits. Safe-plane entry moves vertically to the protocol safe
+height, up or down, before any lateral motion; the plan never crosses at an arbitrary
+higher start height followed by a long contact-speed descent. The content-fingerprinted calibration binds the
 capability-to-hardware transform, TCP-to-tip transform, tool/object geometry,
-fixed push orientation, an upright-only cube gate, tool workspace, angular limits, deadline, and waypoint
+fixed push orientation with an explicit tool-orientation tolerance, an upright-only cube gate, tool workspace, angular limits, deadline, and waypoint
 capacity. Contact support geometry keeps the tool-tip center behind the cube's
 target center instead of planning through it; infeasible travel is rejected.
 Before the watchdog is armed, the transport must attest IK, joint limits,
@@ -111,9 +113,11 @@ must name the exact calibration hash approved for the robot serial, tool serial,
 and approval revision. A transport result and the deployment artifact both bind
 that calibration ID and exact motion-plan ID, preventing a stale or different
 path from being recorded as PASS.
-The result reports measured maxima for linear speed/acceleration and angular
-speed/acceleration; the adapter checks all four against the exact plan before
-publishing them in deployment evidence.
+The result reports measured maxima for linear speed/acceleration, angular
+speed/acceleration, and tool-orientation error; the adapter checks all five against
+the exact plan before publishing them in deployment evidence. The same calibrated
+orientation tolerance gates the starting tool pose, so a real arm's sub-degree
+orientation error is bounded explicitly instead of being required to vanish.
 
 The official interfaces underlying the seam are
 [`pylibfranka`](https://frankarobotics.github.io/libfranka/pylibfranka/latest/)

@@ -47,6 +47,7 @@ class HardwarePushResult(_HardwareModel):
     maximum_measured_acceleration_m_s2: float = Field(ge=0.0)
     maximum_measured_angular_speed_rad_s: float = Field(ge=0.0)
     maximum_measured_angular_acceleration_rad_s2: float = Field(ge=0.0)
+    maximum_measured_orientation_error_rad: float = Field(ge=0.0)
     elapsed_s: float = Field(ge=0.0)
     safety_tripped: bool
     watchdog_token: str = Field(min_length=1)

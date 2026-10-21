@@ -265,6 +265,7 @@ class FrankaHardwareReality:
                 maximum_angular_acceleration_rad_s2=(
                     motion_plan.maximum_angular_acceleration_rad_s2
                 ),
+                orientation_tolerance_rad=motion_plan.orientation_tolerance_rad,
             )
             self.transport.disarm_watchdog(watchdog_token)
             watchdog_token = None
@@ -323,6 +324,9 @@ class FrankaHardwareReality:
                 ),
                 maximum_measured_angular_acceleration_rad_s2=(
                     result.maximum_measured_angular_acceleration_rad_s2
+                ),
+                maximum_measured_orientation_error_rad=(
+                    result.maximum_measured_orientation_error_rad
                 ),
                 motion_elapsed_s=result.elapsed_s,
                 observed_final_position_m=final_position,
@@ -509,6 +513,7 @@ def _validate_push_result(
     maximum_acceleration_m_s2: float,
     maximum_angular_speed_rad_s: float,
     maximum_angular_acceleration_rad_s2: float,
+    orientation_tolerance_rad: float,
 ) -> None:
     if result.motion_plan_id != motion_plan_id or result.calibration_id != calibration_id:
         raise ValueError("hardware transport result attests another plan or calibration")
@@ -529,6 +534,8 @@ def _validate_push_result(
         > maximum_angular_acceleration_rad_s2
     ):
         raise ValueError("hardware transport exceeded the calibrated angular acceleration limit")
+    if result.maximum_measured_orientation_error_rad > orientation_tolerance_rad:
+        raise ValueError("hardware transport exceeded the calibrated orientation tolerance")
     expected_trip = result.controller_outcome == "safety_stopped"
     if result.safety_tripped != expected_trip:
         raise ValueError("hardware transport returned inconsistent safety status")

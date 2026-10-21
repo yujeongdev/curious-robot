@@ -78,6 +78,7 @@ def _calibration() -> FrankaPushCalibration:
         maximum_linear_acceleration_m_s2=0.5,
         maximum_angular_speed_rad_s=0.5,
         maximum_angular_acceleration_rad_s2=1.0,
+        tool_orientation_tolerance_rad=0.02,
     )
 
 
@@ -205,6 +206,7 @@ class FakeTransport:
             "maximum_measured_acceleration_m_s2": 0.2,
             "maximum_measured_angular_speed_rad_s": 0.0,
             "maximum_measured_angular_acceleration_rad_s2": 0.0,
+            "maximum_measured_orientation_error_rad": 0.005,
             "elapsed_s": 1.0,
             "safety_tripped": False,
             "watchdog_token": "watchdog-1",
@@ -319,6 +321,7 @@ def test_hardware_reality_executes_only_guarded_capability(tmp_path) -> None:
     assert deployment.calibration_id == _calibration().calibration_id
     assert deployment.maximum_measured_acceleration_m_s2 == pytest.approx(0.2)
     assert deployment.motion_elapsed_s == pytest.approx(1.0)
+    assert deployment.maximum_measured_orientation_error_rad == pytest.approx(0.005)
     assert transport.calls[0]["maximum_force_n"] == pytest.approx(
         skill.payload.protocol.final_push.safety_stop_fraction
         * skill.payload.safety.maximum_force_n
@@ -561,6 +564,7 @@ def test_builder_rejects_unapproved_calibration_before_transport_factory(tmp_pat
         {"maximum_measured_acceleration_m_s2": 100.0},
         {"maximum_measured_angular_speed_rad_s": 100.0},
         {"maximum_measured_angular_acceleration_rad_s2": 100.0},
+        {"maximum_measured_orientation_error_rad": 0.5},
         {"elapsed_s": 100.0},
         {"deadline_enforced": False},
         {"safety_tripped": True},

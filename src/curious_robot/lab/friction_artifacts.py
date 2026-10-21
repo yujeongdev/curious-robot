@@ -158,6 +158,7 @@ class RealityDeploymentPayload(_FrictionModel):
         default=None,
         ge=0.0,
     )
+    maximum_measured_orientation_error_rad: float | None = Field(default=None, ge=0.0)
     motion_elapsed_s: float | None = Field(default=None, ge=0.0)
     observed_final_position_m: tuple[float, float, float]
     peak_contact_force_n: float = Field(ge=0.0)
@@ -178,6 +179,7 @@ class RealityDeploymentPayload(_FrictionModel):
             self.maximum_measured_acceleration_m_s2,
             self.maximum_measured_angular_speed_rad_s,
             self.maximum_measured_angular_acceleration_rad_s2,
+            self.maximum_measured_orientation_error_rad,
             self.motion_elapsed_s,
         )
         if self.motion_plan_id is None and any(value is not None for value in motion_measurements):
