@@ -5,12 +5,11 @@ Generated from the v0.1.0 public reference run on Newton 1.7.0 / Warp 1.18.0.
 ## Result
 
 - Success: `True`
-- Terminal target error: `0.044414 m`
+- Terminal target error: `0.028079 m`
 - Selected policy: `push_straight_low` at `0.040 m/s`
 - Deterministic recovery bound: `2` attempts
 - Reality attempts used: `1`
-- Peak deployment contact force: `4.068217 N`
-- Dynamic friction posterior: `0.451244 ± 0.182327`
+- Dynamic friction posterior: `0.468385 ± 0.189281`
 - Policy protocol SHA-256: `76c3996914dd2d6ce36523ed8f58edc8506b76ad6abc5a96aa90654bc3971d9c`
 
 ## Authority isolation
@@ -22,14 +21,21 @@ before policy deployment.
 ## Content-addressed lineage
 
 - `capability_gap`: `sha256:c1c3b001a37a3079874ea3b75e707fd3e354679d621b4f5bc247d70187588b34`
-- `trajectory_dataset`: `sha256:d8915bdb582b14235b0695d49b773a5b444148955b9a92aaa20ce354ae9b6d0e`
-- `parameter_posterior`: `sha256:5e598fd67c4be4e77b2e5a71db069c1e9ed6aa10b101a2b3e06166a94599c64d`
-- `world_spec_patch`: `sha256:538f60c8b55481709e5e7a9b888135c7ff1098d96e8cac0e5ea8704a66499f8f`
-- `twin_build`: `sha256:321c7ee1e99e761bd19f20a4dd0e386dab891a78b44666ac4b264a804d578d2a`
-- `twin_validation_report`: `sha256:3ba15fe7aa26e4b849f1b04609495071b1b696751ebbbc34b7daf04e9de8d59b`
-- `policy_artifact`: `sha256:ac59b8fc3c55146441d5f5a3409983fbafeddcc881d5250924a0ab524c908d25`
-- `reality_deployment`: `sha256:577ab1a55faf41fd91d861703b21ca71876e997f9d32d4b6268d5beb96220108`
-- `evaluation_report`: `sha256:e3f2a070afa4971c8f6a886153c599c5be691b2b989194da75c2512cf4b00a47`
+- `trajectory_dataset`: `sha256:36261823288970c75ea31ab130b9340bdbc84c45d5cb88f52d6608b5ee2f1eb3`
+- `parameter_posterior`: `sha256:028720cf128cb7f1a11e9a07fd4d5d205469982e52246c2161002d9aa543637d`
+- `world_spec_patch`: `sha256:06261f333dc50cb5e85980f126e5db8a5258f770530d1f533e73ed585f3f28a5`
+- `twin_build`: `sha256:c2378b35eee12759b7f401da7f34ddc5ebc09bb94012bff3eb05cabab145b1a8`
+- `twin_validation_report`: `sha256:95c3f99e2782c134b4649bfecc624355c88463a30dd1f332762e42dfb02fb430`
+- `policy_artifact`: `sha256:6788d14f600b0bd03448f11c4deaa6125307327e76a7dc4ac3754c9a5a94a8fa`
+- `reality_deployment`: `sha256:3578a188447ee1b5e3316c26338f203a7456b6b871858289a49059cc26b5ef16`
+- `evaluation_report`: `sha256:d9fd6ea8cfa90b51690ecccac22ee90739bd48462c87a095c32be413e6505fe4`
+
+## Presentation clearance
+
+- Source run: `1f16dd40-7a31-46a9-bfab-0ef66569252e`
+- Visual frames checked: `1749`
+- Maximum Franka visual-mesh penetration: `0.527 mm`
+- Frames exceeding the `1.0 mm` publication threshold: `0`
 
 Hidden scenario parameters are intentionally absent. This file contains public
 evidence, posterior state, and the terminal evaluator decision only.

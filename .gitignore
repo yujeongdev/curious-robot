@@ -18,6 +18,7 @@ dist/
 build/
 artifacts/
 docs/media/*.mp4
+docs/media/*.mp4.json
 docs/media/*.sha256
 docs/media/.agent-lab-*
 *.egg-info/

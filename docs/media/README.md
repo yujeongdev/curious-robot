@@ -19,6 +19,8 @@ scripts/record_agent_lab_demo.sh \
 The wrapper calls the frontend's `record:demo` script, which owns browser
 replay and frame rendering. It then independently checks that the MP4:
 
+- contains no Franka visual-mesh penetration deeper than 1 mm in the recorded
+  Newton frames;
 - contains a decodable video stream;
 - is exactly 1920×1080 at 30 fps by default;
 - has a positive duration;

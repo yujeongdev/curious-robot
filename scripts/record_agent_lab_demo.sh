@@ -117,6 +117,11 @@ fi
 require_command ffmpeg "Install ffmpeg with your system package manager."
 require_command ffprobe "Install ffprobe (normally included with ffmpeg)."
 
+uv run python "${repo_root}/scripts/check_visual_clearance.py" \
+  --events "${run_dir}/events.ndjson" \
+  --model "${repo_root}/src/web/public/models/franka/fr3.glb" \
+  --maximum-penetration-mm 1.0
+
 if command -v sha256sum >/dev/null 2>&1; then
   checksum_command=(sha256sum)
 elif command -v shasum >/dev/null 2>&1; then

@@ -35,7 +35,14 @@ def test_newton_experiments_identify_hidden_parameters_without_truth_api(tools: 
     assert any(abs(sample.measured_force_n[0]) > 0.05 for sample in evidence.samples)
     assert any(sample.contact_valid for sample in evidence.samples)
     assert all(
-        sample.contact_pair == ("fr3_tool_tip_collision", "unknown_cube_collision")
+        sample.contact_pair[0]
+        in {
+            "fr3_tool_tip_collision",
+            "fr3_hand_collision",
+            "fr3_leftfinger_collision",
+            "fr3_rightfinger_collision",
+        }
+        and sample.contact_pair[1] == "unknown_cube_collision"
         for sample in evidence.samples
         if sample.contact_valid
     )
@@ -151,22 +158,31 @@ def test_franka_cartesian_command_uses_a_bounded_joint_trajectory() -> None:
 
 
 @pytest.mark.gpu
-def test_cube_collision_is_owned_only_by_visible_franka_tool_tip() -> None:
+def test_cube_collision_is_owned_by_visible_franka_end_effector() -> None:
     world = TruthEnvironment(
         PhysicalParameters(0.2, 0.5, 0.3),
         WorldConfig(device="cuda:0", include_robot=True, seed=7),
     )
     try:
-        tool_tip_shape = world.model.shape_label.index("fr3_tool_tip_collision")
         robot_shapes = list(range(world._cube_shape))
-        non_tool_shapes = set(robot_shapes).difference((tool_tip_shape,))
-        assert not world.model.shape_collision_filter_pairs.contains_pair(
-            tool_tip_shape,
-            world._cube_shape,
+        body_labels = tuple(world.model.body_label)
+        shape_bodies = world.model.shape_body.numpy()
+        visible_end_effector_shapes = {
+            shape_index
+            for shape_index in robot_shapes
+            if shape_index in world._tool_shape_indices
+            or body_labels[int(shape_bodies[shape_index])].endswith(
+                ("/fr3_hand", "/fr3_leftfinger", "/fr3_rightfinger")
+            )
+        }
+        arm_shapes = set(robot_shapes).difference(visible_end_effector_shapes)
+        assert all(
+            not world.model.shape_collision_filter_pairs.contains_pair(shape_index, world._cube_shape)
+            for shape_index in visible_end_effector_shapes
         )
         assert all(
             world.model.shape_collision_filter_pairs.contains_pair(shape_index, world._cube_shape)
-            for shape_index in non_tool_shapes
+            for shape_index in arm_shapes
         )
     finally:
         world.close()
@@ -262,12 +278,13 @@ def test_visual_contact_requires_raw_native_contact_and_keeps_normal_distinct_fr
         world.last_raw_tool_contact_force_n = np.array((-2.0, 0.0, 0.0))
         world.last_tool_contact_normal_world = np.array((0.0, 1.0, 0.0))
         world.last_tool_contact_active = True
+        world.last_tool_contact_shape_label = "fr3_leftfinger_collision"
         world._emit_visual_frame(cube_position)
         contact = sink.events[-1]["payload"]["contacts"][0]
         vector = sink.events[-1]["payload"]["vectors"][0]
         assert contact["normal_world"] == (0.0, 1.0, 0.0)
         assert contact["force_world_n"] == (2.0, -0.0, -0.0)
-        assert contact["shape_a_label"] == "fr3_tool_tip_collision"
+        assert contact["shape_a_label"] == "fr3_leftfinger_collision"
         assert contact["shape_b_label"] == "unknown_cube_collision"
         assert "filtered" in vector["label"]
     finally:

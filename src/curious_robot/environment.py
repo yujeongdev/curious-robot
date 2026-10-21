@@ -80,6 +80,7 @@ class NewtonWorld:
         self.last_tool_contact_position_m = np.zeros(3)
         self.last_tool_contact_normal_world = np.zeros(3)
         self.last_tool_contact_active = False
+        self.last_tool_contact_shape_label: str | None = None
         self._sliding = False
         self._grasped = False
         self._compliance_enabled = False
@@ -161,7 +162,16 @@ class NewtonWorld:
         )
         self._cube_shape = cube_shape
         if self.config.include_robot:
-            self._tool_shape_indices = frozenset((tool_tip_shape,))
+            end_effector_bodies = {
+                index
+                for index, label in enumerate(builder.body_label)
+                if label.endswith(("/fr3_hand", "/fr3_leftfinger", "/fr3_rightfinger"))
+            }
+            self._tool_shape_indices = frozenset(
+                index
+                for index in range(cube_shape)
+                if index == tool_tip_shape or int(builder.shape_body[index]) in end_effector_bodies
+            )
             for shape_index in range(cube_shape):
                 if shape_index not in self._tool_shape_indices:
                     builder.add_shape_collision_filter_pair(shape_index, cube_shape)
@@ -386,7 +396,7 @@ class NewtonWorld:
             velocity_m_s=tuple(float(v) for v in vel[:3]),
             measured_force_n=tuple(float(v) for v in measured),
             contact_valid=self.last_tool_contact_active,
-            contact_pair=("fr3_tool_tip_collision", "unknown_cube_collision")
+            contact_pair=(self.last_tool_contact_shape_label, "unknown_cube_collision")
             if self.last_tool_contact_active
             else None,
             contact_position_m=tuple(float(v) for v in self.last_tool_contact_position_m)
@@ -408,6 +418,7 @@ class NewtonWorld:
         self.last_tool_contact_position_m[:] = 0.0
         self.last_tool_contact_normal_world[:] = 0.0
         self.last_tool_contact_active = False
+        self.last_tool_contact_shape_label = None
         if self.tool_contact_sensor is None:
             return
         self.tool_contact_sensor.update(
@@ -436,6 +447,7 @@ class NewtonWorld:
         contact_forces = self.contact_observables.contact_f.numpy()[:contact_count]
         oriented_normals: list[np.ndarray] = []
         normal_weights: list[float] = []
+        contact_shape_labels: list[str] = []
         for first, second, normal, contact_force in zip(
             shape_0, shape_1, normals, contact_forces, strict=True
         ):
@@ -450,9 +462,11 @@ class NewtonWorld:
                 continue
             oriented_normals.append(oriented)
             normal_weights.append(weight)
+            contact_shape_labels.append(self._shape_contact_label(int(first), int(second)))
 
         self.last_tool_contact_active = bool(oriented_normals) and float(np.linalg.norm(raw_force)) > 1e-6
         if self.last_tool_contact_active:
+            self.last_tool_contact_shape_label = contact_shape_labels[int(np.argmax(normal_weights))]
             average_normal = np.average(oriented_normals, axis=0, weights=normal_weights)
             normal_magnitude = float(np.linalg.norm(average_normal))
             if normal_magnitude > 1e-9:
@@ -485,7 +499,7 @@ class NewtonWorld:
                     "position_m": contact_position,
                     "normal_world": contact_normal,
                     "force_world_n": tuple(float(value) for value in raw_contact_force),
-                    "shape_a_label": "fr3_tool_tip_collision",
+                    "shape_a_label": self.last_tool_contact_shape_label,
                     "shape_b_label": "unknown_cube_collision",
                 },
             )
@@ -538,6 +552,15 @@ class NewtonWorld:
                 },
             }
         )
+
+    def _shape_contact_label(self, first_shape: int, second_shape: int) -> str:
+        shape_index = first_shape if first_shape in self._tool_shape_indices else second_shape
+        label = self.model.shape_label[shape_index]
+        if label == "fr3_tool_tip_collision":
+            return label
+        body_index = int(self.model.shape_body.numpy()[shape_index])
+        body_label = self.model.body_label[body_index].rsplit("/", 1)[-1]
+        return f"{body_label}_collision"
 
     def start_recording(self, output_path: str | Path, stride: int = 4) -> None:
         self.stop_recording()
