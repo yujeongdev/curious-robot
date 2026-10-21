@@ -60,6 +60,7 @@ class PublicNumericalConfig(_FrictionModel):
     initial_position_m: tuple[float, float, float]
     maximum_cartesian_speed_m_s: float = Field(default=0.15, gt=0.0)
     maximum_tool_force_n: float = Field(default=15.0, gt=0.0)
+    observation_noise_std: float = Field(default=0.0002, ge=0.0)
     prediction_residual_tolerance_m: float = Field(default=0.03, gt=0.0)
     seed: int = Field(default=7, ge=0)
     target_position_m: tuple[float, float, float]
@@ -140,8 +141,12 @@ class RealityDeploymentPayload(_FrictionModel):
     attempt_count: int = Field(gt=0, le=3)
     attempts: tuple[DeploymentAttempt, ...]
     controller_outcome: Literal["completed", "safety_stopped", "travel_exhausted"]
+    request_id: str | None = Field(default=None, min_length=1)
+    invocation_id: str | None = Field(default=None, min_length=1)
+    attempt_index: int | None = Field(default=None, gt=0, le=3)
     fresh_episode: bool
     observed_final_position_m: tuple[float, float, float]
+    peak_contact_force_n: float = Field(ge=0.0)
     prediction_target_error_m: float = Field(ge=0.0)
     runtime_process_id: int = Field(gt=0)
     safety_tripped: bool

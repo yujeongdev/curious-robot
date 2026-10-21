@@ -112,6 +112,31 @@ The WorldSpec and PolicyArtifact both carry the exact versioned physical
 experiment protocol snapshot and SHA-256; Twin validation and fresh Reality
 deployment reject a mismatched snapshot.
 
+Successful terminal runs can be distilled into an agent-visible
+`CapabilityArtifact`. The trusted coordinator declassifies only the evaluator's
+success decision into a public `CapabilityAttestation`; the evaluator payload
+remains inaccessible while its content ID is retained as an auditable
+commitment, never as agent-readable provenance. The artifact carries a typed
+`ApplicabilityEnvelope`, independent `SafetyGuardrail`, and bounded
+`RecoveryPolicy`. Its current friction skill is intentionally narrow: the
+requested target/radius must exactly match the Twin-validated goal, while the
+initial-pose tolerance derives only from the recorded observation-noise
+contract. Nominal
+execution is deterministic and LLM-free; any envelope, safety, controller, or
+recovery violation returns control to the agent.
+Reality exposes a separate `deploy_capability` operation for this path. It
+reloads the public attestation and complete capability provenance, then enforces
+the applicability and guardrail again at the command boundary; the discovery
+pipeline's internal `deploy_policy` operation cannot masquerade as a distilled
+skill invocation.
+
+The coordinator is part of the trusted computing base for declassification.
+Agent and Reality/Twin workers never receive a generic agent-store writer;
+their scoped handles cannot write `capability_attestation` or
+`capability_artifact`. The local design relies on this capability separation,
+not a cryptographic issuer signature. A distributed/untrusted coordinator would
+require signed attestations before preserving the same claim.
+
 The legacy multi-experiment `run_episode` path has not yet migrated to these
 workers. It remains available for the Agent Lab demo and must not be cited as
 process-isolated. This distinction keeps the completed friction slice from

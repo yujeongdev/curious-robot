@@ -54,6 +54,8 @@ class LabArtifactKind(StrEnum):
     POLICY_ARTIFACT = "policy_artifact"
     REALITY_DEPLOYMENT = "reality_deployment"
     EVALUATION_REPORT = "evaluation_report"
+    CAPABILITY_ARTIFACT = "capability_artifact"
+    CAPABILITY_ATTESTATION = "capability_attestation"
 
 
 class LabOperation(StrEnum):
@@ -62,6 +64,7 @@ class LabOperation(StrEnum):
     VALIDATE_POLICY = "validate_policy"
     DEPLOY_POLICY = "deploy_policy"
     EVALUATE_TERMINAL = "evaluate_terminal"
+    DEPLOY_CAPABILITY = "deploy_capability"
 
 
 @dataclass(frozen=True, slots=True)

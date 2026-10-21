@@ -22,6 +22,18 @@ def main(argv: list[str] | None = None) -> None:
     friction.add_argument("--seed", type=int, default=7)
     friction.add_argument("--device", default="cuda:0")
     friction.add_argument("--output", default="artifacts/lab-friction")
+    distill = subparsers.add_parser(
+        "lab-distill",
+        help="distill a successful friction run into a deterministic capability",
+    )
+    distill.add_argument("--run", required=True, help="terminal lab-friction artifact directory")
+    execute_skill = subparsers.add_parser(
+        "lab-execute-skill",
+        help="execute a distilled capability through simulated Reality",
+    )
+    execute_skill.add_argument("--run", required=True)
+    execute_skill.add_argument("--seed", type=int, default=7)
+    execute_skill.add_argument("--device", default="cuda:0")
     web = subparsers.add_parser("web", help="launch the local Agent Lab")
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8765)
@@ -55,6 +67,20 @@ def main(argv: list[str] | None = None) -> None:
         )
         manifest = Path(args.output) / "friction_capability_manifest.json"
         print(manifest.read_text(), end="")
+        return
+    if args.command == "lab-distill":
+        from .lab.capability_artifact import distill_from_manifest
+
+        reference = distill_from_manifest(args.run)
+        print(reference.artifact_id)
+        return
+    if args.command == "lab-execute-skill":
+        from .lab.capability_skill import execute_from_manifest
+
+        decision = execute_from_manifest(args.run, device=args.device, seed=args.seed)
+        print(decision.status.value)
+        if decision.status.value == "return_to_agent":
+            raise SystemExit(2)
         return
 
     if args.host not in {"127.0.0.1", "localhost"}:

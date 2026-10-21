@@ -197,6 +197,7 @@ def _world_config_from_spec(document: dict[str, Any], *, device: str):  # noqa: 
         initial_position_m=values.initial_position_m,
         maximum_cartesian_speed_m_s=values.maximum_cartesian_speed_m_s,
         maximum_tool_force_n=values.maximum_tool_force_n,
+        observation_noise_std=values.observation_noise_std,
         prediction_residual_tolerance_m=values.prediction_residual_tolerance_m,
         seed=values.seed + 10_000,
         target_position_m=values.target_position_m,

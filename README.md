@@ -117,6 +117,31 @@ its separate CAS authority. The private seed override is for evaluator
 reproducibility; the trusted launcher delivers it only to Reality, scrubs it
 from every child environment, and never serializes it to an agent artifact.
 
+After a successful terminal evaluation, distill the run into a reusable,
+content-addressed deterministic capability:
+
+```bash
+uv run curious-robot lab-distill --run artifacts/lab-friction
+```
+
+The capability records its validated target, sensor-derived initial-pose tolerance and workspace, force/speed/attempt
+bounds, and recovery exits. Nominal decisions require no LLM; a missing
+operation, out-of-envelope request, safety trip, controller failure, or exhausted
+recovery bound returns control to the agent.
+
+Run the distilled capability through the same independent Reality-side
+guardrail:
+
+```bash
+CURIOUS_ROBOT_EVALUATOR_SCENARIO_SEED=7 \
+  uv run curious-robot lab-execute-skill \
+  --run artifacts/lab-friction --seed 7 --device cuda:0
+```
+
+Reality reloads and verifies the CapabilityArtifact, attestation, source
+deployment, policy, exact target/radius, protocol, and safety limits before it
+sends any robot command. The result is written to `skill_execution.json`.
+
 During a run the CLI emits stages such as `REASON`, `ACT / MEASURE`, `LEARN`,
 `PREDICT`, and `VERIFY`. Open `artifacts/demo/discovery_timeline.html` for the
 legacy static evidence trail, or view `artifacts/demo/discovery.gif`.
