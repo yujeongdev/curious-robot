@@ -1,0 +1,2 @@
+# Bundled vendor code may preserve whitespace inside generated template strings.
+src/curious_robot/web_static/assets/*.js -whitespace

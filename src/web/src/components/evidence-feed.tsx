@@ -42,6 +42,62 @@ function iconFor(event: AgentEvent) {
   return <Bot />;
 }
 
+const TOOL_LANES = {
+  observe_scene: "REALITY",
+  observe_object_pose: "REALITY",
+  get_robot_state: "REALITY",
+  get_tool_wrench: "REALITY",
+  move_joint: "REALITY",
+  move_cartesian: "REALITY",
+  open_gripper: "REALITY",
+  close_gripper: "REALITY",
+  grasp_object: "REALITY",
+  release_object: "REALITY",
+  execute_safe_push: "REALITY",
+  enable_cartesian_compliance: "REALITY",
+  set_desired_force: "REALITY",
+  check_force_condition: "REALITY",
+  release_force_control: "REALITY",
+  weigh_object: "REALITY",
+  probe_static_friction: "REALITY",
+  probe_dynamic_friction: "REALITY",
+  estimate_center_of_mass: "REALITY",
+  verify_task_success: "REALITY",
+  create_belief_simulation: "TWIN",
+  update_physical_parameters: "TWIN",
+  simulate_candidate_action: "TWIN",
+  evaluate_prediction_error: "TWIN",
+  estimate_parameter_uncertainty: "INFERENCE",
+  propose_experiment: "INFERENCE",
+  evaluate_information_gain: "INFERENCE",
+  select_next_action: "INFERENCE",
+} as const;
+
+type EventLane = "REALITY" | "TWIN" | "INFERENCE" | "SYSTEM";
+
+export function eventLane(event: AgentEvent): EventLane {
+  if (event.type.startsWith("tool.")) {
+    const toolName = String(event.payload.tool_name ?? "");
+    return TOOL_LANES[toolName as keyof typeof TOOL_LANES] ?? "SYSTEM";
+  }
+  if (
+    event.type.startsWith("measurement.")
+    || event.type === "action.executed"
+    || event.type === "verification.completed"
+    || event.type === "safety.triggered"
+  ) return "REALITY";
+  if (event.type === "simulation.belief_rebuilt" || event.type === "prediction.completed") {
+    return "TWIN";
+  }
+  if (
+    event.type === "belief.updated"
+    || event.type === "rationale.published"
+    || event.type === "action.selected"
+    || event.type === "learning.completed"
+  ) return "INFERENCE";
+  return "SYSTEM";
+}
+
 function EventSummary({ event }: { event: AgentEvent }) {
   const payload = event.payload;
   if (event.type === "rationale.published") return <p>{String(payload.summary)}</p>;
@@ -81,6 +137,7 @@ function EventSummary({ event }: { event: AgentEvent }) {
 function EvidenceCard({ event }: { event: AgentEvent }) {
   const inspect = useRunStore((state) => state.inspect);
   const expandable = event.type.startsWith("tool.") || event.type === "measurement.sampled";
+  const lane = eventLane(event);
   return (
     <article className={`evidence-card evidence-card--${event.type.replace(".", "-")}`} tabIndex={0} onFocus={() => inspect(event.sequence)}>
       <header>
@@ -89,7 +146,10 @@ function EvidenceCard({ event }: { event: AgentEvent }) {
           <strong>{eventTitle(event)}</strong>
           <span className="mono">#{event.sequence.toString().padStart(4, "0")} · {event.sim_time_s?.toFixed(2) ?? "—"} s</span>
         </div>
-        {event.stage && <Badge>{event.stage.replaceAll("_", " ")}</Badge>}
+        <div className="evidence-badges">
+          <Badge className={`lane-badge lane-badge--${lane.toLowerCase()}`}>{lane}</Badge>
+          {event.stage && <Badge>{event.stage.replaceAll("_", " ")}</Badge>}
+        </div>
       </header>
       <EventSummary event={event} />
       {expandable && (

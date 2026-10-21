@@ -29,10 +29,16 @@ sensor producer is validated.
 
 ## Dual-world Agent Lab
 
-Agent Lab will show Simulated Reality and the learned Newton Twin side by side
-on one causal event cursor. Each world retains its own local simulation time,
-identity, scenario, and belief revision. New evidence is produced only in
-Reality; Twin rollouts predict experiment value and policy outcomes.
+The first dual-world slice is complete. Agent Lab shows Simulated Reality and
+the learned Newton Twin side by side on one causal event cursor. Each world
+retains its own last frame, local simulation time, identity, scenario, camera,
+and belief revision. New evidence is produced only in Reality; Twin rollouts
+predict policy outcomes. Replay and media capture acknowledge both panes.
+
+The next UI slice will consume the isolated laboratory workers' event bridge,
+add task/attempt history, and render manifest-driven object geometry. Until
+that bridge lands, the dual-world interface visualizes the existing integrated
+episode stream and must not imply that browser rendering is a physics worker.
 
 ## Acceptance target
 

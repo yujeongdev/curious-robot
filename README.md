@@ -37,7 +37,8 @@ physical acceptance gates pass.
 - independent Reality, learned Twin, and Evaluator worker processes
 - content-addressed evidence and policy lineage
 - task-level experiment selection using information gain, cost, and risk
-- live and replayable Agent Lab UI driven by authoritative Newton frames
+- live and replayable dual-world Agent Lab that separates Reality experiments
+  and deployment from learned-Twin calibration and prediction
 - visual playback and numerical physics re-execution as separate modes
 - bounded hardware interfaces that reject unsupported deployment
 

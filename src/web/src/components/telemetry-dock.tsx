@@ -25,7 +25,7 @@ export function TelemetryDock({ run }: { run: RunState }) {
       {!collapsed && (
         <div className="telemetry-grid">
           <div className="chart-panel" aria-label="Measured versus desired force chart">
-            <div className="chart-title"><strong>Contact force</strong><span><i className="legend-force" /> measured <i className="legend-command" /> desired</span></div>
+            <div className="chart-title"><strong>Reality contact force</strong><span><i className="legend-force" /> measured <i className="legend-command" /> desired</span></div>
             {run.measurements.length === 0 ? <div className="chart-empty">Waiting for the friction experiment · N</div> : (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={[...run.measurements]} margin={{ top: 8, right: 12, bottom: 0, left: -18 }}>
@@ -41,7 +41,7 @@ export function TelemetryDock({ run }: { run: RunState }) {
             )}
           </div>
           <div className="belief-panel">
-            <div className="chart-title"><strong>Parameter belief</strong><Badge>REV {Math.max(0, ...beliefRows.map((belief) => belief.revision))}</Badge></div>
+            <div className="chart-title"><strong>Posterior → Twin parameters</strong><Badge>REV {Math.max(0, ...beliefRows.map((belief) => belief.revision))}</Badge></div>
             {beliefRows.length === 0 ? <div className="chart-empty">Broad priors · waiting for measurements</div> : beliefRows.map((belief) => (
               <div className="belief-row" key={belief.parameter}>
                 <span>{belief.parameter.replaceAll("_", " ")}</span>
@@ -52,7 +52,7 @@ export function TelemetryDock({ run }: { run: RunState }) {
             ))}
           </div>
           <div className="outcome-panel">
-            <div className="chart-title"><strong>Prediction check</strong></div>
+            <div className="chart-title"><strong>Twin prediction ↔ Reality</strong></div>
             {run.verification ? (
               <div className={run.verification.success ? "outcome-success" : "outcome-failed"}>
                 <span>{run.verification.success ? "✓ VERIFIED" : "× MISMATCH"}</span>
