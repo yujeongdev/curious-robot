@@ -11,6 +11,7 @@ from .contracts import (
     ArtifactRef,
     ArtifactResolver,
     ArtifactVisibility,
+    LabArtifactKind,
     PipelineLane,
 )
 
@@ -56,49 +57,49 @@ _TRANSITION_RULES = {
     PipelineState.CREATED: TransitionRule(
         PipelineState.CAPABILITY_GAP_ASSESSED,
         PipelineLane.CAPABILITY_BUILD,
-        "capability_gap",
+        LabArtifactKind.CAPABILITY_GAP.value,
         ArtifactVisibility.AGENT,
     ),
     PipelineState.CAPABILITY_GAP_ASSESSED: TransitionRule(
         PipelineState.REALITY_EVIDENCE_CAPTURED,
         PipelineLane.REALITY,
-        "trajectory_dataset",
+        LabArtifactKind.TRAJECTORY_DATASET.value,
         ArtifactVisibility.AGENT,
     ),
     PipelineState.REALITY_EVIDENCE_CAPTURED: TransitionRule(
         PipelineState.POSTERIOR_ESTIMATED,
         PipelineLane.CAPABILITY_BUILD,
-        "parameter_posterior",
+        LabArtifactKind.PARAMETER_POSTERIOR.value,
         ArtifactVisibility.AGENT,
     ),
     PipelineState.POSTERIOR_ESTIMATED: TransitionRule(
         PipelineState.TWIN_BUILT,
         PipelineLane.TWIN,
-        "twin_build",
+        LabArtifactKind.TWIN_BUILD.value,
         ArtifactVisibility.AGENT,
     ),
     PipelineState.TWIN_BUILT: TransitionRule(
         PipelineState.TWIN_VALIDATED,
         PipelineLane.TWIN,
-        "twin_validation_report",
+        LabArtifactKind.TWIN_VALIDATION_REPORT.value,
         ArtifactVisibility.AGENT,
     ),
     PipelineState.TWIN_VALIDATED: TransitionRule(
         PipelineState.POLICY_VALIDATED,
         PipelineLane.DEPLOYMENT,
-        "policy_artifact",
+        LabArtifactKind.POLICY_ARTIFACT.value,
         ArtifactVisibility.AGENT,
     ),
     PipelineState.POLICY_VALIDATED: TransitionRule(
         PipelineState.REALITY_DEPLOYED,
         PipelineLane.REALITY,
-        "reality_deployment",
+        LabArtifactKind.REALITY_DEPLOYMENT.value,
         ArtifactVisibility.AGENT,
     ),
     PipelineState.REALITY_DEPLOYED: TransitionRule(
         PipelineState.EVALUATED,
         PipelineLane.DEPLOYMENT,
-        "evaluation_report",
+        LabArtifactKind.EVALUATION_REPORT.value,
         ArtifactVisibility.EVALUATOR,
     ),
 }
@@ -171,11 +172,11 @@ class LaboratoryPipeline:
             if self._history:
                 prior_ids = {item.artifact_id for item in self._history[-1].evidence}
                 if not any(
-                    prior_ids.issubset({item.artifact_id for item in candidate.provenance})
+                    self._lineage_contains(candidate, prior_ids)
                     for candidate in candidates
                 ):
                     raise IllegalPipelineTransition(
-                        f"{rule.evidence_kind} must directly reference the prior transition evidence"
+                        f"{rule.evidence_kind} must descend from the prior transition evidence"
                     )
         previous = self._state
         transition = PipelineTransition(
@@ -189,3 +190,26 @@ class LaboratoryPipeline:
         self._state = target
         self._history.append(transition)
         return transition
+
+    def _lineage_contains(
+        self,
+        envelope: ArtifactEnvelope,
+        required_ids: set[str],
+    ) -> bool:
+        pending = list(envelope.provenance)
+        visited: set[str] = set()
+        while pending:
+            reference = pending.pop()
+            if reference.artifact_id in visited:
+                continue
+            visited.add(reference.artifact_id)
+            if required_ids.issubset(visited):
+                return True
+            try:
+                ancestor = self._resolver.get(reference)
+            except (FileNotFoundError, PermissionError, RuntimeError, ValueError) as error:
+                raise IllegalPipelineTransition(
+                    f"artifact lineage is not present and valid: {reference.artifact_id}"
+                ) from error
+            pending.extend(ancestor.provenance)
+        return required_ids.issubset(visited)

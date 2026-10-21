@@ -44,6 +44,26 @@ class PipelineLane(StrEnum):
     CAPABILITY_BUILD = "capability_build"
 
 
+class LabArtifactKind(StrEnum):
+    CAPABILITY_GAP = "capability_gap"
+    TRAJECTORY_DATASET = "trajectory_dataset"
+    PARAMETER_POSTERIOR = "parameter_posterior"
+    WORLD_SPEC_PATCH = "world_spec_patch"
+    TWIN_BUILD = "twin_build"
+    TWIN_VALIDATION_REPORT = "twin_validation_report"
+    POLICY_ARTIFACT = "policy_artifact"
+    REALITY_DEPLOYMENT = "reality_deployment"
+    EVALUATION_REPORT = "evaluation_report"
+
+
+class LabOperation(StrEnum):
+    FRICTION_EXPERIMENT = "friction_experiment"
+    BUILD_TWIN = "build_twin"
+    VALIDATE_POLICY = "validate_policy"
+    DEPLOY_POLICY = "deploy_policy"
+    EVALUATE_TERMINAL = "evaluate_terminal"
+
+
 @dataclass(frozen=True, slots=True)
 class ArtifactRef:
     artifact_id: str
@@ -164,7 +184,12 @@ class WorldSpec:
         ):
             raise ValueError("WorldSpec sources must be agent-visible PASS artifacts")
         for patch_id in self.applied_patch_ids:
-            ArtifactRef(patch_id, "world_spec_patch", ArtifactVisibility.AGENT, ArtifactOutcome.PASS)
+            ArtifactRef(
+                patch_id,
+                LabArtifactKind.WORLD_SPEC_PATCH.value,
+                ArtifactVisibility.AGENT,
+                ArtifactOutcome.PASS,
+            )
 
     @classmethod
     def create(
@@ -260,7 +285,7 @@ class WorldSpecPatch:
         if any(
             item.visibility is not ArtifactVisibility.AGENT
             or item.outcome is not ArtifactOutcome.PASS
-            or item.kind != "parameter_posterior"
+            or item.kind != LabArtifactKind.PARAMETER_POSTERIOR.value
             for item in self.evidence
         ):
             raise ValueError("WorldSpecPatch requires agent-visible PASS parameter_posterior evidence")

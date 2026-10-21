@@ -91,17 +91,31 @@ Only `model_parameters` may be patched, agent-visible PASS evidence is required,
 and the resulting spec retains both evidence refs and applied patch IDs.
 
 The pipeline state machine resolves every evidence ref from CAS, checks its
-integrity, kind, visibility, outcome, and direct lineage before transition. It publishes
+integrity, kind, visibility, outcome, and causal CAS lineage before transition. It publishes
 one of four stable lanes: `reality`, `twin`, `deployment`, or
 `capability_build`. A validated policy can reach Reality only after Twin build
-and validation; evaluation occurs only after a Reality deployment artifact.
-PR 2 will make the deployment genuinely fresh by constructing its worker then.
+and validation; evaluation occurs only after a fresh Reality deployment artifact.
 
-The existing discovery runner has not yet been relabeled as this pipeline. The
-first end-to-end capability slice will put Reality and Twin adapters in distinct
-workers and migrate evidence through these contracts. This keeps the contracts
-honest: declaring an identity is not presented as process isolation until the
-worker boundary exists.
+The `lab-friction` runner is the first end-to-end implementation of this
+pipeline. One persistent Reality service owns hidden parameters and allocates
+separate experiment and deployment `TruthEnvironment` instances. A different
+process builds and validates `NewtonLearnedTwin` only from the posterior
+`WorldSpec`; a third process evaluates the terminal deployment. The trusted
+coordinator owns CAS and the FSM but receives no sampled hidden physical
+parameters. Normal runs sample the scenario inside Reality. In explicit
+evaluator-reproducibility mode the launcher passes the private seed only to
+Reality and scrubs it from every child environment.
+Reality and Twin receive only agent-store handles. The evaluator receives
+separate read-agent/write-evaluator handles. Root-level manifest/report output
+is an explicit trusted-user terminal summary and is never fed back to the agent.
+The WorldSpec and PolicyArtifact both carry the exact versioned physical
+experiment protocol snapshot and SHA-256; Twin validation and fresh Reality
+deployment reject a mismatched snapshot.
+
+The legacy multi-experiment `run_episode` path has not yet migrated to these
+workers. It remains available for the Agent Lab demo and must not be cited as
+process-isolated. This distinction keeps the completed friction slice from
+overstating the older runner's authority boundary.
 
 The full contract and migration order are documented in
 [`specs/2026-10-21-self-building-lab-spine.md`](specs/2026-10-21-self-building-lab-spine.md).

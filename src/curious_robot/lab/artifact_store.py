@@ -22,6 +22,10 @@ class ArtifactAuthorityError(PermissionError):
     """An artifact crossed its declared authority boundary."""
 
 
+class ArtifactKindPermissionError(ArtifactAuthorityError):
+    """A scoped store capability was used for an undeclared artifact kind."""
+
+
 def _rejected_payload_id(value: JsonValue) -> str:
     """Fingerprint invalid JSON inputs without permitting them into an artifact body."""
 
@@ -80,21 +84,25 @@ class ContentAddressedArtifactStore:
         errors: tuple[str, ...],
         validation_conditions: tuple[str, ...],
         provenance: tuple[ArtifactRef, ...] = (),
+        diagnostics: JsonValue = None,
     ) -> ArtifactRef:
         """Preserve a deterministic rejection record without publishing invalid content."""
 
         if not errors:
             raise ValueError("validation failure must include at least one error")
+        payload: dict[str, JsonValue] = {
+            "attempted_kind": attempted_kind,
+            "errors": list(errors),
+            "rejected_payload_id": _rejected_payload_id(rejected_payload),
+        }
+        if diagnostics is not None:
+            payload["diagnostics"] = diagnostics
         return self.put(
             ArtifactEnvelope(
                 kind=f"{attempted_kind}.validation_failure",
                 visibility=self.visibility,
                 outcome=ArtifactOutcome.FAIL,
-                payload={
-                    "attempted_kind": attempted_kind,
-                    "errors": list(errors),
-                    "rejected_payload_id": _rejected_payload_id(rejected_payload),
-                },
+                payload=payload,
                 provenance=provenance,
                 validation_conditions=validation_conditions,
             )
@@ -148,6 +156,56 @@ class LaboratoryArtifactStores:
         return store.get(reference)
 
 
+class ScopedArtifactStore:
+    """Least-authority read/write view over one visibility-specific CAS."""
+
+    __slots__ = ("_read_kinds", "_store", "_write_kinds")
+
+    def __init__(
+        self,
+        store: ContentAddressedArtifactStore,
+        *,
+        read_kinds: frozenset[str],
+        write_kinds: frozenset[str],
+    ) -> None:
+        self._store = store
+        self._read_kinds = read_kinds
+        self._write_kinds = write_kinds
+
+    def get(self, reference: ArtifactRef) -> ArtifactEnvelope:
+        if reference.kind not in self._read_kinds:
+            raise ArtifactKindPermissionError(f"artifact kind is not readable: {reference.kind}")
+        return self._store.get(reference)
+
+    def put(self, envelope: ArtifactEnvelope) -> ArtifactRef:
+        if envelope.kind not in self._write_kinds:
+            raise ArtifactKindPermissionError(f"artifact kind is not writable: {envelope.kind}")
+        return self._store.put(envelope)
+
+    def record_validation_failure(
+        self,
+        *,
+        attempted_kind: str,
+        rejected_payload: JsonValue,
+        errors: tuple[str, ...],
+        validation_conditions: tuple[str, ...],
+        provenance: tuple[ArtifactRef, ...] = (),
+        diagnostics: JsonValue = None,
+    ) -> ArtifactRef:
+        if attempted_kind not in self._write_kinds:
+            raise ArtifactKindPermissionError(
+                f"artifact failure kind is not writable: {attempted_kind}"
+            )
+        return self._store.record_validation_failure(
+            attempted_kind=attempted_kind,
+            rejected_payload=rejected_payload,
+            errors=errors,
+            validation_conditions=validation_conditions,
+            provenance=provenance,
+            diagnostics=diagnostics,
+        )
+
+
 def open_agent_artifact_store(root: Path) -> ContentAddressedArtifactStore:
     """Open the sole CAS capability that may be injected into an agent worker."""
 
@@ -159,4 +217,30 @@ def open_evaluator_artifact_store(root: Path) -> ContentAddressedArtifactStore:
 
     return ContentAddressedArtifactStore(
         root / "evaluator", visibility=ArtifactVisibility.EVALUATOR
+    )
+
+
+def open_agent_artifact_capability(
+    root: Path,
+    *,
+    read_kinds: frozenset[str],
+    write_kinds: frozenset[str],
+) -> ScopedArtifactStore:
+    return ScopedArtifactStore(
+        open_agent_artifact_store(root),
+        read_kinds=read_kinds,
+        write_kinds=write_kinds,
+    )
+
+
+def open_evaluator_artifact_capability(
+    root: Path,
+    *,
+    read_kinds: frozenset[str],
+    write_kinds: frozenset[str],
+) -> ScopedArtifactStore:
+    return ScopedArtifactStore(
+        open_evaluator_artifact_store(root),
+        read_kinds=read_kinds,
+        write_kinds=write_kinds,
     )

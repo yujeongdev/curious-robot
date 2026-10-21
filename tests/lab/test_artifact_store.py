@@ -4,7 +4,12 @@ import json
 
 import pytest
 
-from curious_robot.lab.artifact_store import ArtifactAuthorityError, LaboratoryArtifactStores
+from curious_robot.lab.artifact_store import (
+    ArtifactAuthorityError,
+    ArtifactKindPermissionError,
+    LaboratoryArtifactStores,
+    open_agent_artifact_capability,
+)
 from curious_robot.lab.contracts import (
     ArtifactEnvelope,
     ArtifactOutcome,
@@ -120,3 +125,29 @@ def test_schema_rejection_is_a_deterministic_fail_artifact(tmp_path) -> None:
     assert first == second
     assert first.outcome is ArtifactOutcome.FAIL
     assert store.get(first).payload["errors"] == ["friction must be finite"]
+
+
+def test_scoped_worker_store_enforces_artifact_kind_capabilities(tmp_path) -> None:
+    stores = LaboratoryArtifactStores(tmp_path)
+    capability_gap = stores.agent.put(
+        ArtifactEnvelope(
+            kind="capability_gap",
+            payload={"closed": True},
+            validation_conditions=("capability gap is closed",),
+        )
+    )
+    reality_store = open_agent_artifact_capability(
+        tmp_path,
+        read_kinds=frozenset({"capability_gap"}),
+        write_kinds=frozenset({"trajectory_dataset"}),
+    )
+
+    assert reality_store.get(capability_gap).kind == "capability_gap"
+    with pytest.raises(ArtifactKindPermissionError):
+        reality_store.put(
+            ArtifactEnvelope(
+                kind="scenario_truth",
+                payload={"mass_kg": 0.42},
+                validation_conditions=("private scenario schema valid",),
+            )
+        )

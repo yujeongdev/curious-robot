@@ -96,6 +96,27 @@ Use `--device cpu` for a portable run. The run creates structured decisions,
 measurements, belief history, replay state, parameter and trajectory plots,
 and a final result summary under the output directory.
 
+### Isolated friction capability
+
+The first explicit Real-to-Sim-to-Real slice runs Reality, learned Twin, and
+terminal Evaluator in three spawned processes. Reality privately retains one
+sampled scenario, destroys the experiment world, and allocates a fresh world
+before deploying the Twin-validated push policy:
+
+```bash
+CURIOUS_ROBOT_EVALUATOR_SCENARIO_SEED=7 \
+  uv run curious-robot lab-friction \
+  --seed 7 --device cuda:0 --output artifacts/lab-friction
+```
+
+Inspect `friction_capability_report.md` for the concise result and process/world
+isolation evidence. `friction_capability_manifest.json` contains the complete
+content-addressed artifact chain. These two root-level files are trusted-user
+terminal reports, not agent inputs; the full evaluator artifact remains under
+its separate CAS authority. The private seed override is for evaluator
+reproducibility; the trusted launcher delivers it only to Reality, scrubs it
+from every child environment, and never serializes it to an agent artifact.
+
 During a run the CLI emits stages such as `REASON`, `ACT / MEASURE`, `LEARN`,
 `PREDICT`, and `VERIFY`. Open `artifacts/demo/discovery_timeline.html` for the
 legacy static evidence trail, or view `artifacts/demo/discovery.gif`.

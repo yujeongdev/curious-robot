@@ -52,7 +52,7 @@ CREATED
 any non-terminal state -> FAILED             preserved FAIL artifact required
 ```
 
-전이는 CAS에 실제 저장된, 직전 evidence를 직접 provenance로 갖는 정확한 kind의
+전이는 CAS에 실제 저장된, 직전 evidence로 이어지는 provenance 계보를 갖는 정확한 kind의
 PASS evidence를 요구한다. 실패 전이는 반대로 CAS의 FAIL artifact를 요구한다.
 잘못된 순서나 terminal 이후 전이는 state와 history를 바꾸지 않고 거부한다. 이 네
 lane 값이 차후 Agent Lab의 Reality / Twin / Deployment / Capability Build 뷰 계약이다.
@@ -73,19 +73,20 @@ lineage가 다르면 다른 artifact다. `WorldSpec` 역시 caller의 mutable di
 
 ## Authority and threat boundary
 
-Python 객체 은닉은 보안 sandbox가 아니다. 실제 권한 경계는 다음 capability slice의
-별도 worker process와 서로 다른 artifact root다. 이번 contract slice는 실제 spawn
-handshake에서 secret sentinel이 노출되지 않고 PID가 다른 것을 검증하고,
-coordinator가 agent에 agent store만 전달할 factory와 검증 규칙을 제공한다. 현재
-discovery runner 자체의 worker migration은 아직 PR 2 범위다. 키 이름 blacklist로
-truth를 찾는 방식은 권한 모델로 사용하지 않는다.
+Python 객체 은닉은 보안 sandbox가 아니다. `lab-friction`은 Reality, Twin,
+Evaluator를 서로 다른 spawned process에 두고 authority별 artifact capability를
+주입한다. spawn handshake에서 secret sentinel이 노출되지 않고 PID가 다른
+것을 검증한다. 단, 기존 Agent Lab `run_episode` path의 worker migration은 아직
+남아 있다. 키 이름 blacklist로 truth를 찾는 방식은 권한 모델로 사용하지
+않는다.
 
-## Next capability slice
+## Implemented capability slice
 
-한 개의 friction-aware push를 끝까지 연결한다.
+`curious-robot lab-friction`은 한 개의 friction-aware push capability를 끝까지
+연결한다.
 
 ```text
-Reality friction experiment
+Reality static-breakaway + dynamic-slide experiment
   -> TrajectoryDataset
   -> ParameterPosterior
   -> WorldSpecPatch
@@ -96,10 +97,30 @@ Reality friction experiment
   -> terminal EvaluationReport
 ```
 
-이때 현재 `RobotRealityAdapter`를 `RealityPort` worker 뒤로 옮기고, posterior 기반
-Newton environment를 `TwinPort` worker가 새로 구성한다. 예비 FCI/ROS 2 adapter는
-같은 operation schema를 구현하되 readiness와 safety guardrail이 없으면 선택되지
-않는다.
+Reality worker는 hidden scenario를 계속 소유하지만 실험 world를 닫고 policy
+deployment용 world를 새로 만든다. Twin worker는 public trajectory에서 계산한
+posterior가 적용된 `WorldSpec`만 받고, 자신이 build artifact로 보고한 바로 그 Newton
+world에서 fixed push를 검증한다. Evaluator worker는 terminal deployment 이후 공개
+goal predicate와 safety 결과만 평가한다. terminal evaluation 전의 artifact/schema/worker
+실패는 FAIL artifact로 보존하고 FSM을 terminal `FAILED`로 바꾼다. `EVALUATED`
+후 생성하는 trusted-user manifest/report는 과학적 FSM의 일부가 아니므로, 출력
+실패가 완료된 evaluation을 나중에 `FAILED`로 바꾸지 않는다.
+
+WorldSpec과 PolicyArtifact는 실행할 physical experiment protocol snapshot과 SHA-256를
+같이 소유한다. Twin은 그 snapshot으로 validation하고 Reality는 policy의
+hash를 다시 검사한 뒤 같은 protocol로 deployment한다. Twin validation PASS는
+force/tilt feasibility뿐 아니라 task target radius 도달을 요구한다. Reality
+safety stop은 유효한 terminal deployment record로 보존하되 mission success는 false로
+평가된다.
+
+현재 PolicyArtifact의 recovery branch는 최대 2회의 동일한 bounded push다.
+각 실행 후 공개 pose로 target radius 진입을 검사하고 성공하면 즉시
+종료하며, safety guardrail이 발화하면 추가 명령을 보내지 않는다. Twin에서도
+같은 분기와 최대 횟수를 검증한 뒤만 policy를 발행한다.
+
+기존 `run_episode`와 Agent Lab event/UI migration, 복수 capability scheduler, FCI/ROS 2,
+skill distillation은 이 slice 범위 밖이다. 예비 FCI/ROS 2 adapter는 같은 operation
+schema와 독립 safety guardrail을 구현한 뒤 `RealityPort` endpoint로 연결한다.
 
 ## Acceptance evidence
 

@@ -717,50 +717,79 @@ def rollout_candidate(
         scenario_id=candidate.action_id,
     )
     try:
-        world.settle()
-        candidate_protocol = configure_push_protocol(
-            protocol.final_push,
-            dt_s=config.dt_s,
-            speed_m_s=candidate.speed_m_s,
-            push_height_m=candidate.push_height_m,
-            safety_stop_fraction=1.0,
-        )
-        execution = world.execute_push(
-            candidate.target_m,
-            candidate.max_force_n,
-            protocol=candidate_protocol,
-        )
-        samples = execution.samples
-        observation = world.observe_object_pose()
-        final = np.asarray(observation.pose.position_m)
-        error = float(np.linalg.norm(final[:2] - np.asarray(candidate.target_m[:2])))
-        peak = max((np.linalg.norm(s.measured_force_n) for s in samples), default=0.0)
-        quat = observation.pose.orientation_xyzw
-        upright_cos = 1.0 - 2.0 * (quat[0] ** 2 + quat[1] ** 2)
-        tilt = math.acos(float(np.clip(upright_cos, -1.0, 1.0)))
-        feasible = (
-            not execution.safety_tripped and peak <= candidate.max_force_n * 1.01 and tilt < math.radians(15)
-        )
-        success_probability = float(np.clip(1.0 - error / 0.10 - tilt / math.pi, 0.0, 1.0))
-        return PredictedOutcome(
-            action_id=candidate.action_id,
-            final_position_m=tuple(float(v) for v in final),
-            target_error_m=error,
-            success_probability=success_probability,
-            tipping_margin=math.radians(15) - tilt,
-            peak_force_n=float(peak),
-            duration_s=len(samples) * config.dt_s,
-            feasible=feasible,
-            rationale=(
-                "independent Newton belief rollout with bounded force controller; "
-                f"controller outcome={execution.outcome.value}"
-            ),
-            scenario_id=candidate.action_id,
-            world_instance_id=world.world_instance_id,
-            world_config_id=world.world_config_id,
-            experiment_protocol_id=protocol_id,
-            belief_revision=belief.revision,
+        return rollout_candidate_in_world(
+            world,
+            belief,
+            candidate,
+            config,
+            protocol,
             belief_snapshot_id=snapshot_id,
+            experiment_protocol_id=protocol_id,
         )
     finally:
         world.close()
+
+
+def rollout_candidate_in_world(
+    world: BeliefEnvironment,
+    belief: PhysicalBelief,
+    candidate: ActionCandidate,
+    config: WorldConfig,
+    protocol: PhysicalExperimentProtocol,
+    *,
+    belief_snapshot_id: str | None = None,
+    experiment_protocol_id: str | None = None,
+) -> PredictedOutcome:
+    """Validate a push in an already constructed, independently identified Twin."""
+
+    if candidate.kind != "push":
+        raise ValueError("in-world validation currently supports push actions only")
+    snapshot_id = belief_snapshot_id or physical_belief_snapshot_id(belief)
+    protocol_id = experiment_protocol_id or f"physical-experiment:{protocol_sha256(protocol)}"
+    world.settle()
+    candidate_protocol = configure_push_protocol(
+        protocol.final_push,
+        dt_s=config.dt_s,
+        speed_m_s=candidate.speed_m_s,
+        push_height_m=candidate.push_height_m,
+        safety_stop_fraction=1.0,
+    )
+    execution = world.execute_push(
+        candidate.target_m,
+        candidate.max_force_n,
+        protocol=candidate_protocol,
+    )
+    samples = execution.samples
+    observation = world.observe_object_pose()
+    final = np.asarray(observation.pose.position_m)
+    error = float(np.linalg.norm(final[:2] - np.asarray(candidate.target_m[:2])))
+    peak = max((np.linalg.norm(s.measured_force_n) for s in samples), default=0.0)
+    quat = observation.pose.orientation_xyzw
+    upright_cos = 1.0 - 2.0 * (quat[0] ** 2 + quat[1] ** 2)
+    tilt = math.acos(float(np.clip(upright_cos, -1.0, 1.0)))
+    feasible = (
+        not execution.safety_tripped
+        and peak <= candidate.max_force_n * 1.01
+        and tilt < math.radians(15)
+    )
+    success_probability = float(np.clip(1.0 - error / 0.10 - tilt / math.pi, 0.0, 1.0))
+    return PredictedOutcome(
+        action_id=candidate.action_id,
+        final_position_m=tuple(float(v) for v in final),
+        target_error_m=error,
+        success_probability=success_probability,
+        tipping_margin=math.radians(15) - tilt,
+        peak_force_n=float(peak),
+        duration_s=len(samples) * config.dt_s,
+        feasible=feasible,
+        rationale=(
+            "independent Newton belief rollout with bounded force controller; "
+            f"controller outcome={execution.outcome.value}"
+        ),
+        scenario_id=candidate.action_id,
+        world_instance_id=world.world_instance_id,
+        world_config_id=world.world_config_id,
+        experiment_protocol_id=protocol_id,
+        belief_revision=belief.revision,
+        belief_snapshot_id=snapshot_id,
+    )
