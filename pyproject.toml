@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "curious-robot"
+version = "0.1.0"
+description = "Discover Physics. Simulate. Act. Learn."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = "Apache-2.0"
+authors = [{ name = "YuJeong Jeong" }]
+keywords = ["robotics", "system-identification", "nvidia-newton", "nvidia-warp", "sim-to-real"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "matplotlib>=3.10",
+  "newton[examples]==1.7.0",
+  "numpy>=2.2",
+  "pydantic>=2.10",
+  "scipy>=1.15",
+]
+
+[project.urls]
+Homepage = "https://github.com/yujeongdev/curious-robot"
+Repository = "https://github.com/yujeongdev/curious-robot"
+Issues = "https://github.com/yujeongdev/curious-robot/issues"
+Documentation = "https://github.com/yujeongdev/curious-robot/tree/main/docs"
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28",
+  "pycollada>=0.9",
+  "pytest>=8.3",
+  "pytest-cov>=6",
+  "ruff>=0.9",
+  "trimesh>=5.1",
+]
+llm = ["openai>=2.0"]
+web = ["fastapi>=0.135,<1", "uvicorn[standard]>=0.41,<1"]
+
+[project.scripts]
+curious-robot = "curious_robot.cli:main"
+curious-robot-replay = "curious_robot.replay:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/curious_robot"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+markers = ["gpu: requires a CUDA-capable NVIDIA GPU"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
