@@ -148,14 +148,32 @@ a { color: inherit; text-decoration: none; }
 .connection-marker { position: absolute; inset: auto 16px -30px auto; z-index: 5; border: 1px solid var(--warning); padding: 4px 9px; background: var(--surface-1); color: var(--warning); font-size: .75rem; }
 
 .workspace-grid { min-height: 410px; height: calc(100svh - 58px - 2px - 79px - 220px); display: grid; grid-template-rows: minmax(0, 1fr); border-bottom: 1px solid var(--border); }
+.dual-newton-workspace { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--canvas); }
+.world-flow { min-height: 30px; display: flex; align-items: center; justify-content: center; gap: 8px; border-bottom: 1px solid var(--border); padding: 4px 8px; background: var(--surface-1); color: var(--text-muted); font-family: "IBM Plex Mono", monospace; font-size: .62rem; }
+.world-flow span[data-active="true"] { color: var(--signal); }
+.world-flow span { display: inline-flex; align-items: center; gap: 5px; }
+.flow-current { border: 1px solid currentcolor; padding: 1px 4px; font-size: .52rem; font-weight: 400; letter-spacing: .06em; }
+.world-flow i { color: var(--border); font-style: normal; }
+.dual-world-panes { min-width: 0; min-height: 0; flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.world-pane-slot { min-width: 0; min-height: 0; display: flex; }
+.world-pane-slot:first-child { border-right: 1px solid var(--border); }
+.world-pane-slot .viewport { flex: 1; }
+.mobile-world-switch { display: none; }
 .panel-separator { display: grid; place-items: center; border: 0; border-left: 1px solid var(--border); border-right: 1px solid var(--border); background: var(--surface-1); cursor: col-resize; touch-action: none; }
 .panel-separator:hover, .panel-separator:focus-visible { background: color-mix(in oklch, var(--signal), var(--surface-1) 84%); }
 .panel-separator span { width: 2px; height: 30px; border-radius: 2px; background: var(--border); }
 .viewport { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--canvas); }
 .viewport-toolbar, .region-header { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 8px 12px; background: var(--surface-1); }
 .viewport-toolbar h2, .region-header h2 { font-size: 1rem; line-height: 1.25; }
+.world-purpose { display: block; margin-top: 2px; color: var(--text-muted); font-size: .68rem; }
+.viewport[data-active="true"] .viewport-toolbar { box-shadow: inset 0 -2px var(--signal); }
+.viewport[data-active="false"] .viewport-toolbar { color: var(--text-secondary); }
 .viewport-badges { display: flex; align-items: center; gap: 6px; }
 .badge--belief { border-color: var(--signal); color: var(--signal); }
+.world-provenance { min-height: 28px; display: flex; align-items: center; gap: 10px; overflow: hidden; border-bottom: 1px solid var(--border); padding: 4px 10px; background: color-mix(in oklch, var(--surface-1), var(--canvas) 40%); color: var(--text-muted); font-size: .63rem; white-space: nowrap; }
+.world-provenance span { overflow: hidden; text-overflow: ellipsis; }
+.world-provenance span:nth-child(2) { flex: 1; }
+.world-provenance svg { width: 12px; height: 12px; vertical-align: -2px; }
 .canvas-shell { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .canvas-shell canvas { display: block; }
 .viewport-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; color: var(--text-secondary); }
@@ -165,6 +183,7 @@ a { color: inherit; text-decoration: none; }
 .viewport-empty li::before { content: "○ "; color: var(--text-muted); }
 .viewport-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: rgb(10 14 19 / .78); color: var(--warning); text-align: center; }
 .viewport-overlay span { max-width: 500px; color: var(--text-secondary); }
+.world-held-marker { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 2; border: 1px solid var(--border); padding: 5px 8px; background: rgb(17 24 32 / .88); color: var(--text-muted); font-family: "IBM Plex Mono", monospace; font-size: .62rem; text-align: center; }
 .viewport-legend { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 14px; border: 1px solid var(--border); border-radius: 2px; padding: 5px 8px; background: rgb(17 24 32 / .88); color: var(--text-muted); font-family: "IBM Plex Mono", monospace; font-size: .65rem; }
 .viewport-legend span, .chart-title span { display: inline-flex; align-items: center; gap: 4px; }
 .legend-force, .legend-command, .legend-target, .legend-contact { width: 18px; height: 2px; display: inline-block; background: var(--signal); }
@@ -178,10 +197,16 @@ a { color: inherit; text-decoration: none; }
 @keyframes evidence-in { from { opacity: 0; transform: translateY(4px); } }
 .evidence-card:focus-within, .evidence-card:hover { border-color: color-mix(in oklch, var(--signal), var(--border) 55%); }
 .evidence-card--belief-updated { border-left: 3px solid var(--signal); background: color-mix(in oklch, var(--signal), var(--surface-1) 94%); }
+.evidence-badges { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.lane-badge { font-family: "IBM Plex Mono", monospace; font-size: .6rem; }
+.lane-badge--reality { border-color: var(--warning); color: var(--warning); }
+.lane-badge--twin { border-color: var(--signal); color: var(--signal); }
+.lane-badge--inference { border-color: var(--text-secondary); color: var(--text-secondary); }
 .evidence-card--verification-completed { border-left: 3px solid var(--success); }
 .evidence-card--safety-triggered, .evidence-card--run-failed { border-left: 3px solid var(--danger); }
 .evidence-card header { display: grid; grid-template-columns: 30px 1fr auto; gap: 9px; align-items: start; }
 .evidence-card header > div { display: flex; flex-direction: column; }
+.evidence-card header > .evidence-badges { flex-direction: row; }
 .evidence-card header strong { font-size: .92rem; }
 .evidence-card header .mono { color: var(--text-muted); font-size: .68rem; }
 .evidence-card > p { margin: 10px 0 0 39px; color: var(--text-secondary); line-height: 1.5; }
@@ -246,6 +271,8 @@ a { color: inherit; text-decoration: none; }
   .phase-list button { padding: 8px; grid-template-columns: 24px 1fr; }
   .phase-list .badge { display: none; }
   .config-grid { grid-template-columns: repeat(2, 1fr); }
+  .viewport-toolbar { align-items: flex-start; }
+  .camera-label { display: none; }
 }
 
 @media (max-width: 767px) {
@@ -276,8 +303,17 @@ a { color: inherit; text-decoration: none; }
   .phase-mobile strong { color: var(--signal); }
   .phase-mobile div > span:last-child { color: var(--text-muted); font-size: .75rem; text-transform: capitalize; }
   .workspace-grid { min-height: 0; height: auto; display: flex; flex-direction: column; }
+  .world-flow { justify-content: flex-start; overflow-x: auto; }
+  .world-flow span { flex: 0 0 auto; }
+  .mobile-world-switch { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); background: var(--surface-1); }
+  .mobile-world-switch button { min-height: 44px; border: 0; border-right: 1px solid var(--border); background: transparent; color: var(--text-secondary); font: inherit; }
+  .mobile-world-switch button:last-child { border-right: 0; }
+  .mobile-world-switch button[aria-pressed="true"] { box-shadow: inset 0 -2px var(--signal); color: var(--signal); }
+  .dual-world-panes { display: block; }
+  .world-pane-slot { display: none; height: 42svh; min-height: 310px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .world-pane-slot[data-mobile-visible="true"] { display: flex; }
   .panel-separator { display: none; }
-  .viewport { height: 42svh; min-height: 310px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .viewport { border-right: 0; border-bottom: 1px solid var(--border); }
   .viewport-toolbar { min-height: 48px; }
   .viewport-badges .button, .viewport-badges .badge:not(:first-child), .viewport-legend { display: none; }
   .evidence-panel { max-height: 320px; }

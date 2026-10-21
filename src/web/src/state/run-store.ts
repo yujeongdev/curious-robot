@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { AgentEvent } from "../generated/agent-events";
-import { initialRunState, reduceRunEvent, seekRun, type RunState } from "./run-reducer";
+import { initialRunState, reduceRunEvent, seekRun, type RunState, type WorldScene } from "./run-reducer";
 
 interface RunStore {
   run: RunState;
@@ -9,13 +9,13 @@ interface RunStore {
   followingLive: boolean;
   selectedSequence: number | null;
   bufferedCount: number;
-  cameraMode: "guided" | "manual";
+  cameraModes: Readonly<Record<WorldScene, "guided" | "manual">>;
   ingest: (event: AgentEvent) => void;
   loadReplay: (events: readonly AgentEvent[]) => void;
   seek: (sequence: number) => void;
   inspect: (sequence: number) => void;
   returnToLive: () => void;
-  setCameraMode: (mode: "guided" | "manual") => void;
+  setCameraMode: (scene: WorldScene, mode: "guided" | "manual") => void;
   reset: () => void;
 }
 
@@ -26,7 +26,7 @@ export const useRunStore = create<RunStore>((set, get) => ({
   followingLive: true,
   selectedSequence: null,
   bufferedCount: 0,
-  cameraMode: "guided",
+  cameraModes: { truth: "guided", belief: "guided" },
   ingest: (event) => {
     const state = get();
     const sourceEvents = [...state.sourceEvents, event];
@@ -67,7 +67,9 @@ export const useRunStore = create<RunStore>((set, get) => ({
       bufferedCount: 0,
     });
   },
-  setCameraMode: (cameraMode) => set({ cameraMode }),
+  setCameraMode: (scene, cameraMode) => set((state) => ({
+    cameraModes: { ...state.cameraModes, [scene]: cameraMode },
+  })),
   reset: () => set({
     run: initialRunState,
     sourceEvents: [],
@@ -75,6 +77,6 @@ export const useRunStore = create<RunStore>((set, get) => ({
     followingLive: true,
     selectedSequence: null,
     bufferedCount: 0,
-    cameraMode: "guided",
+    cameraModes: { truth: "guided", belief: "guided" },
   }),
 }));

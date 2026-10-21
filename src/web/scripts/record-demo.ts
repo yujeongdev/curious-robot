@@ -125,35 +125,45 @@ async function main() {
     const max = Number(await slider.getAttribute("max"));
     if (!Number.isFinite(max) || max < 2) throw new Error("Replay fixture did not load a valid event sequence.");
     let frameIndex = 0;
-    let validatedViewports = 0;
+    const validatedScenes = new Set<string>();
     const captureInputFps = Math.min(options.fps, 8);
     const sequences = captureSequences(captureEvents, max);
     for (const sequence of sequences) {
       await slider.fill(String(sequence));
-      const viewport = page.locator(".canvas-shell");
-      const expectedFrameId = captureEvents
-        ?.slice(0, sequence)
-        .reverse()
-        .find((value) => (value as { type?: unknown }).type === "simulation.visual_frame") as
-        | { payload?: { frame_id?: number } }
-        | undefined;
-      const expectedId = expectedFrameId?.payload?.frame_id;
+      const expectedFrames: Record<string, number> = {};
+      for (const value of captureEvents?.slice(0, sequence) ?? []) {
+        const event = value as { type?: unknown; payload?: { frame_id?: number; scene?: string } };
+        if (event.type === "simulation.visual_frame" && event.payload?.scene && event.payload.frame_id !== undefined) {
+          expectedFrames[event.payload.scene] = event.payload.frame_id;
+        }
+      }
       await page.waitForFunction(
         `(() => {
+          const expectedFrames = ${JSON.stringify(expectedFrames)};
           const sequenceLabel = document.querySelector('.replay-bar .mono')?.textContent ?? '';
-          const currentFrame = document.querySelector('.canvas-shell')?.getAttribute('data-frame-id') ?? '';
-          return sequenceLabel.includes('SEQ ${sequence} /') && (${expectedId === undefined ? "true" : `currentFrame === '${expectedId}'`});
+          return sequenceLabel.includes('SEQ ${sequence} /') && Object.entries(expectedFrames).every(([scene, frameId]) => {
+            const viewport = document.querySelector('.canvas-shell[data-world-scene="' + scene + '"]');
+            return viewport?.getAttribute('data-frame-id') === String(frameId);
+          });
         })()`,
       );
       await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
-      if ((sequence >= Math.floor(max / 2) || sequence === max || validatedViewports === 0) && validatedViewports < 3 && await viewport.locator("canvas").count() > 0) {
-        assertNonBlankViewport(await viewport.screenshot(), sequence);
-        validatedViewports += 1;
+      for (const scene of Object.keys(expectedFrames)) {
+        if (validatedScenes.has(scene)) continue;
+        const viewport = page.locator(`.canvas-shell[data-world-scene="${scene}"]`);
+        if (await viewport.locator("canvas").count() > 0) {
+          assertNonBlankViewport(await viewport.screenshot(), sequence);
+          validatedScenes.add(scene);
+        }
       }
       await page.screenshot({ path: join(temporary, `frame-${String(frameIndex).padStart(6, "0")}.jpg`), type: "jpeg", quality: 95 });
       frameIndex += 1;
     }
-    if (validatedViewports < 2) throw new Error(`WebGL viewport validation incomplete: only ${validatedViewports} checkpoints rendered.`);
+    for (const requiredScene of ["truth", "belief"]) {
+      if (!validatedScenes.has(requiredScene)) {
+        throw new Error(`WebGL viewport validation incomplete: ${requiredScene} pane never rendered.`);
+      }
+    }
     execFileSync("ffmpeg", ["-y", "-framerate", String(captureInputFps), "-i", join(temporary, "frame-%06d.jpg"), "-r", String(options.fps), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output], { stdio: "inherit" });
     const gif = output.replace(/\.mp4$/i, ".gif");
     execFileSync("ffmpeg", ["-y", "-i", output, "-vf", "fps=12,scale=960:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer", gif], { stdio: "inherit" });

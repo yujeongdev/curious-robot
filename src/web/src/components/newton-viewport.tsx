@@ -1,8 +1,9 @@
 import { Grid, OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
-import { Camera, Eye, RotateCcw, TriangleAlert } from "lucide-react";
+import { Camera, Clock3, Eye, RotateCcw, TriangleAlert } from "lucide-react";
 import { Suspense } from "react";
 import type { VisualFramePayload } from "../generated/agent-events";
+import type { WorldScene } from "../state/run-reducer";
 import { useRunStore } from "../state/run-store";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -40,46 +41,72 @@ function Scene({ frame, cameraMode }: { frame: VisualFramePayload; cameraMode: "
   );
 }
 
-function SceneSummary({ frame }: { frame: VisualFramePayload | null }) {
+function SceneSummary({ frame, scene }: { frame: VisualFramePayload | null; scene: WorldScene }) {
   const cube = frame ? findCubeBody(frame.bodies) : undefined;
   return (
-    <div className="sr-only" aria-live="polite" data-testid="scene-summary">
+    <div className="sr-only" data-testid={`scene-summary-${scene}`}>
       {frame ? `${frame.scene} scene, frame ${frame.frame_id}. Cube at ${cube?.position_m.join(", ") ?? "unknown"} meters. ${frame.contacts.length} contacts. Target region ${frame.target_region ? "visible" : "absent"}.` : "No visual frame received."}
     </div>
   );
 }
 
-export function NewtonViewport({ frame, disconnected = false }: { frame: VisualFramePayload | null; disconnected?: boolean }) {
-  const cameraMode = useRunStore((state) => state.cameraMode);
+export function NewtonViewport({
+  frame,
+  scene,
+  title,
+  frameSequence,
+  active = false,
+  heldMessage,
+  disconnected = false,
+}: {
+  frame: VisualFramePayload | null;
+  scene: WorldScene;
+  title: string;
+  frameSequence?: number;
+  active?: boolean;
+  heldMessage?: string;
+  disconnected?: boolean;
+}) {
+  const cameraMode = useRunStore((state) => state.cameraModes[scene]);
   const setCameraMode = useRunStore((state) => state.setCameraMode);
+  const headingId = `viewport-title-${scene}`;
+  const worldLabel = scene === "truth" ? "Simulated Reality" : "Learned Newton Twin";
   return (
-    <section className="viewport" aria-labelledby="viewport-title">
+    <section className={`viewport viewport--${scene}`} aria-labelledby={headingId} data-active={active}>
       <header className="viewport-toolbar">
         <div>
-          <span className="eyebrow">Newton presentation mirror</span>
-          <h2 id="viewport-title">Simulation</h2>
+          <span className="eyebrow">{scene === "truth" ? "Observed physics authority" : "Posterior physics model"}</span>
+          <h2 id={headingId}>{worldLabel}</h2>
+          <span className="world-purpose">{title}</span>
         </div>
         <div className="viewport-badges">
-          <Badge className={frame?.scene === "belief" ? "badge--belief" : ""}>{frame?.scene?.toUpperCase() ?? "WAITING"}</Badge>
+          <Badge className={scene === "belief" ? "badge--belief" : ""}>{active ? "ADVANCING" : frame ? "HELD" : "WAITING"}</Badge>
           {frame && <Badge className="mono">FRAME {frame.frame_id}</Badge>}
           <Tooltip label={cameraMode === "guided" ? "Camera follows the active stage" : "Stage changes cannot move the camera"}>
-            <Button size="compact" variant="ghost" onClick={() => setCameraMode(cameraMode === "guided" ? "manual" : "guided")}>
-              {cameraMode === "guided" ? <Camera /> : <RotateCcw />} {cameraMode === "guided" ? "Guided camera" : "Return to guided"}
+            <Button size="compact" variant="ghost" onClick={() => setCameraMode(scene, cameraMode === "guided" ? "manual" : "guided")}>
+              {cameraMode === "guided" ? <Camera /> : <RotateCcw />} <span className="camera-label">{cameraMode === "guided" ? "Guided camera" : "Return to guided"}</span>
             </Button>
           </Tooltip>
         </div>
       </header>
-      <div className="canvas-shell" data-frame-id={frame?.frame_id ?? ""}>
+      <div className="world-provenance mono" aria-label={`${worldLabel} provenance`}>
+        <span>{frame ? frame.world_instance_id.slice(0, 12) : "world pending"}</span>
+        <span>{frame?.scenario_id ?? (scene === "truth" ? "reality evidence" : "posterior rollout")}</span>
+        <span><Clock3 /> {frame ? `${frame.sim_time_s.toFixed(2)} s` : "—"}</span>
+        {scene === "belief" && <span>REV {frame?.belief_revision ?? "—"}</span>}
+        {frameSequence !== undefined && <span>SEQ {frameSequence}</span>}
+      </div>
+      <div className="canvas-shell" data-frame-id={frame?.frame_id ?? ""} data-world-scene={scene}>
         {frame ? (
-          <Canvas shadows dpr={[1, 1.5]} frameloop="always" camera={{ position: [0.95, 1.05, 1.5], fov: 40 }} onCreated={({ camera }) => camera.lookAt(-0.12, 0.32, 0)} gl={{ antialias: true, alpha: false }}>
+          <Canvas shadows dpr={[1, 1.5]} frameloop="demand" camera={{ position: [0.95, 1.05, 1.5], fov: 40 }} onCreated={({ camera }) => camera.lookAt(-0.12, 0.32, 0)} gl={{ antialias: true, alpha: false }}>
             <Scene frame={frame} cameraMode={cameraMode} />
           </Canvas>
         ) : (
           <div className="viewport-empty">
             <Eye />
-            <strong>Authoritative frames will appear here</strong>
-            <span>Start a run to observe Newton physics. The browser does not simulate dynamics.</span>
-            <ul><li>GPU worker</li><li>Body manifest</li><li>Visual frame stream</li></ul>
+            <strong>{scene === "truth" ? "Waiting for Reality observations" : "Waiting for a posterior Twin build"}</strong>
+            <span>{scene === "truth" ? "Robot experiments and deployment appear only in this world." : "Counterfactual experiments and policy rollouts appear after evidence updates the belief."}</span>
+            <ul><li>Independent world</li><li>Newton frames</li><li>No browser physics</li></ul>
           </div>
         )}
         {disconnected && (
@@ -89,13 +116,18 @@ export function NewtonViewport({ frame, disconnected = false }: { frame: VisualF
             <span>Last acknowledged frame remains visible. Physics worker status is reported separately.</span>
           </div>
         )}
+        {!active && frame && !disconnected && (
+          <div className="world-held-marker" role="status">
+            {heldMessage ?? "Retained at the current causal cursor"}
+          </div>
+        )}
         <div className="viewport-legend" aria-hidden="true">
           <span><i className="legend-force" /> measured force</span>
           <span><i className="legend-target" /> target region</span>
           <span><i className="legend-contact" /> contact</span>
         </div>
       </div>
-      <SceneSummary frame={frame} />
+      <SceneSummary frame={frame} scene={scene} />
     </section>
   );
 }

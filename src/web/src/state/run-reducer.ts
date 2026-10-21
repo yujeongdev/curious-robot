@@ -33,6 +33,13 @@ export interface BeliefEstimate {
   unit: string;
 }
 
+export type WorldScene = VisualFramePayload["scene"];
+
+export interface WorldFrameState {
+  frame: VisualFramePayload;
+  sequence: number;
+}
+
 export interface RunState {
   runId: string | null;
   status: RunStatus;
@@ -42,7 +49,8 @@ export interface RunState {
   events: readonly AgentEvent[];
   stageInstances: readonly StageInstance[];
   activeStageInstanceId: string | null;
-  latestFrame: VisualFramePayload | null;
+  worldFrames: Readonly<Record<WorldScene, WorldFrameState | null>>;
+  activeScene: WorldScene | null;
   measurements: readonly MeasurementPoint[];
   beliefs: Readonly<Record<string, BeliefEstimate>>;
   gap: { expected: number; received: number } | null;
@@ -59,7 +67,8 @@ export const initialRunState: RunState = {
   events: [],
   stageInstances: [],
   activeStageInstanceId: null,
-  latestFrame: null,
+  worldFrames: { truth: null, belief: null },
+  activeScene: null,
   measurements: [],
   beliefs: {},
   gap: null,
@@ -124,6 +133,16 @@ function statusFor(event: AgentEvent, current: RunStatus): RunStatus {
   return states[event.type] ?? current;
 }
 
+function activeSceneFor(event: AgentEvent, current: WorldScene | null): WorldScene | null {
+  if (["run.completed", "run.failed", "run.cancelled", "run.abandoned", "run.paused", "stage.completed"].includes(event.type)) {
+    return null;
+  }
+  if (event.type !== "stage.entered") return current;
+  if (["act", "measure", "execute", "verify"].includes(event.stage ?? "")) return "truth";
+  if (["update_simulation", "predict"].includes(event.stage ?? "")) return "belief";
+  return null;
+}
+
 export function reduceRunEvent(state: RunState, event: AgentEvent): RunState {
   if (state.seenEventIds.has(event.event_id)) return state;
   if (state.runId && state.runId !== event.run_id) {
@@ -145,12 +164,20 @@ export function reduceRunEvent(state: RunState, event: AgentEvent): RunState {
     lastSimTimeS: event.sim_time_s ?? state.lastSimTimeS,
     seenEventIds: seen,
     events: [...state.events, event].slice(-500),
+    activeScene: activeSceneFor(event, state.activeScene),
     gap: null,
     ...updateStage(state, event),
   };
 
   if (event.type === "simulation.visual_frame") {
-    return { ...base, latestFrame: visualFramePayloadSchema.parse(event.payload) };
+    const frame = visualFramePayloadSchema.parse(event.payload);
+    return {
+      ...base,
+      worldFrames: {
+        ...state.worldFrames,
+        [frame.scene]: { frame, sequence: event.sequence },
+      },
+    };
   }
   if (event.type === "measurement.sampled") {
     const values = (event.payload.values ?? {}) as Record<string, unknown>;

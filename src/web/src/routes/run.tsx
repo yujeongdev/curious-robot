@@ -3,7 +3,7 @@ import { CircleDot, Download, Radio, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commandRun, subscribeToRun } from "../api/events";
 import { EvidenceFeed } from "../components/evidence-feed";
-import { NewtonViewport } from "../components/newton-viewport";
+import { DualNewtonWorkspace } from "../components/dual-newton-workspace";
 import { MobileInspectors } from "../components/mobile-inspectors";
 import { RunControls } from "../components/run-controls";
 import { ResizableWorkspace } from "../components/resizable-workspace";
@@ -119,7 +119,7 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
       {viewerDisconnected && <div className="degraded-banner" role="status">Visual connection interrupted. Committed evidence remains available; no run state has been fabricated.</div>}
       <StageStepper run={run} />
       <ResizableWorkspace
-        primary={<NewtonViewport frame={run.latestFrame} disconnected={viewerDisconnected} />}
+        primary={<DualNewtonWorkspace run={run} disconnected={viewerDisconnected} />}
         secondary={<EvidenceFeed run={run} />}
       />
       <TelemetryDock run={run} />
