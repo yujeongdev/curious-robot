@@ -139,6 +139,7 @@ class VisualFramePayload(PublicModel):
     action_id: str | None = None
     belief_revision: int | None = Field(default=None, ge=0)
     body_manifest_id: str = Field(min_length=1)
+    tool_tip_radius_m: float | None = Field(default=None, gt=0.0)
     sim_time_s: float = Field(ge=0.0)
     presentation_time_s: float = Field(ge=0.0)
     bodies: tuple[BodyTransform, ...]

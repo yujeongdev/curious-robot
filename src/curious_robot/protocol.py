@@ -8,9 +8,11 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .trajectory import physics_substeps_for_target_speed
+
 
 class PushProtocol(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
     precontact_offset_m: float = Field(gt=0.0)
     safe_height_m: float = Field(gt=0.0)
@@ -50,3 +52,27 @@ def protocol_sha256(protocol: PhysicalExperimentProtocol) -> str:
     """Return the canonical run-protocol fingerprint used by evidence records."""
     payload = protocol.model_dump_json(exclude_none=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def configure_push_protocol(
+    protocol: PushProtocol,
+    *,
+    dt_s: float,
+    speed_m_s: float,
+    push_height_m: float | None = None,
+    safety_stop_fraction: float | None = None,
+) -> PushProtocol:
+    """Return a fully validated protocol at the requested operating point."""
+
+    payload = protocol.model_dump()
+    payload["contact_speed_m_s"] = speed_m_s
+    payload["physics_substeps_per_command"] = physics_substeps_for_target_speed(
+        increment_m=protocol.command_increment_m,
+        speed_m_s=speed_m_s,
+        dt_s=dt_s,
+    )
+    if push_height_m is not None:
+        payload["push_height_offset_m"] = push_height_m
+    if safety_stop_fraction is not None:
+        payload["safety_stop_fraction"] = safety_stop_fraction
+    return PushProtocol.model_validate(payload)

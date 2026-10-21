@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import uuid
 from dataclasses import dataclass, field, replace
 
@@ -10,6 +9,7 @@ import numpy as np
 from pydantic_core import to_jsonable_python
 
 from .belief import update_belief
+from .control import PushExecutionResult
 from .environment import BeliefEnvironment, EventIntentSink, StepControl, WorldConfig, rollout_candidate
 from .planning import (
     candidate_actions,
@@ -28,7 +28,13 @@ from .planning import (
     select_next_action as choose_action,
 )
 from .ports import RobotRealityPort
-from .protocol import PhysicalExperimentProtocol, PushProtocol, load_default_protocol, protocol_sha256
+from .protocol import (
+    PhysicalExperimentProtocol,
+    PushProtocol,
+    configure_push_protocol,
+    load_default_protocol,
+    protocol_sha256,
+)
 from .schemas import (
     ActionCandidate,
     ActionDecision,
@@ -49,6 +55,7 @@ from .schemas import (
     WrenchObservation,
 )
 from .sysid import estimate_dynamic_friction, estimate_mass, estimate_static_friction
+from .trajectory import minimum_jerk_duration_s
 
 
 @dataclass
@@ -135,15 +142,25 @@ class RobotTools:
         return result
 
     def move_cartesian(self, target: Pose, speed_m_s: float = 0.05) -> Pose:
-        start = np.asarray(self.reality.tool_controller_pose().position_m)
+        start = np.asarray(self.reality.observe_tool_pose().position_m)
         end = np.asarray(target.position_m)
         distance = float(np.linalg.norm(end - start))
         if speed_m_s <= 0 or speed_m_s > 0.15:
             raise ValueError("Cartesian speed must be in (0, 0.15] m/s")
-        steps = max(1, math.ceil(distance / (speed_m_s * self.config.dt_s)))
-        self.reality.command_cartesian(target.position_m, steps * self.config.dt_s)
-        self._record("move_cartesian", target.model_dump(), {"steps": steps})
-        return target
+        duration_s = minimum_jerk_duration_s(distance, speed_m_s)
+        motion = self.reality.command_cartesian(target.position_m, duration_s)
+        achieved = self.reality.observe_tool_pose()
+        self._record(
+            "move_cartesian",
+            {**target.model_dump(), "speed_m_s": speed_m_s},
+            {
+                "steps": motion.physics_steps,
+                "duration_s": motion.duration_s,
+                "achieved_position_m": achieved.position_m,
+                "residual_m": motion.tracking_error_m,
+            },
+        )
+        return achieved
 
     def open_gripper(self) -> RobotState:
         self.reality.set_gripper(0.08)
@@ -163,15 +180,41 @@ class RobotTools:
         self._record("release_object", {}, {"released": True})
         return True
 
-    def execute_safe_push(self, target_m: tuple[float, float, float], max_force_n: float = 12.0):
+    def execute_safe_push(
+        self,
+        target_m: tuple[float, float, float],
+        max_force_n: float = 12.0,
+        *,
+        speed_m_s: float | None = None,
+        push_height_m: float | None = None,
+    ) -> PushExecutionResult:
         if max_force_n > self.config.maximum_tool_force_n:
             raise ValueError("force exceeds safety limit")
+        protocol = configure_push_protocol(
+            self.protocol.final_push,
+            dt_s=self.config.dt_s,
+            speed_m_s=speed_m_s or self.protocol.final_push.contact_speed_m_s,
+            push_height_m=push_height_m,
+            safety_stop_fraction=1.0,
+        )
         result = self.reality.execute_push(
             target_m,
             max_force_n,
-            protocol=self.protocol.final_push,
+            protocol=protocol,
         )
-        self._record("execute_safe_push", {"target_m": target_m}, {"sample_count": len(result)})
+        self._record(
+            "execute_safe_push",
+            {
+                "target_m": target_m,
+                "speed_m_s": protocol.contact_speed_m_s,
+                "push_height_m": protocol.push_height_offset_m,
+            },
+            {
+                "sample_count": len(result.samples),
+                "outcome": result.outcome.value,
+                "peak_contact_force_n": result.peak_contact_force_n,
+            },
+        )
         return result
 
     # Contact control
@@ -217,11 +260,12 @@ class RobotTools:
         self._record("weigh_object", {}, {"evidence_id": evidence.evidence_id, "samples": 0})
         return evidence
 
-    def _prepare_physical_pusher(self, protocol: PushProtocol) -> tuple[float, float, float]:
+    def _prepare_physical_tool_tip(self, protocol: PushProtocol) -> tuple[float, float, float]:
         if not self.config.include_robot:
             raise RuntimeError("physical experiments require the Franka articulation")
         cube = self.reality.observe_object_pose().pose.position_m
         tool = self.reality.observe_tool_pose().position_m
+        self.release_force_control()
         self.close_gripper()
         self.move_cartesian(
             Pose(position_m=(tool[0], tool[1], protocol.safe_height_m)),
@@ -266,42 +310,50 @@ class RobotTools:
         initial_x = self.reality.observe_object_pose().pose.position_m[0]
         moving_frames = 0
         contact_seen = False
-        for command_index, target_x in enumerate(
-            np.arange(start_x_m, end_x_m + increment_m / 2, increment_m)
-        ):
-            self.reality.set_cartesian_target((float(target_x), y_m, z_m))
-            for _ in range(substeps):
-                raw_sample = self.reality.step()
-                phase = (
-                    "contact"
-                    if raw_sample.contact_valid
-                    else ("contact_lost" if contact_seen else "approach")
-                )
-                contact_seen = contact_seen or raw_sample.contact_valid
-                sample = raw_sample.model_copy(
-                    update={
-                        "experiment_id": experiment_id,
-                        "command_id": f"{experiment_id}:cartesian-target:{command_index}",
-                        "experiment_phase": phase,
-                    }
-                )
-                samples.append(sample)
-                horizontal_force = abs(sample.measured_force_n[0])
-                if horizontal_force > protocol.maximum_horizontal_force_n:
-                    return samples
-                moved = (
-                    abs(sample.position_m[0] - initial_x) > protocol.breakaway_displacement_m
-                    and abs(sample.velocity_m_s[0]) > protocol.breakaway_velocity_m_s
-                )
-                moving_frames = moving_frames + 1 if moved else 0
-                if stop_after_breakaway and moving_frames >= protocol.breakaway_consecutive_frames:
-                    return samples
-        return samples
+        try:
+            self.enable_cartesian_compliance()
+            for command_index, target_x in enumerate(
+                np.arange(start_x_m, end_x_m + increment_m / 2, increment_m)
+            ):
+                segment_end_x = min(float(target_x + increment_m), end_x_m)
+                for substep_index in range(1, substeps + 1):
+                    phase = substep_index / substeps
+                    substep_target_x = float(target_x + phase * (segment_end_x - target_x))
+                    self.reality.set_cartesian_target((substep_target_x, y_m, z_m))
+                    raw_sample = self.reality.step()
+                    phase = (
+                        "contact"
+                        if raw_sample.contact_valid
+                        else ("contact_lost" if contact_seen else "approach")
+                    )
+                    contact_seen = contact_seen or raw_sample.contact_valid
+                    sample = raw_sample.model_copy(
+                        update={
+                            "experiment_id": experiment_id,
+                            "command_id": f"{experiment_id}:cartesian-target:{command_index}",
+                            "experiment_phase": phase,
+                        }
+                    )
+                    samples.append(sample)
+                    horizontal_force = float(np.linalg.norm(sample.measured_force_n[:2]))
+                    if horizontal_force > protocol.maximum_horizontal_force_n:
+                        self.reality.hold_current_joint_positions(0.1)
+                        return samples
+                    moved = (
+                        abs(sample.position_m[0] - initial_x) > protocol.breakaway_displacement_m
+                        and abs(sample.velocity_m_s[0]) > protocol.breakaway_velocity_m_s
+                    )
+                    moving_frames = moving_frames + 1 if moved else 0
+                    if stop_after_breakaway and moving_frames >= protocol.breakaway_consecutive_frames:
+                        return samples
+            return samples
+        finally:
+            self.release_force_control()
 
     def probe_static_friction(self) -> ExperimentEvidence:
         protocol = self.protocol.static_probe
         evidence_id = f"static-{uuid.uuid4().hex[:8]}"
-        cube = self._prepare_physical_pusher(protocol)
+        cube = self._prepare_physical_tool_tip(protocol)
         samples = self._sample_contact_push(
             start_x_m=cube[0] - protocol.precontact_offset_m,
             end_x_m=cube[0] - protocol.precontact_offset_m + protocol.maximum_travel_m,
@@ -336,8 +388,8 @@ class RobotTools:
                 "motion_threshold_m_s": protocol.breakaway_velocity_m_s,
                 "position_increment_m": protocol.command_increment_m,
                 "force_model_discrepancy_fraction": protocol.force_model_discrepancy_fraction,
-                "producer": "Newton SensorContact hand/fingers/pusher ↔ cube",
-                "controller": "Franka IK joint-target contact ramp",
+                "producer": "Newton SensorContact Franka end-effector ↔ cube",
+                "controller": "Franka IK minimum-jerk joint-target contact ramp",
                 "protocol_schema_version": self.protocol.schema_version,
                 "protocol_sha256": protocol_sha256(self.protocol),
                 "experiment_correlation_id": evidence_id,
@@ -357,7 +409,7 @@ class RobotTools:
     def probe_dynamic_friction(self) -> ExperimentEvidence:
         protocol = self.protocol.dynamic_probe
         evidence_id = f"dynamic-{uuid.uuid4().hex[:8]}"
-        cube = self._prepare_physical_pusher(protocol)
+        cube = self._prepare_physical_tool_tip(protocol)
         samples = self._sample_contact_push(
             start_x_m=cube[0] - protocol.precontact_offset_m,
             end_x_m=cube[0] - protocol.precontact_offset_m + protocol.maximum_travel_m,
@@ -382,8 +434,8 @@ class RobotTools:
             samples=tuple(samples),
             metadata={
                 "target_velocity_m_s": protocol.contact_speed_m_s,
-                "producer": "Newton SensorContact hand/fingers/pusher ↔ cube",
-                "controller": "Franka IK joint-target maintained-contact slide",
+                "producer": "Newton SensorContact Franka end-effector ↔ cube",
+                "controller": "Franka IK minimum-jerk approach plus maintained-contact slide",
                 "protocol_schema_version": self.protocol.schema_version,
                 "protocol_sha256": protocol_sha256(self.protocol),
                 "experiment_correlation_id": evidence_id,

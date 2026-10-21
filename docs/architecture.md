@@ -32,9 +32,11 @@ private evaluator truth ──> Newton/MuJoCo Warp reality
 - Joint commands and high-level tool targets are distinct from measured force.
   The tool force producer is Newton `SensorContact` over MuJoCo Warp's native
   `CONTACT_F` observable for robot-tool ↔ cube contact pairs.
-- The validated experiment path uses a physical pusher rigidly mounted to the
-  Franka hand. The controller moves Franka joints; no public action applies a
-  force to the cube.
+- The validated experiment path uses a visible spherical tool tip rigidly
+  mounted at the Franka TCP. Its emitted radius and pose are shared with the
+  Agent Lab mirror, and it is the only robot shape authorized to contact the
+  cube. The controller moves Franka joints; no public action applies a force
+  directly to the cube.
 - Bilateral finger grasp/lift has not passed its physical acceptance gate.
   Pick-and-place and weighing are therefore reported unavailable instead of
   using a weld, teleport, or cube-force surrogate.

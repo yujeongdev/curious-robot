@@ -454,8 +454,33 @@ def run_episode(
         episode_events.enter(DiscoveryStage.EXECUTE)
         replay_path = output / "scene_replay.bin"
         reality.start_recording(replay_path, stride=4)
+        controller_result = "completed"
+        safety_event_ids: list[str] = []
         if selected_action.kind == "push":
-            final_samples = tools.execute_safe_push(selected_action.target_m, selected_action.max_force_n)
+            execution = tools.execute_safe_push(
+                selected_action.target_m,
+                selected_action.max_force_n,
+                speed_m_s=selected_action.speed_m_s,
+                push_height_m=selected_action.push_height_m,
+            )
+            final_samples = list(execution.samples)
+            controller_result = execution.outcome.value
+            if execution.safety_tripped:
+                safety_event_ids.append(
+                    str(
+                        episode_events.emit(
+                            "safety.triggered",
+                            {
+                                "condition": "tool contact force norm exceeded action limit",
+                                "measured_value": execution.peak_contact_force_n,
+                                "limit": selected_action.max_force_n,
+                                "units": "N",
+                                "controller_response": "latched measured joints and stopped push",
+                                "can_continue": False,
+                            },
+                        )
+                    )
+                )
         else:
             final_samples = reality.execute_pick_place(
                 selected_action.target_m,
@@ -472,15 +497,15 @@ def run_episode(
             "action.executed",
             {
                 "action_id": selected_action.action_id,
-                "controller_result": "completed",
+                "controller_result": controller_result,
                 "observed_terminal_position_m": observed,
-                "safety_event_ids": [],
+                "safety_event_ids": safety_event_ids,
             },
         )
         predicted = next(o.final_position_m for o in outcomes if o.action_id == selected_action.action_id)
         prediction_error = tools.evaluate_prediction_error(predicted, observed)
         episode_events.enter(DiscoveryStage.VERIFY)
-        success = tools.verify_task_success()
+        success = tools.verify_task_success() and controller_result == "completed"
         verification = tools.records[-1].result_summary
         episode_events.emit(
             "verification.completed",

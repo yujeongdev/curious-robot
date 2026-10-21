@@ -6,14 +6,14 @@ from types import SimpleNamespace
 from uuid import UUID
 
 from curious_robot.belief import initial_belief
+from curious_robot.control import NewtonFrankaController, PushExecutionOutcome, PushExecutionResult
 from curious_robot.environment import (
     BeliefEnvironment,
-    NewtonWorld,
     WorldConfig,
     physical_belief_snapshot_id,
     rollout_candidate,
 )
-from curious_robot.protocol import load_default_protocol, protocol_sha256
+from curious_robot.protocol import configure_push_protocol, load_default_protocol, protocol_sha256
 from curious_robot.schemas import ActionCandidate, MotionSample, ObjectPoseObservation, Pose, PredictedOutcome
 from curious_robot.tools import RobotTools
 
@@ -31,14 +31,23 @@ def _mutated_config() -> WorldConfig:
         "seed": 831,
         "arm_position_stiffness": 321.0,
         "arm_position_damping": 37.0,
+        "contact_arm_position_stiffness": 233.0,
+        "contact_arm_position_damping": 29.0,
         "gripper_position_stiffness": 144.0,
         "gripper_position_damping": 13.0,
-        "pusher_radius_m": 0.009,
-        "pusher_density_kg_m3": 212.0,
-        "pusher_friction": 0.73,
+        "tool_tip_radius_m": 0.01,
+        "tool_tip_density_kg_m3": 180.0,
+        "tool_tip_friction": 0.61,
         "maximum_tool_force_n": 11.5,
+        "maximum_cartesian_speed_m_s": 0.13,
         "contact_sensor_cutoff_hz": 7.5,
         "prediction_residual_tolerance_m": 0.024,
+        "maximum_joint_target_speed_rad_s": 1.23,
+        "ik_position_tolerance_m": 0.006,
+        "cartesian_tracking_tolerance_m": 0.011,
+        "maximum_cartesian_settle_s": 0.91,
+        "maximum_cartesian_corrections": 3,
+        "maximum_cartesian_correction_m": 0.031,
     }
     assert set(values) == {item.name for item in fields(WorldConfig)}
     return WorldConfig(**values)
@@ -75,14 +84,18 @@ def test_rollout_preserves_complete_config_protocol_and_posterior_provenance(mon
 
         def execute_push(self, target_m, max_force_n, *, protocol):  # noqa: ANN001, ANN201
             captured["push"] = (target_m, max_force_n, protocol)
-            return [
-                MotionSample(
-                    timestamp_s=0.1,
-                    position_m=config.target_position_m,
-                    velocity_m_s=(0.0, 0.0, 0.0),
-                    measured_force_n=(1.0, 0.0, 0.0),
-                )
-            ]
+            return PushExecutionResult(
+                samples=(
+                    MotionSample(
+                        timestamp_s=0.1,
+                        position_m=config.target_position_m,
+                        velocity_m_s=(0.0, 0.0, 0.0),
+                        measured_force_n=(1.0, 0.0, 0.0),
+                    ),
+                ),
+                outcome=PushExecutionOutcome.COMPLETED,
+                peak_contact_force_n=1.0,
+            )
 
         def observe_object_pose(self) -> ObjectPoseObservation:
             return ObjectPoseObservation(
@@ -108,7 +121,15 @@ def test_rollout_preserves_complete_config_protocol_and_posterior_provenance(mon
 
     assert captured["config"] is config
     assert captured["belief"] is belief
-    assert captured["push"] == (candidate.target_m, candidate.max_force_n, custom_final_push)
+    effective_push = captured["push"]
+    assert effective_push[:2] == (candidate.target_m, candidate.max_force_n)
+    assert effective_push[2] == configure_push_protocol(
+        custom_final_push,
+        dt_s=config.dt_s,
+        speed_m_s=candidate.speed_m_s,
+        push_height_m=candidate.push_height_m,
+        safety_stop_fraction=1.0,
+    )
     assert captured["closed"] is True
     assert outcome.world_instance_id == UUID(FakeWorld.world_instance_id)
     assert outcome.world_config_id == config.config_id
@@ -169,6 +190,6 @@ def test_robot_tools_passes_run_protocol_and_only_updates_observed_start(monkeyp
 
 
 def test_execute_push_controller_does_not_use_exact_cube_state_for_decisions() -> None:
-    source = inspect.getsource(NewtonWorld.execute_push)
+    source = inspect.getsource(NewtonFrankaController.execute_push)
     assert "observe_object_pose" in source
     assert "cube_controller_state" not in source

@@ -26,6 +26,7 @@ def test_real_episode_streams_typed_events_and_visual_frames(tmp_path, monkeypat
         provenance = json.loads((run_directory / "value_provenance.json").read_text())
         belief_config = json.loads((run_directory / "belief_simulation_config.json").read_text())
         reexecution = json.loads((run_directory / "reexecution.json").read_text())
+        assert reexecution["schema_version"] == 1
         assert provenance["learned_physical_parameters"]["belief_world_input"] == (
             "belief_simulation_config.json"
         )

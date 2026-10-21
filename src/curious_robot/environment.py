@@ -3,11 +3,7 @@
 from __future__ import annotations
 
 import copy
-import dataclasses
-import hashlib
-import json
 import math
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import uuid4
@@ -18,7 +14,11 @@ import numpy as np
 import warp as wp
 from newton.sensors import SensorContact
 
-from .protocol import PhysicalExperimentProtocol, PushProtocol, protocol_sha256
+from .control import (
+    NewtonFrankaController,
+    PushExecutionResult,
+)
+from .protocol import PhysicalExperimentProtocol, PushProtocol, configure_push_protocol, protocol_sha256
 from .schemas import (
     ActionCandidate,
     MotionSample,
@@ -29,14 +29,17 @@ from .schemas import (
     PredictedOutcome,
     WrenchObservation,
 )
-
-GRAVITY = 9.81
-CUBE_EDGE_M = 0.05
-TABLE_HEIGHT_M = 0.0
-# Known robot/scene geometry, not episode variables learned by SysID.
-FRANKA_BASE_POSITION_M = (-0.45, 0.0, 0.0)
-FRANKA_READY_JOINT_Q = (0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04)
-FRANKA_HAND_TO_TCP_M = 0.1034
+from .trajectory import CartesianMotionResult
+from .world_config import (
+    CUBE_EDGE_M,
+    FRANKA_BASE_POSITION_M,
+    FRANKA_HAND_TO_TCP_M,
+    FRANKA_READY_JOINT_Q,
+    GRAVITY,
+    PhysicalParameters,
+    WorldConfig,
+    physical_belief_snapshot_id,
+)
 
 
 class StepControl(Protocol):
@@ -45,52 +48,6 @@ class StepControl(Protocol):
 
 class EventIntentSink(Protocol):
     def emit(self, intent: dict[str, Any]) -> None: ...
-
-
-@dataclass(frozen=True, slots=True)
-class PhysicalParameters:
-    """Scene-construction parameters. Truth instances stay private to TruthEnvironment."""
-
-    mass_kg: float
-    static_friction: float
-    dynamic_friction: float
-    com_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    restitution: float = 0.0
-
-
-@dataclass(frozen=True, slots=True)
-class WorldConfig:
-    device: str = "cuda:0"
-    dt_s: float = 1.0 / 240.0
-    initial_position_m: tuple[float, float, float] = (-0.12, 0.0, CUBE_EDGE_M / 2)
-    target_position_m: tuple[float, float, float] = (0.15, 0.0, CUBE_EDGE_M / 2)
-    target_radius_m: float = 0.06
-    observation_noise_std: float = 0.0002
-    force_noise_std: float = 0.015
-    include_robot: bool = True
-    seed: int = 0
-    arm_position_stiffness: float = 250.0
-    arm_position_damping: float = 30.0
-    gripper_position_stiffness: float = 100.0
-    gripper_position_damping: float = 10.0
-    pusher_radius_m: float = 0.012
-    pusher_density_kg_m3: float = 100.0
-    pusher_friction: float = 0.5
-    maximum_tool_force_n: float = 15.0
-    contact_sensor_cutoff_hz: float = 10.0
-    prediction_residual_tolerance_m: float = 0.03
-
-    @property
-    def config_id(self) -> str:
-        """Content-address the complete effective world configuration."""
-        canonical = json.dumps(dataclasses.asdict(self), sort_keys=True, separators=(",", ":"))
-        return f"world-config:{hashlib.sha256(canonical.encode()).hexdigest()}"
-
-
-def physical_belief_snapshot_id(belief: PhysicalBelief) -> str:
-    """Content-address the posterior used to construct a belief world."""
-    canonical = belief.model_dump_json(exclude_none=False)
-    return f"physical-belief:{hashlib.sha256(canonical.encode()).hexdigest()}"
 
 
 class NewtonWorld:
@@ -156,23 +113,22 @@ class NewtonWorld:
                 xform=wp.transform(wp.vec3(*FRANKA_BASE_POSITION_M), wp.quat_identity()),
                 floating=False,
                 enable_self_collisions=False,
-                parse_visuals_as_colliders=True,
+                parse_visuals_as_colliders=False,
                 joint_damping_mode="passive",
             )
-            pusher_body = next(
+            hand_body = next(
                 index for index, label in enumerate(builder.body_label) if label.endswith("/fr3_hand")
             )
-            pusher_shape = builder.add_shape_sphere(
-                pusher_body,
+            tool_tip_shape = builder.add_shape_sphere(
+                hand_body,
                 xform=wp.transform(wp.vec3(0.0, 0.0, FRANKA_HAND_TO_TCP_M), wp.quat_identity()),
-                radius=self.config.pusher_radius_m,
+                radius=self.config.tool_tip_radius_m,
                 cfg=newton.ModelBuilder.ShapeConfig(
-                    mu=self.config.pusher_friction,
-                    density=self.config.pusher_density_kg_m3,
+                    mu=self.config.tool_tip_friction,
+                    density=self.config.tool_tip_density_kg_m3,
                 ),
-                label="fr3_pusher_tip",
+                label="fr3_tool_tip_collision",
             )
-            self._pusher_shape = pusher_shape
             ready = np.asarray(FRANKA_READY_JOINT_Q)
             ready[:7] += np.random.default_rng(self.config.seed + 97).uniform(-0.02, 0.02, 7)
             ready = ready.tolist()
@@ -205,8 +161,9 @@ class NewtonWorld:
         )
         self._cube_shape = cube_shape
         if self.config.include_robot:
+            self._tool_shape_indices = frozenset((tool_tip_shape,))
             for shape_index in range(cube_shape):
-                if shape_index != pusher_shape:
+                if shape_index not in self._tool_shape_indices:
                     builder.add_shape_collision_filter_pair(shape_index, cube_shape)
         builder.add_ground_plane(cfg=material)
         self.model = builder.finalize(device=self.config.device)
@@ -238,7 +195,7 @@ class NewtonWorld:
         if self.config.include_robot:
             self.tool_contact_sensor = SensorContact(
                 self.model,
-                sensing_bodies=["fr3/fr3_hand"],
+                sensing_bodies=["fr3/fr3_hand", "fr3/fr3_leftfinger", "fr3/fr3_rightfinger"],
                 counterpart_bodies="unknown_cube",
                 request_contact_attributes=False,
             )
@@ -284,6 +241,9 @@ class NewtonWorld:
             lambda_initial=0.1,
             jacobian_mode=ik.IKJacobianType.ANALYTIC,
         )
+        self._ik_state = self._ik_model.state()
+        self._tool_pose = np.asarray(self.observe_tool_pose().position_m, dtype=float)
+        self._franka_controller = NewtonFrankaController(self)
 
     def close(self) -> None:
         """Release large GPU references eagerly between black-box rollouts."""
@@ -426,7 +386,7 @@ class NewtonWorld:
             velocity_m_s=tuple(float(v) for v in vel[:3]),
             measured_force_n=tuple(float(v) for v in measured),
             contact_valid=self.last_tool_contact_active,
-            contact_pair=("fr3_pusher_tip", "unknown_cube_collision")
+            contact_pair=("fr3_tool_tip_collision", "unknown_cube_collision")
             if self.last_tool_contact_active
             else None,
             contact_position_m=tuple(float(v) for v in self.last_tool_contact_position_m)
@@ -479,9 +439,9 @@ class NewtonWorld:
         for first, second, normal, contact_force in zip(
             shape_0, shape_1, normals, contact_forces, strict=True
         ):
-            if int(first) == self._pusher_shape and int(second) == self._cube_shape:
+            if int(first) in self._tool_shape_indices and int(second) == self._cube_shape:
                 oriented = np.asarray(normal, dtype=float)
-            elif int(first) == self._cube_shape and int(second) == self._pusher_shape:
+            elif int(first) == self._cube_shape and int(second) in self._tool_shape_indices:
                 oriented = -np.asarray(normal, dtype=float)
             else:
                 continue
@@ -525,7 +485,7 @@ class NewtonWorld:
                     "position_m": contact_position,
                     "normal_world": contact_normal,
                     "force_world_n": tuple(float(value) for value in raw_contact_force),
-                    "shape_a_label": "fr3_pusher_tip",
+                    "shape_a_label": "fr3_tool_tip_collision",
                     "shape_b_label": "unknown_cube_collision",
                 },
             )
@@ -561,6 +521,9 @@ class NewtonWorld:
                     "action_id": self.scenario_id,
                     "belief_revision": self.belief_revision,
                     "body_manifest_id": ("franka-cube-v1" if self.config.include_robot else "cube-only-v1"),
+                    "tool_tip_radius_m": (
+                        self.config.tool_tip_radius_m if self.config.include_robot else None
+                    ),
                     "sim_time_s": self.sim_time_s,
                     "presentation_time_s": self.sim_time_s,
                     "bodies": bodies,
@@ -613,7 +576,7 @@ class NewtonWorld:
             torque_nm=tuple(float(v) for v in self.last_control_torque_nm),
             frame="world",
             producer=(
-                "Newton SensorContact: cube-on-hand/fingers linear contact force, sign-flipped to "
+                "Newton SensorContact: cube-on-hand/fingers/tool linear contact force, sign-flipped to "
                 f"robot-on-cube with {self.config.contact_sensor_cutoff_hz:g} Hz first-order sensor "
                 "filter; excludes internal transmission loads and contact torque"
             ),
@@ -626,72 +589,36 @@ class NewtonWorld:
         return names, self.state_0.joint_q.numpy().astype(float), self.state_0.joint_qd.numpy().astype(float)
 
     def command_joint_targets(self, targets: dict[int, float], duration_s: float = 0.5) -> None:
-        target = self.control.joint_target_q.numpy()
-        for index, value in targets.items():
-            if not 0 <= index < len(target):
-                raise IndexError(f"joint coordinate {index} out of bounds")
-            target[index] = value
-        self.control.joint_target_q.assign(target)
-        if duration_s <= 0.0:
-            return
-        for _ in range(max(1, round(duration_s / self.config.dt_s))):
-            self.step()
+        self._franka_controller.command_joint_targets(targets, duration_s)
 
-    def command_cartesian(self, target_m: tuple[float, float, float], duration_s: float) -> None:
-        """Solve Franka IK and execute the result through bounded joint PD targets."""
-        self.set_cartesian_target(target_m)
-        for _ in range(max(1, round(duration_s / self.config.dt_s))):
-            self.step()
+    def command_cartesian(
+        self,
+        target_m: tuple[float, float, float],
+        duration_s: float,
+    ) -> CartesianMotionResult:
+        return self._franka_controller.command_cartesian(target_m, duration_s)
+
+    def command_cartesian_at_speed(
+        self,
+        target_m: tuple[float, float, float],
+        speed_m_s: float,
+    ) -> CartesianMotionResult:
+        return self._franka_controller.command_cartesian_at_speed(target_m, speed_m_s)
 
     def set_cartesian_target(self, target_m: tuple[float, float, float]) -> None:
-        """Set a bounded IK-derived joint target without advancing physics."""
-        if not hasattr(self, "_ik_solver"):
-            raise RuntimeError("Cartesian robot commands require a Franka articulation")
-        current = self.state_0.joint_q.numpy()[: self._ik_model.joint_coord_count]
-        self._ik_q.assign(current.reshape(1, -1))
-        self._ik_position.set_target_positions(wp.array([target_m], dtype=wp.vec3, device=self.config.device))
-        self._ik_solver.step(self._ik_q, self._ik_q, iterations=32)
-        solution = self._ik_q.numpy()[0]
-        self.command_joint_targets(
-            {index: float(solution[index]) for index in range(min(7, len(solution)))},
-            0.0,
-        )
-        self._tool_pose = np.asarray(target_m, dtype=float)
+        self._franka_controller.set_cartesian_target(target_m)
 
     def set_gripper(self, width_m: float) -> None:
-        joint_labels = tuple(self.model.joint_label)
-        try:
-            left_joint = joint_labels.index("fr3/fr3_finger_joint1")
-            right_joint = joint_labels.index("fr3/fr3_finger_joint2")
-        except ValueError:
-            return
-        half = float(np.clip(width_m / 2, 0.0, 0.04))
-        joint_q_start = self.model.joint_q_start.numpy()
-        self.command_joint_targets(
-            {
-                int(joint_q_start[left_joint]): half,
-                int(joint_q_start[right_joint]): half,
-            },
-            0.35,
-        )
+        self._franka_controller.set_gripper(width_m)
 
     def enable_compliance(self) -> None:
-        self._compliance_enabled = True
+        self._franka_controller.enable_compliance()
 
     def release_compliance(self) -> None:
-        self._compliance_enabled = False
-        self._desired_force_n[:] = 0.0
+        self._franka_controller.release_compliance()
 
     def set_desired_force(self, force_n: tuple[float, float, float]) -> None:
-        """Reject force commands until measured-feedback control is validated."""
-        force = np.asarray(force_n, dtype=float)
-        norm = float(np.linalg.norm(force))
-        if norm > self.config.maximum_tool_force_n:
-            raise ValueError(f"desired force exceeds {self.config.maximum_tool_force_n:g} N safety bound")
-        raise RuntimeError(
-            "desired-force control unavailable: no validated Cartesian admittance or impedance "
-            "controller is connected to measured contact-force feedback"
-        )
+        self._franka_controller.set_desired_force(force_n)
 
     def execute_push(
         self,
@@ -699,38 +626,11 @@ class NewtonWorld:
         max_force_n: float = 12.0,
         *,
         protocol: PushProtocol,
-    ) -> list[MotionSample]:
-        if not self.config.include_robot:
-            raise RuntimeError("physical push requires the Franka articulation")
-        samples: list[MotionSample] = []
-        self.set_gripper(0.0)
-        for _attempt in range(protocol.maximum_attempts):
-            start = np.asarray(self.observe_object_pose().pose.position_m, dtype=float)
-            if abs(start[0] - target_m[0]) < 0.012:
-                break
-            tool = self.observe_tool_pose().position_m
-            self.command_cartesian((tool[0], tool[1], protocol.safe_height_m), 0.5)
-            push_y = float(start[1] + protocol.lateral_ik_compensation_m)
-            start_x = float(start[0] - protocol.precontact_offset_m)
-            self.command_cartesian((start_x, push_y, protocol.safe_height_m), 0.5)
-            push_z = float(start[2] + protocol.push_height_offset_m)
-            self.command_cartesian((start_x, push_y, push_z), 0.5)
-            end_x = max(target_m[0], start_x + protocol.maximum_travel_m)
-            stop_segment = False
-            for target_x in np.arange(start_x, end_x, protocol.command_increment_m):
-                self.set_cartesian_target((float(target_x), push_y, push_z))
-                for _ in range(protocol.physics_substeps_per_command):
-                    sample = self.step()
-                    samples.append(sample)
-                    if abs(sample.measured_force_n[0]) > protocol.safety_stop_fraction * max_force_n:
-                        stop_segment = True
-                        break
-                reached_target = samples[-1].position_m[0] >= target_m[0] - 0.012
-                if stop_segment or reached_target:
-                    break
-        for _ in range(round(0.35 / self.config.dt_s)):
-            samples.append(self.step())
-        return samples
+    ) -> PushExecutionResult:
+        return self._franka_controller.execute_push(target_m, max_force_n, protocol=protocol)
+
+    def hold_current_joint_positions(self, duration_s: float) -> None:
+        self._franka_controller.hold_current_joint_positions(duration_s)
 
     def execute_pick_place(
         self,
@@ -818,11 +718,19 @@ def rollout_candidate(
     )
     try:
         world.settle()
-        samples = world.execute_push(
+        candidate_protocol = configure_push_protocol(
+            protocol.final_push,
+            dt_s=config.dt_s,
+            speed_m_s=candidate.speed_m_s,
+            push_height_m=candidate.push_height_m,
+            safety_stop_fraction=1.0,
+        )
+        execution = world.execute_push(
             candidate.target_m,
             candidate.max_force_n,
-            protocol=protocol.final_push,
+            protocol=candidate_protocol,
         )
+        samples = execution.samples
         observation = world.observe_object_pose()
         final = np.asarray(observation.pose.position_m)
         error = float(np.linalg.norm(final[:2] - np.asarray(candidate.target_m[:2])))
@@ -830,7 +738,9 @@ def rollout_candidate(
         quat = observation.pose.orientation_xyzw
         upright_cos = 1.0 - 2.0 * (quat[0] ** 2 + quat[1] ** 2)
         tilt = math.acos(float(np.clip(upright_cos, -1.0, 1.0)))
-        feasible = peak <= candidate.max_force_n * 1.01 and tilt < math.radians(15)
+        feasible = (
+            not execution.safety_tripped and peak <= candidate.max_force_n * 1.01 and tilt < math.radians(15)
+        )
         success_probability = float(np.clip(1.0 - error / 0.10 - tilt / math.pi, 0.0, 1.0))
         return PredictedOutcome(
             action_id=candidate.action_id,
@@ -841,7 +751,10 @@ def rollout_candidate(
             peak_force_n=float(peak),
             duration_s=len(samples) * config.dt_s,
             feasible=feasible,
-            rationale="independent Newton belief rollout with bounded force controller",
+            rationale=(
+                "independent Newton belief rollout with bounded force controller; "
+                f"controller outcome={execution.outcome.value}"
+            ),
             scenario_id=candidate.action_id,
             world_instance_id=world.world_instance_id,
             world_config_id=world.world_config_id,
