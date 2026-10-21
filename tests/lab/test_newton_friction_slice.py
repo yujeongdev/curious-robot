@@ -5,6 +5,8 @@ import json
 import pytest
 
 from curious_robot.lab.artifact_store import LaboratoryArtifactStores
+from curious_robot.lab.capability_artifact import distill_friction_capability
+from curious_robot.lab.capability_skill import SkillStatus, execute_from_manifest
 from curious_robot.lab.contracts import ArtifactEnvelope
 from curious_robot.lab.friction_runner import run_newton_friction_slice
 from curious_robot.lab.newton_ports import TerminalEvaluator
@@ -25,6 +27,7 @@ def test_terminal_evaluator_requires_completed_controller(tmp_path) -> None:
                 "controller_outcome": "travel_exhausted",
                 "fresh_episode": True,
                 "observed_final_position_m": [0.15, 0.0, 0.025],
+                "peak_contact_force_n": 1.0,
                 "prediction_target_error_m": 0.0,
                 "runtime_process_id": 101,
                 "safety_tripped": False,
@@ -115,3 +118,10 @@ def test_newton_friction_slice_uses_independent_twin_and_fresh_reality(
     agent_documents = "\n".join(path.read_text() for path in (tmp_path / "agent").rglob("*.json"))
     for forbidden in ("scenario_seed", "evaluation_truth", "hidden_parameters"):
         assert forbidden not in agent_documents
+
+    capability_ref = distill_friction_capability(stores, result)
+    (tmp_path / "capability_artifact.json").write_text(
+        json.dumps({"artifact_id": capability_ref.artifact_id})
+    )
+    skill_result = execute_from_manifest(tmp_path, device="cuda:0", seed=7)
+    assert skill_result.status is SkillStatus.COMPLETED

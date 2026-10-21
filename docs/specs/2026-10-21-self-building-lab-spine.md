@@ -118,9 +118,38 @@ safety stop은 유효한 terminal deployment record로 보존하되 mission succ
 종료하며, safety guardrail이 발화하면 추가 명령을 보내지 않는다. Twin에서도
 같은 분기와 최대 횟수를 검증한 뒤만 policy를 발행한다.
 
-기존 `run_episode`와 Agent Lab event/UI migration, 복수 capability scheduler, FCI/ROS 2,
-skill distillation은 이 slice 범위 밖이다. 예비 FCI/ROS 2 adapter는 같은 operation
+기존 `run_episode`와 Agent Lab event/UI migration, 복수 capability scheduler, FCI/ROS 2는
+이 slice 범위 밖이다. 예비 FCI/ROS 2 adapter는 같은 operation
 schema와 독립 safety guardrail을 구현한 뒤 `RealityPort` endpoint로 연결한다.
+
+## Deterministic capability distillation
+
+`curious-robot lab-distill`은 terminal evaluation이 성공한 run만
+`CapabilityArtifact`로 증류한다. evaluator payload는 agent에 공개하지 않고,
+trusted coordinator가 성공 판정과 evaluator content ID commitment를
+`CapabilityAttestation`으로 declassify한다. CapabilityArtifact는
+다음을 content-addressed payload로 소유한다.
+
+- `ApplicabilityEnvelope`: operation schema, sensor-noise에서 도출한 initial-pose tolerance,
+  검증된 target/workspace, 최대 이동 거리, 검증된 target radius
+- `SafetyGuardrail`: force, speed, attempt 상한과 safety-trip/controller-completion 규칙
+- `RecoveryPolicy`: target predicate, 최대 재시도, safety/exhaustion 시 agent 복귀
+
+nominal decision은 LLM 없이 `deploy_capability` request를 생성한다. 현 capability는
+검증된 target과 정확히 같은 요청만 수행하며, 조건을 벗어나면 추측하지 않고
+agent에게 제어를 돌려준다.
+
+현 local threat model에서 coordinator는 trusted computing base다. agent/Reality/Twin
+worker는 generic agent-store writer를 받지 않고, scoped handle로는
+`capability_attestation`/`capability_artifact`를 쓸 수 없다. 분산 환경에서
+coordinator까지 untrusted로 두려면 별도 signature/MAC 계약이 필요하다.
+
+실제 skill invocation은 내부 discovery용 `deploy_policy`와 다른
+`deploy_capability` operation을 사용한다. Reality adapter는 명령 전에 capability,
+attestation, source policy/deployment lineage, 정확한 target/radius, protocol hash,
+force/speed/attempt 상한을 다시 검사한다. recovery observation은 finite/nonnegative
+typed contract이며, 다른 request를 재시도로 위장하거나 attempt index를 reset할 수
+없다.
 
 ## Acceptance evidence
 

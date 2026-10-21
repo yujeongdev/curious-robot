@@ -25,7 +25,11 @@ class NewtonSimulatedReality:
     """Reality service whose child process exclusively owns hidden parameters."""
 
     operations = frozenset(
-        {LabOperation.FRICTION_EXPERIMENT.value, LabOperation.DEPLOY_POLICY.value}
+        {
+            LabOperation.FRICTION_EXPERIMENT.value,
+            LabOperation.DEPLOY_POLICY.value,
+            LabOperation.DEPLOY_CAPABILITY.value,
+        }
     )
     evidence_kinds = frozenset(
         {

@@ -19,11 +19,8 @@ from .contracts import (
     OperationResult,
     content_id,
 )
-from .friction_artifacts import (
-    RealityDeploymentPayload,
-    TrajectoryDatasetPayload,
-    default_world_spec_seed,
-)
+from .friction_artifacts import TrajectoryDatasetPayload, default_world_spec_seed
+from .newton_deployment import close_capability_sessions, execute_deployment
 from .ports import PortAuthority, RuntimeIdentity
 from .process_port import send_error, send_ready, send_result
 
@@ -55,8 +52,6 @@ def _reality_worker(  # noqa: ANN001
     from curious_robot.belief import initial_belief
     from curious_robot.environment import TruthEnvironment
     from curious_robot.ports import RobotRealityAdapter
-    from curious_robot.protocol import PhysicalExperimentProtocol, protocol_sha256
-    from curious_robot.schemas import ActionCandidate
     from curious_robot.surface import sample_surface_profile
     from curious_robot.tools import RobotTools
     from curious_robot.world_config import PhysicalParameters, WorldConfig
@@ -64,7 +59,14 @@ def _reality_worker(  # noqa: ANN001
     store = open_agent_artifact_capability(
         artifact_root,
         read_kinds=frozenset(
-            {LabArtifactKind.CAPABILITY_GAP.value, LabArtifactKind.POLICY_ARTIFACT.value}
+            {
+                LabArtifactKind.CAPABILITY_ARTIFACT.value,
+                LabArtifactKind.CAPABILITY_ATTESTATION.value,
+                LabArtifactKind.CAPABILITY_GAP.value,
+                LabArtifactKind.POLICY_ARTIFACT.value,
+                LabArtifactKind.REALITY_DEPLOYMENT.value,
+                LabArtifactKind.TRAJECTORY_DATASET.value,
+            }
         ),
         write_kinds=frozenset(
             {
@@ -101,11 +103,13 @@ def _reality_worker(  # noqa: ANN001
     )
     send_ready(connection, identity)
     experiment_world_id: str | None = None
+    capability_sessions: dict[str, dict] = {}
 
     while True:
         message = connection.recv()
         command = message.get("command")
         if command == "shutdown":
+            close_capability_sessions(capability_sessions)
             return
         try:
             if command != "execute" or not isinstance(message.get("payload"), OperationRequest):
@@ -193,98 +197,22 @@ def _reality_worker(  # noqa: ANN001
                         result = OperationResult(request.request_id, "completed", (reference,))
                 finally:
                     world.close()
-            elif request.operation == LabOperation.DEPLOY_POLICY.value:
-                if experiment_world_id is None:
-                    raise RuntimeError("friction experiment must precede deployment")
-                policy_ref = _reference(
-                    arguments["policy_artifact_id"], LabArtifactKind.POLICY_ARTIFACT.value
-                )
-                policy = store.get(policy_ref)
-                policy_payload = policy.payload
-                if not isinstance(policy_payload, dict):
-                    raise TypeError("policy payload must be an object")
-                action = ActionCandidate.model_validate(policy_payload["action"])
-                max_attempts = int(policy_payload["max_attempts"])
-                if not 1 <= max_attempts <= 3:
-                    raise ValueError("policy max_attempts must be in [1, 3]")
-                goal_target = np.asarray(policy_payload["goal_target_m"][:2], dtype=float)
-                goal_radius = float(policy_payload["goal_target_radius_m"])
-                protocol = PhysicalExperimentProtocol.model_validate(policy_payload["protocol"])
-                if policy_payload["protocol_sha256"] != protocol_sha256(protocol):
-                    raise ValueError("policy protocol hash does not match its snapshot")
-                config = WorldConfig(
+            elif request.operation in {
+                LabOperation.DEPLOY_POLICY.value,
+                LabOperation.DEPLOY_CAPABILITY.value,
+            }:
+                result = execute_deployment(
+                    request=request,
+                    arguments=arguments,
+                    store=store,
+                    identity=identity,
+                    hidden_parameters=hidden_parameters,
+                    hidden_initial_position=hidden_initial_position,
+                    experiment_world_id=experiment_world_id,
+                    capability_sessions=capability_sessions,
                     device=device,
-                    initial_position_m=hidden_initial_position,
-                    include_robot=True,
-                    seed=seed + 1,
+                    seed=seed,
                 )
-                world = TruthEnvironment(
-                    hidden_parameters,
-                    config,
-                    scene="truth",
-                    scenario_id="fresh-policy-deployment",
-                )
-                try:
-                    world.settle()
-                    observed_initial = world.observe_object_pose().pose.position_m
-                    tools = RobotTools(
-                        RobotRealityAdapter(world),
-                        initial_belief(),
-                        replace(config, initial_position_m=observed_initial),
-                        protocol=protocol,
-                    )
-                    attempts = []
-                    for _attempt in range(max_attempts):
-                        execution = tools.execute_safe_push(
-                            action.target_m,
-                            action.max_force_n,
-                            speed_m_s=action.speed_m_s,
-                            push_height_m=action.push_height_m,
-                        )
-                        observation = world.observe_object_pose()
-                        final_position = observation.pose.position_m
-                        distance_xy = float(
-                            np.linalg.norm(np.asarray(final_position[:2]) - goal_target)
-                        )
-                        attempts.append(
-                            {
-                                "controller_outcome": execution.outcome.value,
-                                "target_error_m": distance_xy,
-                            }
-                        )
-                        if distance_xy <= goal_radius or execution.safety_tripped:
-                            break
-                    deployment_payload = RealityDeploymentPayload.model_validate(
-                        {
-                            "action_id": action.action_id,
-                            "attempt_count": len(attempts),
-                            "attempts": attempts,
-                            "controller_outcome": execution.outcome.value,
-                            "fresh_episode": world.world_instance_id != experiment_world_id,
-                            "observed_final_position_m": list(final_position),
-                            "prediction_target_error_m": distance_xy,
-                            "runtime_process_id": identity.process_id,
-                            "safety_tripped": execution.safety_tripped,
-                            "target_position_m": list(policy_payload["goal_target_m"]),
-                            "target_radius_m": goal_radius,
-                            "terminal": True,
-                            "world_instance_id": world.world_instance_id,
-                        }
-                    )
-                    reference = store.put(
-                        ArtifactEnvelope(
-                            kind=LabArtifactKind.REALITY_DEPLOYMENT.value,
-                            payload=deployment_payload.model_dump(mode="json"),
-                            provenance=(policy_ref,),
-                            validation_conditions=(
-                                "deployment uses a newly allocated Reality world",
-                                "independent force guardrail outcome is recorded",
-                            ),
-                        )
-                    )
-                    result = OperationResult(request.request_id, "completed", (reference,))
-                finally:
-                    world.close()
             else:
                 result = OperationResult(
                     request.request_id,
@@ -303,6 +231,7 @@ def _public_world_config(config) -> dict[str, Any]:  # noqa: ANN001
         "initial_position_m": list(config.initial_position_m),
         "maximum_cartesian_speed_m_s": config.maximum_cartesian_speed_m_s,
         "maximum_tool_force_n": config.maximum_tool_force_n,
+        "observation_noise_std": config.observation_noise_std,
         "prediction_residual_tolerance_m": config.prediction_residual_tolerance_m,
         "seed": config.seed,
         "target_position_m": list(config.target_position_m),

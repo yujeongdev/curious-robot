@@ -55,7 +55,16 @@ class FrictionCapabilityResult:
 class FrictionCapabilityPipeline:
     """Coordinate ports using only public artifacts and an explicit CAS lineage."""
 
-    REQUIRED_OPERATIONS = tuple(operation.value for operation in LabOperation)
+    REQUIRED_OPERATIONS = tuple(
+        operation.value
+        for operation in (
+            LabOperation.FRICTION_EXPERIMENT,
+            LabOperation.BUILD_TWIN,
+            LabOperation.VALIDATE_POLICY,
+            LabOperation.DEPLOY_POLICY,
+            LabOperation.EVALUATE_TERMINAL,
+        )
+    )
 
     def __init__(
         self,
