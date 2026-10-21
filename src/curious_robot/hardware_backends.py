@@ -39,6 +39,7 @@ class HardwareReadinessEvidence:
     state_streaming: bool = False
     hardware_component_active: bool = False
     command_controller_active: bool = False
+    approved_calibration_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +61,8 @@ class HardwareBackendProbe:
             "state_streaming": self.readiness.state_streaming,
         }
         blockers.extend(name for name, ready in common.items() if not ready)
+        if not self.readiness.approved_calibration_id:
+            blockers.append("approved_calibration_id")
         if self.contract.requires_realtime_host and not self.readiness.realtime_host_ready:
             blockers.append("realtime_host_ready")
         if self.contract.kind is HardwareBackendKind.ROS2_CONTROL:

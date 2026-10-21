@@ -177,6 +177,26 @@ timestamp, covariance, source identity가 있는 observation만 허용하며 epi
 거부한다. Factory가 transport를 반환하기 전에 예외를 내면 부분 할당한 자원은
 factory 자체가 정리해야 한다.
 
+Hardware command는 raw target을 SDK에 바로 넘기지 않는다. frame/object가 명시된
+attested action과 protocol, attempt별 fresh object pose, typed tool-tip pose,
+content-fingerprinted public calibration으로 safe lift → pre-contact transit → contact
+descent → guarded contact acquisition → bounded push → contact release → retreat
+lift의 연속 Cartesian plan을 먼저
+만든다. Calibration은 capability→hardware transform, TCP→tip transform,
+cube/tool contact geometry, upright-only object gate, fixed orientation과
+angular/linear 상한을 묶는다. 각
+segment는 항상 independent force guard를 켜고, quantized minimum-jerk
+speed/acceleration bound와 calibrated tool workspace를 만족해야 한다. 목표까지
+필요한 travel, 전체 waypoint 수, 계획 시간이 protocol/deadline을 넘으면 motion
+시작 전에 거부한다. Transport는 정확한 plan ID에 대해 IK, joint limit,
+singularity, self/environment collision, orientation preflight를 attest해야 하며
+이 검사가 모두 통과한 뒤에만 watchdog을 arm한다.
+Local deployment에서는 operator/factory가 TCB이며 readiness가 robot/tool serial과
+approval revision을 포함한 exact calibration hash를 승인해야 한다. Transport
+result와 deployment artifact도 exact plan ID와 calibration ID를 함께 보존한다.
+또한 measured linear speed/acceleration과 angular speed/acceleration maxima를
+plan limit과 대조하고 deployment evidence에 보존한다.
+
 ## Acceptance evidence
 
 - evaluator truth artifact의 agent store write/read/provenance 거부와 spawn

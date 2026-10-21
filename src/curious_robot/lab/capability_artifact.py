@@ -32,6 +32,8 @@ class _SkillModel(BaseModel):
 
 class ApplicabilityEnvelope(_SkillModel):
     operation_schema: Literal["friction-aware-push-v1"]
+    frame_id: str = Field(min_length=1)
+    object_id: str = Field(min_length=1)
     required_operations: tuple[Literal[LabOperation.DEPLOY_CAPABILITY], ...]
     supported_action_kind: Literal["push"]
     validated_target_radius_m: float = Field(gt=0.0)
@@ -205,6 +207,8 @@ def distill_friction_capability(
         or float(policy_envelope.payload["goal_target_radius_m"]) != dataset.task.target_radius_m
         or protocol != dataset.task.protocol
         or deployment.action_id != action.action_id
+        or deployment.frame_id != dataset.task.frame_id
+        or deployment.object_id != dataset.task.object_id
         or deployment.target_position_m != target
         or deployment.target_radius_m != dataset.task.target_radius_m
     ):
@@ -253,6 +257,8 @@ def distill_friction_capability(
         protocol_sha256=protocol_sha256(protocol),
         applicability=ApplicabilityEnvelope(
             operation_schema="friction-aware-push-v1",
+            frame_id=dataset.task.frame_id,
+            object_id=dataset.task.object_id,
             required_operations=(LabOperation.DEPLOY_CAPABILITY,),
             supported_action_kind="push",
             validated_target_radius_m=dataset.task.target_radius_m,

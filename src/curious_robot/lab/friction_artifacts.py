@@ -37,6 +37,8 @@ class _FrictionModel(BaseModel):
 
 class FrictionTaskSpec(_FrictionModel):
     kind: Literal["friction-aware-push"]
+    frame_id: Literal["simulation_world"]
+    object_id: Literal["cube"]
     protocol: PhysicalExperimentProtocol
     protocol_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     target_position_m: tuple[float, float, float]
@@ -145,6 +147,18 @@ class RealityDeploymentPayload(_FrictionModel):
     invocation_id: str | None = Field(default=None, min_length=1)
     attempt_index: int | None = Field(default=None, gt=0, le=3)
     fresh_episode: bool
+    frame_id: str = Field(default="simulation_world", min_length=1)
+    object_id: str = Field(default="cube", min_length=1)
+    motion_plan_id: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    calibration_id: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    maximum_measured_speed_m_s: float | None = Field(default=None, ge=0.0)
+    maximum_measured_acceleration_m_s2: float | None = Field(default=None, ge=0.0)
+    maximum_measured_angular_speed_rad_s: float | None = Field(default=None, ge=0.0)
+    maximum_measured_angular_acceleration_rad_s2: float | None = Field(
+        default=None,
+        ge=0.0,
+    )
+    motion_elapsed_s: float | None = Field(default=None, ge=0.0)
     observed_final_position_m: tuple[float, float, float]
     peak_contact_force_n: float = Field(ge=0.0)
     prediction_target_error_m: float = Field(ge=0.0)
@@ -157,6 +171,19 @@ class RealityDeploymentPayload(_FrictionModel):
 
     @model_validator(mode="after")
     def validate_attempts(self) -> RealityDeploymentPayload:
+        if (self.motion_plan_id is None) != (self.calibration_id is None):
+            raise ValueError("hardware plan and calibration IDs must be supplied together")
+        motion_measurements = (
+            self.maximum_measured_speed_m_s,
+            self.maximum_measured_acceleration_m_s2,
+            self.maximum_measured_angular_speed_rad_s,
+            self.maximum_measured_angular_acceleration_rad_s2,
+            self.motion_elapsed_s,
+        )
+        if self.motion_plan_id is None and any(value is not None for value in motion_measurements):
+            raise ValueError("hardware motion measurements require a motion plan")
+        if self.motion_plan_id is not None and any(value is None for value in motion_measurements):
+            raise ValueError("hardware motion measurements must be complete")
         if self.attempt_count != len(self.attempts):
             raise ValueError("attempt_count must equal the number of attempt records")
         if self.controller_outcome != self.attempts[-1].controller_outcome:
@@ -302,6 +329,8 @@ def default_world_spec_seed(
     protocol = protocol or load_default_protocol()
     task = FrictionTaskSpec(
         kind="friction-aware-push",
+        frame_id="simulation_world",
+        object_id="cube",
         protocol=protocol,
         protocol_sha256=protocol_sha256(protocol),
         target_position_m=target_position_m,

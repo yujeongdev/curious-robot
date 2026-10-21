@@ -158,6 +158,8 @@ def execute_deployment(
             invocation_id=(invocation.invocation_id if capability_payload is not None else None),
             attempt_index=(invocation.attempt_index if capability_payload is not None else 1),
             fresh_episode=world.world_instance_id != experiment_world_id,
+            frame_id="simulation_world",
+            object_id="cube",
             observed_final_position_m=final_position,
             peak_contact_force_n=peak_force,
             prediction_target_error_m=target_error,

@@ -18,8 +18,14 @@ from curious_robot.hardware_backends import (
 from curious_robot.hardware_factory import build_franka_hardware_reality
 from curious_robot.hardware_interfaces import (
     HardwareEpisode,
+    HardwareMotionPreflight,
     HardwareObservation,
     HardwarePushResult,
+)
+from curious_robot.hardware_motion import (
+    FrankaPushCalibration,
+    HardwareMotionPhase,
+    HardwareToolPose,
 )
 from curious_robot.lab.artifact_store import LaboratoryArtifactStores
 from curious_robot.lab.capability_artifact import distill_friction_capability
@@ -30,8 +36,8 @@ from curious_robot.lab.friction_artifacts import RealityDeploymentPayload
 NOW = 100.0
 
 
-def _ready(**updates: bool) -> HardwareReadinessEvidence:
-    values = {
+def _ready(**updates: object) -> HardwareReadinessEvidence:
+    values: dict[str, object] = {
         "robot_reachable": True,
         "external_perception_ready": True,
         "independent_safety_ready": True,
@@ -41,9 +47,38 @@ def _ready(**updates: bool) -> HardwareReadinessEvidence:
         "state_streaming": True,
         "hardware_component_active": True,
         "command_controller_active": True,
+        "approved_calibration_id": _calibration().calibration_id,
     }
     values.update(updates)
     return HardwareReadinessEvidence(**values)
+
+
+def _calibration() -> FrankaPushCalibration:
+    return FrankaPushCalibration(
+        capability_frame_id="simulation_world",
+        hardware_frame_id="world",
+        object_id="cube",
+        tool_id="fr3-pusher-tip",
+        robot_serial="FR3-TEST-001",
+        tool_serial="PUSHER-TEST-001",
+        approval_revision="operator-fixture-v1",
+        capability_to_hardware_yaw_rad=0.0,
+        capability_to_hardware_translation_m=(0.0, 0.0, 0.0),
+        tcp_to_tip_translation_m=(0.0, 0.0, 0.1034),
+        tcp_to_tip_orientation_xyzw=(0.0, 0.0, 0.0, 1.0),
+        required_tip_orientation_xyzw=(0.0, 1.0, 0.0, 0.0),
+        object_half_extent_xy_m=0.025,
+        tool_tip_radius_m=0.012,
+        maximum_object_tilt_rad=0.0,
+        control_period_s=0.001,
+        retreat_distance_m=0.04,
+        maximum_waypoint_count=100_000,
+        tool_workspace_min_m=(-0.5, -0.5, 0.0),
+        tool_workspace_max_m=(0.8, 0.5, 0.8),
+        maximum_linear_acceleration_m_s2=0.5,
+        maximum_angular_speed_rad_s=0.5,
+        maximum_angular_acceleration_rad_s2=1.0,
+    )
 
 
 class FakePerception:
@@ -66,6 +101,7 @@ class FakePerception:
             episode_id=episode_id or self.current_episode_id,
             object_id="cube",
             position_m=position,
+            orientation_xyzw=(0.0, 0.0, 0.0, 1.0),
             frame_id="world",
             captured_monotonic_s=self.captured_at,
             covariance_trace_m2=0.00001,
@@ -104,9 +140,43 @@ class FakeTransport:
         self.result_updates = {}
         self.fail_safe_stop = False
         self.fail_close = False
+        self.preflight_calls = []
+        self.preflight_feasible = True
+        self.preflight_errors = ()
+        self.arm_calls = 0
+
+    def read_tool_pose(self, timeout_s: float) -> HardwareToolPose:
+        assert timeout_s > 0
+        calibration = _calibration()
+        return HardwareToolPose(
+            frame_id=calibration.hardware_frame_id,
+            tool_id=calibration.tool_id,
+            calibration_id=calibration.calibration_id,
+            tip_position_m=(0.10, 0.0, 0.18),
+            tip_orientation_xyzw=calibration.required_tip_orientation_xyzw,
+            captured_monotonic_s=NOW,
+        )
+
+    def validate_motion_plan(self, motion_plan, timeout_s):  # noqa: ANN001, ANN201
+        assert timeout_s > 0
+        self.preflight_calls.append(motion_plan)
+        return HardwareMotionPreflight(
+            plan_id=motion_plan.plan_id,
+            feasible=self.preflight_feasible,
+            checks=(
+                "ik",
+                "joint_limits",
+                "singularity",
+                "self_collision",
+                "environment_collision",
+                "orientation",
+            ),
+            errors=self.preflight_errors,
+        )
 
     def arm_watchdog(self, command_timeout_s: float) -> str:
         assert command_timeout_s > 0
+        self.arm_calls += 1
         return "watchdog-1"
 
     def disarm_watchdog(self, watchdog_token: str) -> None:
@@ -125,10 +195,16 @@ class FakeTransport:
 
     def execute_bounded_push(self, **kwargs):  # noqa: ANN003, ANN201
         self.calls.append(kwargs)
+        motion_plan = kwargs["motion_plan"]
         values = {
+            "motion_plan_id": motion_plan.plan_id,
+            "calibration_id": motion_plan.calibration_id,
             "controller_outcome": "completed",
             "peak_contact_force_n": 4.0,
             "maximum_measured_speed_m_s": 0.02,
+            "maximum_measured_acceleration_m_s2": 0.2,
+            "maximum_measured_angular_speed_rad_s": 0.0,
+            "maximum_measured_angular_acceleration_rad_s2": 0.0,
             "elapsed_s": 1.0,
             "safety_tripped": False,
             "watchdog_token": "watchdog-1",
@@ -158,6 +234,7 @@ def _hardware_case(tmp_path, *, backend=HardwareBackendKind.PYLIBFRANKA):  # noq
         artifact_root=tmp_path,
         probes=probes,
         transport_factories={backend: lambda: transport},
+        push_calibration=_calibration(),
         perception=perception,
         monotonic=lambda: NOW,
     )
@@ -214,6 +291,7 @@ def test_hardware_reality_executes_only_guarded_capability(tmp_path) -> None:
         artifact_root=tmp_path,
         probes=probes,
         transport_factories={HardwareBackendKind.PYLIBFRANKA: lambda: transport},
+        push_calibration=_calibration(),
         perception=FakePerception(
             applicability.validated_initial_position_m,
             (0.13, 0.0, 0.025),
@@ -237,8 +315,23 @@ def test_hardware_reality_executes_only_guarded_capability(tmp_path) -> None:
     assert result.status == "completed"
     assert deployment.request_id == decision.request.request_id
     assert deployment.prediction_target_error_m == pytest.approx(0.02)
-    assert transport.calls[0]["maximum_force_n"] == skill.payload.safety.maximum_force_n
-    assert transport.calls[0]["command_timeout_s"] == 30.0
+    assert deployment.motion_plan_id == transport.calls[0]["motion_plan"].plan_id
+    assert deployment.calibration_id == _calibration().calibration_id
+    assert deployment.maximum_measured_acceleration_m_s2 == pytest.approx(0.2)
+    assert deployment.motion_elapsed_s == pytest.approx(1.0)
+    assert transport.calls[0]["maximum_force_n"] == pytest.approx(
+        skill.payload.protocol.final_push.safety_stop_fraction
+        * skill.payload.safety.maximum_force_n
+    )
+    assert transport.calls[0]["command_timeout_s"] == 60.0
+    motion_plan = transport.calls[0]["motion_plan"]
+    assert motion_plan.hardware_frame_id == "world"
+    assert motion_plan.capability_frame_id == "simulation_world"
+    assert transport.preflight_calls == [motion_plan]
+    assert any(
+        segment.phase is HardwareMotionPhase.CONTACT_PUSH
+        for segment in motion_plan.segments
+    )
 
     bypass = reality.execute(
         OperationRequest(
@@ -264,6 +357,7 @@ def test_hardware_reality_rejects_widened_or_replayed_invocation(tmp_path) -> No
         artifact_root=tmp_path,
         probes=probes,
         transport_factories={HardwareBackendKind.ROS2_CONTROL: lambda: transport},
+        push_calibration=_calibration(),
         perception=FakePerception(
             applicability.validated_initial_position_m,
             (0.13, 0.0, 0.025),
@@ -311,6 +405,7 @@ def test_builder_rejects_handcrafted_probe_even_with_canonical_contract(tmp_path
             artifact_root=tmp_path,
             probes=(probe,),
             transport_factories={HardwareBackendKind.PYLIBFRANKA: lambda: transport},
+            push_calibration=_calibration(),
             perception=FakePerception((0.0, 0.0, 0.025), (0.0, 0.0, 0.025)),
             monotonic=lambda: NOW,
         )
@@ -336,6 +431,7 @@ def test_builder_falls_back_when_preferred_factory_fails(tmp_path) -> None:
             HardwareBackendKind.PYLIBFRANKA: fail_fci,
             HardwareBackendKind.ROS2_CONTROL: lambda: ros_transport,
         },
+        push_calibration=_calibration(),
         perception=FakePerception((0.0, 0.0, 0.025), (0.0, 0.0, 0.025)),
         monotonic=lambda: NOW,
     )
@@ -361,6 +457,7 @@ def test_builder_cleans_mismatched_transport_and_falls_back(tmp_path) -> None:
             HardwareBackendKind.PYLIBFRANKA: lambda: mismatched,
             HardwareBackendKind.ROS2_CONTROL: lambda: ros_transport,
         },
+        push_calibration=_calibration(),
         perception=FakePerception((0.0, 0.0, 0.025), (0.0, 0.0, 0.025)),
         monotonic=lambda: NOW,
     )
@@ -395,6 +492,7 @@ def test_builder_does_not_fallback_if_rejected_transport_cleanup_fails(tmp_path)
                 HardwareBackendKind.PYLIBFRANKA: lambda: mismatched,
                 HardwareBackendKind.ROS2_CONTROL: ros_factory,
             },
+            push_calibration=_calibration(),
             perception=FakePerception((0.0, 0.0, 0.025), (0.0, 0.0, 0.025)),
             monotonic=lambda: NOW,
         )
@@ -414,6 +512,7 @@ def test_builder_cleans_transport_when_adapter_construction_fails(tmp_path) -> N
             artifact_root=tmp_path,
             probes=probes,
             transport_factories={HardwareBackendKind.PYLIBFRANKA: lambda: transport},
+            push_calibration=_calibration(),
             perception=FakePerception((0.0, 0.0, 0.025), (0.0, 0.0, 0.025)),
             command_timeout_s=float("nan"),
             monotonic=lambda: NOW,
@@ -423,14 +522,49 @@ def test_builder_cleans_transport_when_adapter_construction_fails(tmp_path) -> N
     assert transport.close_calls == 1
 
 
+def test_builder_rejects_unapproved_calibration_before_transport_factory(tmp_path) -> None:
+    probes = probe_hardware_backends(
+        {
+            HardwareBackendKind.PYLIBFRANKA: _ready(
+                approved_calibration_id="sha256:" + "0" * 64
+            )
+        },
+        module_available=lambda _name: True,
+    )
+    transport = FakeTransport(HardwareBackendKind.PYLIBFRANKA)
+
+    factory_calls = 0
+
+    def factory() -> FakeTransport:
+        nonlocal factory_calls
+        factory_calls += 1
+        return transport
+
+    with pytest.raises(HardwareBackendUnavailable, match="calibration is not approved"):
+        build_franka_hardware_reality(
+            artifact_root=tmp_path,
+            probes=probes,
+            transport_factories={HardwareBackendKind.PYLIBFRANKA: factory},
+            push_calibration=_calibration(),
+            perception=FakePerception((0.0, 0.0, 0.025), (0.0, 0.0, 0.025)),
+            monotonic=lambda: NOW,
+        )
+
+    assert factory_calls == 0
+
+
 @pytest.mark.parametrize(
     "updates",
     [
         {"peak_contact_force_n": 100.0},
         {"maximum_measured_speed_m_s": 100.0},
+        {"maximum_measured_acceleration_m_s2": 100.0},
+        {"maximum_measured_angular_speed_rad_s": 100.0},
+        {"maximum_measured_angular_acceleration_rad_s2": 100.0},
         {"elapsed_s": 100.0},
         {"deadline_enforced": False},
         {"safety_tripped": True},
+        {"motion_plan_id": "sha256:" + "0" * 64},
     ],
 )
 def test_hardware_result_violation_stops_and_records_failure(tmp_path, updates) -> None:  # noqa: ANN001
@@ -443,6 +577,20 @@ def test_hardware_result_violation_stops_and_records_failure(tmp_path, updates) 
     assert transport.safe_stop_calls == 1
     assert transport.disarmed == ["watchdog-1"]
     assert perception.ended == [f"hardware:{request.arguments['invocation_id']}"]
+
+
+def test_failed_motion_preflight_never_arms_or_executes(tmp_path) -> None:
+    _, _, transport, _, reality, request = _hardware_case(tmp_path)
+    transport.preflight_feasible = False
+    transport.preflight_errors = ("self_collision",)
+
+    result = reality.execute(request)
+
+    assert result.status == "failed"
+    assert transport.preflight_calls
+    assert transport.arm_calls == 0
+    assert transport.calls == []
+    assert transport.safe_stop_calls == 1
 
 
 def test_stale_perception_is_rejected_before_motion(tmp_path) -> None:
@@ -479,6 +627,37 @@ def test_duplicate_episode_id_is_not_fresh(tmp_path) -> None:
     assert reality.execute(second.request).status == "failed"
     assert transport.safe_stop_calls == 1
     assert perception.ended == ["physical-episode-1"]
+
+
+def test_recovery_attempt_replans_from_fresh_object_pose(tmp_path) -> None:
+    _, skill, transport, perception, reality, request = _hardware_case(tmp_path)
+    perception.final = (-0.05, 0.0, 0.025)
+
+    first = reality.execute(request)
+    second_request = OperationRequest(
+        request.operation,
+        {**request.arguments, "attempt_index": 2},
+        "recovery-attempt-2",
+    )
+    second = reality.execute(second_request)
+
+    assert first.status == "completed"
+    assert second.status == "completed"
+    first_push = next(
+        segment
+        for segment in transport.calls[0]["motion_plan"].segments
+        if segment.phase is HardwareMotionPhase.CONTACT_PUSH
+    )
+    second_push = next(
+        segment
+        for segment in transport.calls[1]["motion_plan"].segments
+        if segment.phase is HardwareMotionPhase.CONTACT_PUSH
+    )
+    assert second_push.start_position_m[0] > first_push.start_position_m[0]
+    assert transport.preflight_calls == [
+        transport.calls[0]["motion_plan"],
+        transport.calls[1]["motion_plan"],
+    ]
 
 
 def test_terminal_observation_must_match_active_episode(tmp_path) -> None:
