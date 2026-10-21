@@ -1,0 +1,76 @@
+"""Public contracts for the Curious Robot laboratory architecture."""
+
+from .artifact_store import (
+    ArtifactAuthorityError,
+    ContentAddressedArtifactStore,
+    LaboratoryArtifactStores,
+    open_agent_artifact_store,
+    open_evaluator_artifact_store,
+)
+from .contracts import (
+    ArtifactEnvelope,
+    ArtifactOutcome,
+    ArtifactRef,
+    ArtifactResolver,
+    ArtifactVisibility,
+    CapabilityGap,
+    CapabilityRequirement,
+    LabArtifactKind,
+    LabOperation,
+    OperationRequest,
+    OperationResult,
+    PatchOperation,
+    PipelineLane,
+    StaleWorldSpecError,
+    WorldSpec,
+    WorldSpecEvidenceError,
+    WorldSpecPatch,
+)
+from .friction_artifacts import CapabilityExecutionError
+from .friction_capability import FrictionCapabilityPipeline, FrictionCapabilityResult
+from .pipeline import IllegalPipelineTransition, LaboratoryPipeline, PipelineState
+from .ports import (
+    EvaluatorPort,
+    PortAuthority,
+    RealityPort,
+    RuntimeIdentity,
+    TwinPort,
+    assert_independent_reality_and_twin,
+)
+
+__all__ = [
+    "ArtifactEnvelope",
+    "ArtifactAuthorityError",
+    "ArtifactOutcome",
+    "ArtifactRef",
+    "ArtifactResolver",
+    "ArtifactVisibility",
+    "CapabilityGap",
+    "CapabilityRequirement",
+    "ContentAddressedArtifactStore",
+    "CapabilityExecutionError",
+    "EvaluatorPort",
+    "FrictionCapabilityPipeline",
+    "FrictionCapabilityResult",
+    "IllegalPipelineTransition",
+    "LaboratoryArtifactStores",
+    "LaboratoryPipeline",
+    "LabArtifactKind",
+    "LabOperation",
+    "OperationRequest",
+    "OperationResult",
+    "PatchOperation",
+    "PipelineLane",
+    "PipelineState",
+    "PortAuthority",
+    "RealityPort",
+    "RuntimeIdentity",
+    "StaleWorldSpecError",
+    "TwinPort",
+    "WorldSpec",
+    "WorldSpecEvidenceError",
+    "WorldSpecPatch",
+    "assert_independent_reality_and_twin",
+    "open_agent_artifact_store",
+    "open_evaluator_artifact_store",
+]

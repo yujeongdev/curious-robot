@@ -1,0 +1,209 @@
+import type { AgentEvent, DetailedStage, VisualFramePayload } from "../generated/agent-events";
+import { visualFramePayloadSchema } from "../generated/agent-events";
+
+export type RunStatus = "idle" | "preparing" | "running" | "pause_pending" | "paused" | "completed" | "failed" | "cancelled" | "abandoned";
+export type StageStatus = "pending" | "active" | "completed" | "failed" | "skipped";
+
+export interface StageInstance {
+  id: string;
+  stage: DetailedStage;
+  iteration: number;
+  status: StageStatus;
+  firstSequence: number;
+  lastSequence?: number;
+  durationS?: number;
+  reason?: string;
+}
+
+export interface MeasurementPoint {
+  sequence: number;
+  simTimeS: number;
+  measuredForceN?: number;
+  desiredForceN?: number;
+  objectPositionM?: number;
+  objectVelocityMps?: number;
+}
+
+export interface BeliefEstimate {
+  parameter: string;
+  mean: number;
+  std: number;
+  interval95: [number, number];
+  revision: number;
+  unit: string;
+}
+
+export interface RunState {
+  runId: string | null;
+  status: RunStatus;
+  lastSequence: number;
+  lastSimTimeS: number;
+  seenEventIds: ReadonlySet<string>;
+  events: readonly AgentEvent[];
+  stageInstances: readonly StageInstance[];
+  activeStageInstanceId: string | null;
+  latestFrame: VisualFramePayload | null;
+  measurements: readonly MeasurementPoint[];
+  beliefs: Readonly<Record<string, BeliefEstimate>>;
+  gap: { expected: number; received: number } | null;
+  fatalError: string | null;
+  verification: { success: boolean; residualM?: number; toleranceM?: number } | null;
+}
+
+export const initialRunState: RunState = {
+  runId: null,
+  status: "idle",
+  lastSequence: 0,
+  lastSimTimeS: 0,
+  seenEventIds: new Set(),
+  events: [],
+  stageInstances: [],
+  activeStageInstanceId: null,
+  latestFrame: null,
+  measurements: [],
+  beliefs: {},
+  gap: null,
+  fatalError: null,
+  verification: null,
+};
+
+function number(payload: Record<string, unknown>, key: string): number | undefined {
+  const value = payload[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function updateStage(state: RunState, event: AgentEvent): Pick<RunState, "stageInstances" | "activeStageInstanceId"> {
+  if (!event.stage || !event.stage_instance_id) {
+    return { stageInstances: state.stageInstances, activeStageInstanceId: state.activeStageInstanceId };
+  }
+  const instances = [...state.stageInstances];
+  const index = instances.findIndex((item) => item.id === event.stage_instance_id);
+  if (event.type === "stage.entered") {
+    const next: StageInstance = {
+      id: event.stage_instance_id,
+      stage: event.stage,
+      iteration: event.iteration_id,
+      status: "active",
+      firstSequence: event.sequence,
+    };
+    if (index >= 0) instances[index] = next;
+    else instances.push(next);
+    return { stageInstances: instances, activeStageInstanceId: next.id };
+  }
+  if (event.type === "stage.completed") {
+    const outcome = String(event.payload.outcome ?? "completed") as StageStatus;
+    const previous = index >= 0 ? instances[index] : undefined;
+    const next: StageInstance = {
+      id: event.stage_instance_id,
+      stage: event.stage,
+      iteration: event.iteration_id,
+      status: ["failed", "skipped"].includes(outcome) ? outcome : "completed",
+      firstSequence: previous?.firstSequence ?? event.sequence,
+      lastSequence: event.sequence,
+      durationS: number(event.payload, "duration_s"),
+      reason: String(event.payload.failure_reason ?? event.payload.skipped_reason ?? "") || undefined,
+    };
+    if (index >= 0) instances[index] = next;
+    else instances.push(next);
+    return { stageInstances: instances, activeStageInstanceId: null };
+  }
+  return { stageInstances: state.stageInstances, activeStageInstanceId: state.activeStageInstanceId };
+}
+
+function statusFor(event: AgentEvent, current: RunStatus): RunStatus {
+  const states: Partial<Record<AgentEvent["type"], RunStatus>> = {
+    "run.started": "preparing",
+    "run.paused": "paused",
+    "run.resumed": "running",
+    "run.completed": "completed",
+    "run.failed": "failed",
+    "run.cancelled": "cancelled",
+    "run.abandoned": "abandoned",
+    "stage.entered": "running",
+  };
+  return states[event.type] ?? current;
+}
+
+export function reduceRunEvent(state: RunState, event: AgentEvent): RunState {
+  if (state.seenEventIds.has(event.event_id)) return state;
+  if (state.runId && state.runId !== event.run_id) {
+    return { ...state, fatalError: `Wrong run: expected ${state.runId}, received ${event.run_id}` };
+  }
+  const expected = state.lastSequence + 1;
+  if (event.sequence !== expected) {
+    if (event.sequence <= state.lastSequence) return state;
+    return { ...state, gap: { expected, received: event.sequence } };
+  }
+
+  const seen = new Set(state.seenEventIds);
+  seen.add(event.event_id);
+  const base: RunState = {
+    ...state,
+    runId: event.run_id,
+    status: statusFor(event, state.status),
+    lastSequence: event.sequence,
+    lastSimTimeS: event.sim_time_s ?? state.lastSimTimeS,
+    seenEventIds: seen,
+    events: [...state.events, event].slice(-500),
+    gap: null,
+    ...updateStage(state, event),
+  };
+
+  if (event.type === "simulation.visual_frame") {
+    return { ...base, latestFrame: visualFramePayloadSchema.parse(event.payload) };
+  }
+  if (event.type === "measurement.sampled") {
+    const values = (event.payload.values ?? {}) as Record<string, unknown>;
+    const point: MeasurementPoint = {
+      sequence: event.sequence,
+      simTimeS: event.sim_time_s ?? state.lastSimTimeS,
+      measuredForceN: number(values, "measured_force_n"),
+      desiredForceN: number(values, "desired_force_n"),
+      objectPositionM: number(values, "object_position_m"),
+      objectVelocityMps: number(values, "object_velocity_mps"),
+    };
+    return { ...base, measurements: [...state.measurements, point].slice(-2000) };
+  }
+  if (event.type === "belief.updated") {
+    const parameter = String(event.payload.parameter_name ?? "unknown");
+    const posterior = (event.payload.posterior ?? {}) as Record<string, unknown>;
+    const uncertainty = (posterior.uncertainty ?? {}) as Record<string, unknown>;
+    const interval = uncertainty.interval95 ?? posterior.interval_95;
+    const interval95: [number, number] = Array.isArray(interval) && interval.length === 2
+      ? [Number(interval[0]), Number(interval[1])]
+      : [Number(posterior.mean ?? 0), Number(posterior.mean ?? 0)];
+    return {
+      ...base,
+      beliefs: {
+        ...state.beliefs,
+        [parameter]: {
+          parameter,
+          mean: Number(posterior.mean ?? 0),
+          std: Number(uncertainty.standard_deviation ?? posterior.std ?? 0),
+          interval95,
+          revision: Number(event.payload.revision ?? 0),
+          unit: String(posterior.units ?? event.payload.unit ?? ""),
+        },
+      },
+    };
+  }
+  if (event.type === "verification.completed") {
+    return {
+      ...base,
+      verification: {
+        success: Boolean(event.payload.success),
+        residualM: number(event.payload, "prediction_residual_m"),
+        toleranceM: number(event.payload, "tolerance_m"),
+      },
+    };
+  }
+  return base;
+}
+
+export function reduceRunEvents(events: readonly AgentEvent[]): RunState {
+  return events.reduce(reduceRunEvent, initialRunState);
+}
+
+export function seekRun(events: readonly AgentEvent[], sequence: number): RunState {
+  return reduceRunEvents(events.filter((event) => event.sequence <= sequence));
+}

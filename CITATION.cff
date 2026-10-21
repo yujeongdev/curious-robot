@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use Curious Robot in research, please cite this software."
+title: "Curious Robot: Agentic Physics Discovery with NVIDIA Newton"
+type: software
+authors:
+  - family-names: Jeong
+    given-names: YuJeong
+repository-code: "https://github.com/yujeongdev/curious-robot"
+url: "https://github.com/yujeongdev/curious-robot"
+license: Apache-2.0
+version: 0.1.0
+date-released: 2026-10-19
+keywords:
+  - robotics
+  - system identification
+  - NVIDIA Newton
+  - NVIDIA Warp
+  - sim-to-real
