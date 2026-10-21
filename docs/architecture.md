@@ -55,10 +55,46 @@ contact is not claimed to be differentiable.
 
 ## Hardware replacement seam
 
-Replacing the reality plant requires an implementation of the same typed
-observation and bounded-action surface. SysID, beliefs, planning, replay schema,
-and belief simulation remain unchanged. No ROS 2 dependency is introduced in
-this simulation-only milestone.
+`FrankaHardwareReality` implements the high-level RealityPort without importing
+a hardware SDK at module import time. Backend selection is fail-closed:
+
+1. prefer official `pylibfranka` direct FCI when its module, a real-time host,
+   robot reachability, exclusive control, state stream, perception, timeout,
+   and independent safety evidence are all present;
+2. otherwise use ROS 2 Jazzy `franka_hardware`/`ros2_control` only when its
+   modules, active hardware component, active command controller, state stream,
+   real-time host, perception, timeout, exclusivity, and safety evidence are
+   present;
+3. reject partial readiness rather than silently falling back to simulation.
+
+The shared adapter accepts only `deploy_capability`, reloads the complete
+CapabilityArtifact lineage, applies the same invocation/attempt guardrail at the
+hardware command boundary, supplies protocol/force/speed/timeout bounds to the
+transport, and independently rejects returned force, measured-speed,
+elapsed-time, watchdog, or safety-status violations. The transport contract
+must arm a controller-side or out-of-process watchdog before motion; passing a
+Python timeout value alone is not deadline enforcement. Every failure commands
+a safe stop, closes only the affected perception episode, and preserves a FAIL
+artifact. Commands are serialized so invocations cannot control the robot
+concurrently.
+
+External object poses carry a frame, monotonic capture time, covariance, and
+producer identity. Stale, future-dated, wrong-frame, uncertain, wrong-source,
+or reused-episode observations fail before deployment evidence can pass. No
+live robot connection occurs during discovery or selection; concrete FCI/ROS
+transports are injected factories. Factory availability participates in ordered
+routing, so an unusable direct FCI plugin can fall back to a fully ready ROS 2
+plugin, but only after the rejected transport confirms safe-stop and cleanup;
+otherwise fallback is refused. A factory that raises before returning a
+transport owns cleanup of any resources it partially allocated. This repository
+tests the routing and safety contract with a fake
+transport but does not ship a concrete SDK transport or claim a physical robot
+trial.
+
+The official interfaces underlying the seam are
+[`pylibfranka`](https://frankarobotics.github.io/libfranka/pylibfranka/latest/)
+and ROS 2 Jazzy
+[`franka_hardware`](https://frankarobotics.github.io/docs/doc/franka_ros2_jazzy/franka_hardware/doc/index.html).
 
 The complete ownership and value-flow contract is
 [`specs/2026-10-21-reality-sysid-belief-boundary.md`](specs/2026-10-21-reality-sysid-belief-boundary.md).

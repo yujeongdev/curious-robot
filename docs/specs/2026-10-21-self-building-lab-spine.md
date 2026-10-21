@@ -151,6 +151,32 @@ force/speed/attempt 상한을 다시 검사한다. recovery observation은 finit
 typed contract이며, 다른 request를 재시도로 위장하거나 attempt index를 reset할 수
 없다.
 
+## Hardware Reality routing
+
+`FrankaHardwareReality`는 같은 `deploy_capability` schema를 hardware transport로
+연결한다. 선택 순서는 official `pylibfranka` direct FCI 우선, ROS 2
+Jazzy `franka_hardware` fallback이다. 단, package import 가능성만으로 ready라고
+판정하지 않는다. robot reachability, external perception, independent safety,
+command timeout, exclusive control, state stream, real-time host가 공통으로
+필요하고, ROS 2는 active hardware component/controller 증거까지 필요하다.
+
+adapter는 CapabilityArtifact와 invocation/attempt binding을 다시 검사한 뒤
+transport에 force/speed/timeout 상한을 전달한다. 외부 perception이 terminal
+object pose를 생산하며, 불완전한 readiness나 direct `deploy_policy` 우회는
+fail-closed로 거부한다.
+
+Transport는 controller-side 또는 별도 process watchdog을 먼저 arm하고 실행
+결과에 watchdog token, elapsed time, measured maximum speed/force를 attest해야
+한다. Adapter는 이를 capability bound와 다시 대조하고 위반 시 safe-stop,
+episode cleanup, FAIL artifact를 수행한다. Perception은 frame, monotonic
+timestamp, covariance, source identity가 있는 observation만 허용하며 episode ID
+재사용을 fresh deployment로 기록하지 않는다. 명령은 adapter-wide lock으로
+직렬화한다. 현 저장소는 이 routing/safety contract를 fake transport로 검증할
+뿐 concrete SDK transport나 physical trial을 주장하지 않는다.
+거부된 transport의 safe-stop/close가 실패하면 다른 backend fallback도
+거부한다. Factory가 transport를 반환하기 전에 예외를 내면 부분 할당한 자원은
+factory 자체가 정리해야 한다.
+
 ## Acceptance evidence
 
 - evaluator truth artifact의 agent store write/read/provenance 거부와 spawn

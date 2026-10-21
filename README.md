@@ -216,6 +216,14 @@ producer is Newton `SensorContact` over native MuJoCo Warp robot-tool ↔ cube
 contacts. It measures linear contact force, not a complete strain-gauge wrist
 moment, and never reads hidden object parameters.
 
+The hardware routing seam is implemented and tested without connecting to a
+robot. It prefers official `pylibfranka` direct FCI and falls back to ROS 2
+Jazzy `franka_hardware` only when canonical readiness evidence and a usable
+transport plugin are present. It requires an independent transport watchdog,
+auditable motion bounds, fresh framed perception, serialized commands, and
+safe-stop cleanup. Concrete SDK transports remain deployment plugins; no result
+in this repository is labeled as a physical hardware trial.
+
 The validated MVP manipulation path is physical robot pushing. Pick-and-place
 and quasi-static weighing remain visible candidates but are rejected until a
 bilateral finger-contact lift passes its acceptance gate; the system does not
