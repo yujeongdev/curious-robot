@@ -62,3 +62,46 @@ this simulation-only milestone.
 
 The complete ownership and value-flow contract is
 [`specs/2026-10-21-reality-sysid-belief-boundary.md`](specs/2026-10-21-reality-sysid-belief-boundary.md).
+
+## Laboratory pipeline spine
+
+The next execution architecture is defined by `curious_robot.lab`. It separates
+three high-level ports instead of treating the current Newton runner as one
+trusted object:
+
+- `RealityPort` accepts the shared operation schema and returns observation
+  artifacts. Its hidden configuration, model, and state are absent from the
+  agent-facing contract.
+- `TwinPort` builds a task-oriented world from a versioned `WorldSpec`. A
+  `RuntimeIdentity` gate is applied by the trusted coordinator and rejects any
+  Reality/Twin pair that shares a process, world, model, state, or
+  configuration identity. Spawn-based tests bind the reported PID to each
+  worker's actual OS process.
+- `EvaluatorPort` accepts only a terminal artifact. Evaluator artifacts live in
+  a separate authority root and cannot be read or referenced by agent artifacts.
+  Agent workers receive only the handle returned by `open_agent_artifact_store`;
+  the two-store resolver belongs exclusively to the trusted coordinator.
+
+Artifacts are canonical JSON addressed by SHA-256 over the complete envelope,
+including provenance, validation conditions, visibility, and PASS/FAIL outcome.
+A failed validation remains evidence rather than disappearing as an exception.
+`WorldSpecPatch` carries its base content ID, so applying an observation-derived
+patch to a newer twin specification fails instead of silently overwriting it.
+Only `model_parameters` may be patched, agent-visible PASS evidence is required,
+and the resulting spec retains both evidence refs and applied patch IDs.
+
+The pipeline state machine resolves every evidence ref from CAS, checks its
+integrity, kind, visibility, outcome, and direct lineage before transition. It publishes
+one of four stable lanes: `reality`, `twin`, `deployment`, or
+`capability_build`. A validated policy can reach Reality only after Twin build
+and validation; evaluation occurs only after a Reality deployment artifact.
+PR 2 will make the deployment genuinely fresh by constructing its worker then.
+
+The existing discovery runner has not yet been relabeled as this pipeline. The
+first end-to-end capability slice will put Reality and Twin adapters in distinct
+workers and migrate evidence through these contracts. This keeps the contracts
+honest: declaring an identity is not presented as process isolation until the
+worker boundary exists.
+
+The full contract and migration order are documented in
+[`specs/2026-10-21-self-building-lab-spine.md`](specs/2026-10-21-self-building-lab-spine.md).
