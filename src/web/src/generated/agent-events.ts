@@ -62,6 +62,7 @@ export const visualFramePayloadSchema = z.object({
   action_id: z.string().nullable().optional(),
   belief_revision: z.number().int().nullable().optional(),
   body_manifest_id: z.string(),
+  tool_tip_radius_m: z.number().positive().nullable().optional(),
   sim_time_s: z.number(),
   presentation_time_s: z.number(),
   bodies: z.array(bodyTransformSchema),

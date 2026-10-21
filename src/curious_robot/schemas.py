@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
@@ -173,9 +174,15 @@ class ActionCandidate(FrozenModel):
     action_id: str
     kind: Literal["push", "pick_place"]
     target_m: Vec3
-    speed_m_s: float
-    max_force_n: float
-    push_height_m: float | None = None
+    speed_m_s: float = Field(gt=0.0, le=0.15)
+    max_force_n: float = Field(gt=0.0, le=15.0)
+    push_height_m: float | None = Field(default=None, ge=0.0, le=0.05)
+
+    @model_validator(mode="after")
+    def validate_finite_target(self) -> ActionCandidate:
+        if not all(math.isfinite(value) for value in self.target_m):
+            raise ValueError("action target must contain finite coordinates")
+        return self
 
 
 class PredictedOutcome(FrozenModel):

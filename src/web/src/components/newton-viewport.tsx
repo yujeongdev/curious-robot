@@ -25,7 +25,9 @@ function Scene({ frame, cameraMode }: { frame: VisualFramePayload; cameraMode: "
           <boxGeometry args={[1.45, 0.85, 0.07]} />
           <meshStandardMaterial color="#26333d" roughness={0.72} />
         </mesh>
-        <Suspense fallback={null}><FrankaMirror bodies={frame.bodies} /></Suspense>
+        <Suspense fallback={null}>
+          <FrankaMirror bodies={frame.bodies} toolTipRadiusM={frame.tool_tip_radius_m ?? undefined} />
+        </Suspense>
         {cube && (
           <mesh position={cube.position_m} quaternion={cube.orientation_xyzw} castShadow>
             <boxGeometry args={[0.05, 0.05, 0.05]} />

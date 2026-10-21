@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from .control import PushExecutionResult
 from .schemas import MotionSample, ObjectPoseObservation, Pose, WrenchObservation
+from .trajectory import CartesianMotionResult
 
 
 class RobotRealityPort(Protocol):
@@ -18,17 +20,20 @@ class RobotRealityPort(Protocol):
     def get_tool_wrench(self) -> WrenchObservation: ...
     def joint_state_arrays(self): ...  # noqa: ANN201
     def command_joint_targets(self, targets: dict[int, float], duration_s: float = 0.5) -> None: ...
-    def command_cartesian(self, target_m: tuple[float, float, float], duration_s: float) -> None: ...
+    def command_cartesian(
+        self, target_m: tuple[float, float, float], duration_s: float
+    ) -> CartesianMotionResult: ...
     def set_cartesian_target(self, target_m: tuple[float, float, float]) -> None: ...
     def set_gripper(self, width_m: float) -> None: ...
     def enable_compliance(self) -> None: ...
     def release_compliance(self) -> None: ...
+    def hold_current_joint_positions(self, duration_s: float) -> None: ...
     def set_desired_force(self, force_n: tuple[float, float, float]) -> None:
         """Command force only when the adapter has validated measured-feedback control."""
         ...
 
     def step(self) -> MotionSample: ...
-    def execute_push(self, target_m, max_force_n, protocol): ...  # noqa: ANN001, ANN201
+    def execute_push(self, target_m, max_force_n, protocol) -> PushExecutionResult: ...  # noqa: ANN001
 
 
 class RobotRealityAdapter:
@@ -66,8 +71,10 @@ class RobotRealityAdapter:
     def command_joint_targets(self, targets: dict[int, float], duration_s: float = 0.5) -> None:
         self.__plant.command_joint_targets(targets, duration_s)
 
-    def command_cartesian(self, target_m: tuple[float, float, float], duration_s: float) -> None:
-        self.__plant.command_cartesian(target_m, duration_s)
+    def command_cartesian(
+        self, target_m: tuple[float, float, float], duration_s: float
+    ) -> CartesianMotionResult:
+        return self.__plant.command_cartesian(target_m, duration_s)
 
     def set_cartesian_target(self, target_m: tuple[float, float, float]) -> None:
         self.__plant.set_cartesian_target(target_m)
@@ -81,11 +88,14 @@ class RobotRealityAdapter:
     def release_compliance(self) -> None:
         self.__plant.release_compliance()
 
+    def hold_current_joint_positions(self, duration_s: float) -> None:
+        self.__plant.hold_current_joint_positions(duration_s)
+
     def set_desired_force(self, force_n: tuple[float, float, float]) -> None:
         self.__plant.set_desired_force(force_n)
 
     def step(self) -> MotionSample:
         return self.__plant.step()
 
-    def execute_push(self, target_m, max_force_n, protocol):  # noqa: ANN001, ANN201
+    def execute_push(self, target_m, max_force_n, protocol) -> PushExecutionResult:  # noqa: ANN001
         return self.__plant.execute_push(target_m, max_force_n, protocol=protocol)

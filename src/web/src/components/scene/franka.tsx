@@ -32,20 +32,26 @@ function OfficialFrankaLink({ body, source }: { body: BodyTransform; source: Obj
   );
 }
 
-export function FrankaMirror({ bodies }: { bodies: readonly BodyTransform[] }) {
+export function FrankaMirror({
+  bodies,
+  toolTipRadiusM,
+}: {
+  bodies: readonly BodyTransform[];
+  toolTipRadiusM?: number;
+}) {
   const { scene } = useGLTF(officialFrankaGlb);
   const robotBodies = bodies.filter(isFrankaBody);
-  const pusher = bodies.find((body) => body.body_id === "fr3__fr3_hand_tcp");
+  const toolTip = bodies.find((body) => body.body_id === "fr3__fr3_hand_tcp");
   return (
     <group aria-label="Official Franka FR3 presentation mirror">
       {robotBodies.map((body) => {
         const source = officialVisualBodyIds.has(body.body_id) ? scene.getObjectByName(body.body_id) : null;
         return source ? <OfficialFrankaLink key={body.body_id} body={body} source={source} /> : null;
       })}
-      {pusher && (
-        <group position={pusher.position_m} quaternion={pusher.orientation_xyzw} name="physical-pusher-tip">
+      {toolTip && toolTipRadiusM && (
+        <group position={toolTip.position_m} quaternion={toolTip.orientation_xyzw} name="physical-tool-tip">
           <mesh castShadow receiveShadow>
-            <sphereGeometry args={[0.012, 20, 16]} />
+            <sphereGeometry args={[toolTipRadiusM, 20, 16]} />
             <meshStandardMaterial color="#f2b84b" roughness={0.35} metalness={0.25} />
           </mesh>
         </group>
