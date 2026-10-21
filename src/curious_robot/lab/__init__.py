@@ -15,6 +15,8 @@ from .contracts import (
     ArtifactVisibility,
     CapabilityGap,
     CapabilityRequirement,
+    LabArtifactKind,
+    LabOperation,
     OperationRequest,
     OperationResult,
     PatchOperation,
@@ -24,6 +26,8 @@ from .contracts import (
     WorldSpecEvidenceError,
     WorldSpecPatch,
 )
+from .friction_artifacts import CapabilityExecutionError
+from .friction_capability import FrictionCapabilityPipeline, FrictionCapabilityResult
 from .pipeline import IllegalPipelineTransition, LaboratoryPipeline, PipelineState
 from .ports import (
     EvaluatorPort,
@@ -44,10 +48,15 @@ __all__ = [
     "CapabilityGap",
     "CapabilityRequirement",
     "ContentAddressedArtifactStore",
+    "CapabilityExecutionError",
     "EvaluatorPort",
+    "FrictionCapabilityPipeline",
+    "FrictionCapabilityResult",
     "IllegalPipelineTransition",
     "LaboratoryArtifactStores",
     "LaboratoryPipeline",
+    "LabArtifactKind",
+    "LabOperation",
     "OperationRequest",
     "OperationResult",
     "PatchOperation",

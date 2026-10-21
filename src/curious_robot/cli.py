@@ -15,6 +15,13 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--device", default="cuda:0")
     run.add_argument("--output", default="artifacts/demo")
     run.add_argument("--no-robot", action="store_true", help="CI-only reduced scene")
+    friction = subparsers.add_parser(
+        "lab-friction",
+        help="run the isolated Reality-to-Twin friction capability slice",
+    )
+    friction.add_argument("--seed", type=int, default=7)
+    friction.add_argument("--device", default="cuda:0")
+    friction.add_argument("--output", default="artifacts/lab-friction")
     web = subparsers.add_parser("web", help="launch the local Agent Lab")
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8765)
@@ -35,6 +42,19 @@ def main(argv: list[str] | None = None) -> None:
         print(result.model_dump_json(indent=2))
         if not result.success:
             raise SystemExit(2)
+        return
+    if args.command == "lab-friction":
+        from pathlib import Path
+
+        from .lab.friction_runner import run_newton_friction_slice
+
+        run_newton_friction_slice(
+            seed=args.seed,
+            output_directory=args.output,
+            device=args.device,
+        )
+        manifest = Path(args.output) / "friction_capability_manifest.json"
+        print(manifest.read_text(), end="")
         return
 
     if args.host not in {"127.0.0.1", "localhost"}:

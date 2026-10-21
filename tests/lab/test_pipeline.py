@@ -74,7 +74,7 @@ def test_failure_requires_preserved_fail_artifact_and_is_terminal(tmp_path) -> N
         pipeline.transition(PipelineState.CAPABILITY_GAP_ASSESSED, evidence=(pass_evidence,))
 
 
-def test_happy_path_requires_stored_directly_linked_evidence(tmp_path) -> None:
+def test_happy_path_requires_stored_causally_linked_evidence(tmp_path) -> None:
     stores = LaboratoryArtifactStores(tmp_path)
     pipeline = LaboratoryPipeline(stores)
     stages = (
@@ -104,7 +104,7 @@ def test_forged_or_unlinked_evidence_cannot_advance_pipeline(tmp_path) -> None:
     pipeline.transition(PipelineState.CAPABILITY_GAP_ASSESSED, evidence=(capability,))
     unlinked = _put(stores, "trajectory_dataset")
 
-    with pytest.raises(IllegalPipelineTransition, match="directly reference"):
+    with pytest.raises(IllegalPipelineTransition, match="descend from"):
         pipeline.transition(PipelineState.REALITY_EVIDENCE_CAPTURED, evidence=(unlinked,))
 
     forged = ArtifactEnvelope(

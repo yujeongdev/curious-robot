@@ -64,6 +64,12 @@ def assert_independent_reality_and_twin(
 
 class RealityPort(Protocol):
     @property
+    def evidence_kinds(self) -> frozenset[str]: ...
+
+    @property
+    def operations(self) -> frozenset[str]: ...
+
+    @property
     def identity(self) -> RuntimeIdentity: ...
 
     def execute(self, request: OperationRequest) -> OperationResult: ...
@@ -73,6 +79,12 @@ class RealityPort(Protocol):
 
 class TwinPort(Protocol):
     @property
+    def evidence_kinds(self) -> frozenset[str]: ...
+
+    @property
+    def operations(self) -> frozenset[str]: ...
+
+    @property
     def identity(self) -> RuntimeIdentity: ...
 
     def build(self, spec: WorldSpec) -> ArtifactRef: ...
@@ -81,6 +93,12 @@ class TwinPort(Protocol):
 
 
 class EvaluatorPort(Protocol):
+    @property
+    def evidence_kinds(self) -> frozenset[str]: ...
+
+    @property
+    def operations(self) -> frozenset[str]: ...
+
     @property
     def identity(self) -> RuntimeIdentity: ...
 
