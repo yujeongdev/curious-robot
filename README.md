@@ -26,7 +26,7 @@ physical acceptance gates pass.
 
 ![Agent Lab replay showing the Franka experiment, discovery stage, evidence, and telemetry](docs/media/curious-robot-demo.gif)
 
-[Watch the H.264 demo and inspect its checksum](https://github.com/yujeongdev/curious-robot/releases/tag/v0.1.0).
+[Watch the H.264 demo and inspect its checksum](https://github.com/yujeongdev/curious-robot/releases/tag/v0.1.1).
 
 ## What this repository demonstrates
 
