@@ -11,6 +11,11 @@ React Three Fiber is a presentation mirror of committed Newton transforms. It
 must never integrate motion, infer contact, mutate a posterior, or fabricate a
 frame for either world.
 
+For pose-match tasks, the target is the recorded public object geometry
+projected as a thin tabletop silhouette at the target position and yaw. A
+T-bar goal must therefore look like the same T-bar, never a generic circle or
+a browser-side approximation.
+
 The left pane is **Reality Stand-in · Hidden Physics**. It displays bounded robot experiments,
 measured outcomes, and fresh policy deployment. Hidden truth parameters are
 not displayed before evaluator reveal.

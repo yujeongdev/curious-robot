@@ -16,7 +16,9 @@ This page distinguishes executed evidence from planned capability.
 - The T-bar task builds one rigid body from two non-overlapping public box
   parts, records contact against both constituent shapes, evaluates three
   independent Twin candidate worlds, and deploys the selected typed contact
-  plan into a fresh Reality world.
+  plan into a fresh Reality world. Its floor target uses the exact same public
+  compound geometry, so success means aligning the T-bar with a T-shaped
+  silhouette rather than entering a circular region.
 - The executed T-bar acceptance run passed both its 30 mm planar-position and
   9° wrapped-yaw predicates for the first friction-only MVP. Its experiment,
   candidate, and deployment worlds had distinct identities.

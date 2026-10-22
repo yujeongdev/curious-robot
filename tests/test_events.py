@@ -124,14 +124,42 @@ def test_visual_frame_requires_stable_unique_body_and_asset_ids() -> None:
             }
         ],
     }
+    payload["target_region"] = {
+        "center_m": (0.15, 0.0, 0.001),
+        "radius_m": 0.03,
+        "yaw_rad": 0.0,
+        "yaw_tolerance_rad": 0.15707963267948966,
+        "geometry": {
+            key: value
+            for key, value in payload["object_geometry"].items()
+            if key != "body_id"
+        },
+        "label": "align t-bar silhouette",
+    }
     frame = SimulationVisualFrameEvent(
         **common(), frame_id=4, sim_time_s=0.5, payload=VisualFramePayload.model_validate(payload)
     )
     assert frame.payload.scene == "truth"
     assert frame.payload.object_geometry.archetype_id == "t-bar"
+    assert frame.payload.target_region is not None
+    assert frame.payload.target_region.center_m[2] == 0.001
+    assert frame.payload.target_region.geometry is not None
+    assert (
+        frame.payload.target_region.geometry.geometry_hash
+        == frame.payload.object_geometry.geometry_hash
+    )
+    assert len(frame.payload.target_region.geometry.parts) == 1
     invalid_geometry = {**payload, "object_geometry": {**payload["object_geometry"], "body_id": "missing"}}
     with pytest.raises(ValidationError, match="must reference a body"):
         VisualFramePayload.model_validate(invalid_geometry)
+    leaked_target = frame.payload.model_dump()
+    leaked_target["target_region"]["geometry"]["hidden_mass_kg"] = 0.4
+    with pytest.raises(EventContractError, match="hidden_mass_kg"):
+        validate_public_data(leaked_target)
+    mismatched_target = frame.payload.model_dump()
+    mismatched_target["target_region"]["geometry"]["geometry_hash"] = "sha256:" + "b" * 64
+    with pytest.raises(ValidationError, match="must exactly match"):
+        VisualFramePayload.model_validate(mismatched_target)
     assert frame.frame_id == frame.payload.frame_id
 
     mismatched = frame.model_copy(update={"frame_id": 5})

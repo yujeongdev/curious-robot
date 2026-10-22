@@ -50,6 +50,8 @@ export const objectGeometryVisualSchema = z.object({
   parts: z.array(visualRigidBoxPartSchema).min(1),
 });
 
+export const targetGeometryVisualSchema = objectGeometryVisualSchema.omit({ body_id: true });
+
 export const contactSchema = z.object({
   position_m: vector3Schema,
   normal_world: vector3Schema,
@@ -89,11 +91,28 @@ export const visualFramePayloadSchema = z.object({
     radius_m: z.number().positive(),
     yaw_rad: z.number().default(0),
     yaw_tolerance_rad: z.number().positive().nullable().optional(),
+    geometry: targetGeometryVisualSchema.nullable().optional(),
   }).optional(),
   camera_hint: z.object({ preset: z.string(), target_m: vector3Schema.nullable().optional() }).nullable().optional(),
 }).superRefine((frame, context) => {
   if (frame.object_geometry && !frame.bodies.some((body) => body.body_id === frame.object_geometry?.body_id)) {
     context.addIssue({ code: "custom", message: "object geometry body must exist in frame", path: ["object_geometry", "body_id"] });
+  }
+  const targetGeometry = frame.target_region?.geometry;
+  if (targetGeometry) {
+    const objectGeometry = frame.object_geometry;
+    const sameGeometry = objectGeometry
+      && targetGeometry.archetype_id === objectGeometry.archetype_id
+      && targetGeometry.archetype_version === objectGeometry.archetype_version
+      && targetGeometry.geometry_hash === objectGeometry.geometry_hash
+      && JSON.stringify(targetGeometry.parts) === JSON.stringify(objectGeometry.parts);
+    if (!sameGeometry) {
+      context.addIssue({
+        code: "custom",
+        message: "target geometry must exactly match recorded object geometry",
+        path: ["target_region", "geometry"],
+      });
+    }
   }
 });
 

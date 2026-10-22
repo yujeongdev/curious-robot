@@ -41,7 +41,7 @@ least 8 of 10 evaluator seeds after planar COM/yaw-inertia identification is
 added. The 2.35° pre-COM result was discarded and is not used as evidence.
 
 The separately retained integrated Agent Lab run
-`d8eafbb0-0d34-45cc-806e-e0bb7b00c93d` also completed successfully after two
+`743bee64-e2da-4996-bd90-0eaa37f06a9d` also completed successfully after two
 agent-selected probes and three Twin rollouts. Its physics re-execution passed
 the 15 mm position comparison but failed the stricter yaw determinism check
 (0.161 rad observed versus 0.010 rad tolerance). This nondeterminism is

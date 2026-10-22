@@ -29,6 +29,11 @@ local simulation times are independent: while one world advances, the other is
 explicitly marked `HELD`. The UI never copies a Reality transform into the Twin
 to make them appear synchronized.
 
+For `push-t-bar-v1`, the goal marker is the public T-bar geometry projected
+onto the tabletop at the target pose. The physical T-bar must overlap that
+same-shape silhouette within the task's planar-position and yaw tolerances.
+The marker comes from the recorded target manifest; R3F does not infer it.
+
 A five-step causal bridge makes the authority transition explicit:
 
 1. Reality experiment

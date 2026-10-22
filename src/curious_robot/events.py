@@ -119,14 +119,6 @@ class VectorVisual(PublicModel):
     label: str | None = None
 
 
-class TargetRegionVisual(PublicModel):
-    center_m: Vec3
-    radius_m: float = Field(gt=0.0)
-    yaw_rad: float = 0.0
-    yaw_tolerance_rad: float | None = Field(default=None, gt=0.0)
-    label: str = "target"
-
-
 class CameraHint(PublicModel):
     preset: str
     target_m: Vec3 | None = None
@@ -157,6 +149,24 @@ class ObjectGeometryVisual(PublicModel):
     geometry_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     body_id: str = Field(min_length=1)
     parts: tuple[VisualRigidBoxPart, ...] = Field(min_length=1)
+
+
+class TargetGeometryVisual(PublicModel):
+    """Public object silhouette projected onto the tabletop goal pose."""
+
+    archetype_id: str = Field(min_length=1)
+    archetype_version: str = Field(min_length=1)
+    geometry_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    parts: tuple[VisualRigidBoxPart, ...] = Field(min_length=1)
+
+
+class TargetRegionVisual(PublicModel):
+    center_m: Vec3
+    radius_m: float = Field(gt=0.0)
+    yaw_rad: float = 0.0
+    yaw_tolerance_rad: float | None = Field(default=None, gt=0.0)
+    geometry: TargetGeometryVisual | None = None
+    label: str = "target"
 
 
 class VisualFramePayload(PublicModel):
@@ -190,6 +200,17 @@ class VisualFramePayload(PublicModel):
             raise ValueError("asset_node_id values must be unique in a visual frame")
         if self.object_geometry is not None and self.object_geometry.body_id not in body_ids:
             raise ValueError("object_geometry.body_id must reference a body in the frame")
+        target_geometry = self.target_region.geometry if self.target_region is not None else None
+        if target_geometry is not None:
+            if self.object_geometry is None:
+                raise ValueError("shaped target requires recorded object_geometry")
+            if (
+                target_geometry.archetype_id != self.object_geometry.archetype_id
+                or target_geometry.archetype_version != self.object_geometry.archetype_version
+                or target_geometry.geometry_hash != self.object_geometry.geometry_hash
+                or target_geometry.parts != self.object_geometry.parts
+            ):
+                raise ValueError("target geometry must exactly match recorded object geometry")
         return self
 
 

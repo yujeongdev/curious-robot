@@ -600,6 +600,16 @@ class NewtonWorld:
             if self.last_tool_contact_active
             else ()
         )
+        public_object_parts = [
+            {
+                "part_id": part.part_id,
+                "center_object_m": part.center_m,
+                "half_extents_m": tuple(value / 2.0 for value in part.size_m),
+                "orientation_object_xyzw": (0.0, 0.0, 0.0, 1.0),
+            }
+            for part in self.object_geometry.parts
+        ]
+        has_shaped_goal = get_task_preset(self.config.task_id).goal.requires_yaw
         self.event_sink.emit(
             {
                 "type": "simulation.visual_frame",
@@ -623,15 +633,7 @@ class NewtonWorld:
                         "archetype_version": self.object_geometry.archetype_version,
                         "geometry_hash": self.object_geometry.geometry_hash,
                         "body_id": self.object_geometry.body_label,
-                        "parts": [
-                            {
-                                "part_id": part.part_id,
-                                "center_object_m": part.center_m,
-                                "half_extents_m": tuple(value / 2.0 for value in part.size_m),
-                                "orientation_object_xyzw": (0.0, 0.0, 0.0, 1.0),
-                            }
-                            for part in self.object_geometry.parts
-                        ],
+                        "parts": public_object_parts,
                     },
                     "tool_tip_radius_m": (
                         self.config.tool_tip_radius_m if self.config.include_robot else None
@@ -642,11 +644,29 @@ class NewtonWorld:
                     "contacts": contacts,
                     "vectors": vectors,
                     "target_region": {
-                        "center_m": self.config.target_position_m,
+                        "center_m": (
+                            self.config.target_position_m[0],
+                            self.config.target_position_m[1],
+                            0.001,
+                        ),
                         "radius_m": self.config.target_radius_m,
                         "yaw_rad": self.config.target_yaw_rad,
                         "yaw_tolerance_rad": self.config.target_yaw_tolerance_rad,
-                        "label": "target",
+                        "geometry": (
+                            {
+                                "archetype_id": self.object_geometry.archetype_id,
+                                "archetype_version": self.object_geometry.archetype_version,
+                                "geometry_hash": self.object_geometry.geometry_hash,
+                                "parts": public_object_parts,
+                            }
+                            if has_shaped_goal
+                            else None
+                        ),
+                        "label": (
+                            f"align {self.object_geometry.archetype_id} silhouette"
+                            if has_shaped_goal
+                            else "target region"
+                        ),
                     },
                     "camera_hint": {"preset": "tabletop", "target_m": self.config.target_position_m},
                 },
