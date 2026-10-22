@@ -10,14 +10,15 @@ remain local and excluded from Git.
 ## Result
 
 - Terminal success: `true`
-- Planar target error: `0.013871 m` against a `0.030 m` tolerance
-- Wrapped yaw error: `0.115756 rad` (`6.632°`) against a `9°` MVP tolerance
+- Planar target error: `0.007912 m` against a `0.030 m` tolerance
+- Wrapped yaw error: `0.081075 rad` (`4.645°`) against a `9°` MVP tolerance
 - Selected candidate: `push_tbar_fast`
 - Selected contact plan: `0.080 m/s`, `0.012 m` push height,
   `+0.0125 m` lateral contact offset
-- Peak predicted candidate force: `2.834 N`; observed deployment peak: `5.839 N`
+- Peak predicted candidate force: `3.271 N`; observed deployment peak: `6.576 N`
 - Dynamic-friction posterior: `0.482877 ± 0.195249`
-- Physical experiment protocol: `sha256:b1199368e0aae7e42abf19ef8168430155bd459e2fb328467739998d1c7a5445`
+- Physical experiment protocol `1.2.0`:
+  `sha256:1091406e1dc4d685246b52fbbf6c5046d973d52a9e3fe9d6edf82161b66c76d1`
 
 The candidate was selected from three independently allocated Newton Twin
 worlds. All three used the same evidence-backed posterior and public geometry
@@ -25,12 +26,12 @@ hash, but different bounded contact plans.
 
 ## Authority and identity evidence
 
-- Reality experiment world: `96229071-022e-42be-a49e-bb4cbdfff244`
+- Reality experiment world: `06d6e53e-0de0-430a-a0bc-0a8160b94d70`
 - Twin candidate worlds:
-  - `bef09d9c-4f18-4fb3-9131-4e95733b0792`
-  - `3a60eabc-6e48-4996-8d80-fc9f9976e272`
-  - `a2ae87d5-e1e3-46aa-8cf8-ccc2653e69bb` (selected)
-- Fresh Reality deployment world: `bc051552-8083-4fcb-b5c4-fc6685f0fbd6`
+  - `706b104f-8608-4938-a30a-4f55e2307462`
+  - `807713cd-2040-45c2-bfe3-f3a8bf19f62f`
+  - `abec66bb-f37d-4362-9cf7-f100e65c55e5` (selected)
+- Fresh Reality deployment world: `f3bb0ccb-b091-40ed-92e1-4ac83991e849`
 - Public geometry: one T-bar rigid body, two non-overlapping box parts
 - Floor goal: the same two-part T-bar geometry projected at the target pose
 - Geometry hash: `sha256:a3e9d55450c4813a039f75718cea15322400df1b6d86d3f857ee9345cf953682`

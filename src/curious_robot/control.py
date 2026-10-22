@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -511,6 +512,13 @@ class NewtonFrankaController:
                 max_force_n=max_force_n,
                 peak_contact_force_n=peak_contact_force_n,
                 protocol=correction_protocol,
+                completion_test=lambda sample: abs(
+                    signed_yaw_error(
+                        yaw_from_quaternion_xyzw(sample.orientation_xyzw),
+                        goal.target.yaw_rad,
+                    )
+                )
+                <= stop_tolerance,
             )
             if outcome is PushExecutionOutcome.SAFETY_STOPPED:
                 return True, peak_contact_force_n
@@ -566,6 +574,7 @@ class NewtonFrankaController:
         max_force_n: float,
         peak_contact_force_n: float,
         protocol: PushProtocol,
+        completion_test: Callable[[MotionSample], bool] | None = None,
     ) -> tuple[PushExecutionOutcome, float]:
         world = self._world
         outcome = PushExecutionOutcome.TRAVEL_EXHAUSTED
@@ -593,9 +602,14 @@ class NewtonFrankaController:
                     if contact_force_n > protocol.safety_stop_fraction * max_force_n:
                         self.hold_current_joint_positions(0.1)
                         return PushExecutionOutcome.SAFETY_STOPPED, peak_contact_force_n
-                cube_xy = np.asarray(samples[-1].position_m[:2], dtype=float)
-                if np.linalg.norm(cube_xy - target_xy) <= world.config.target_radius_m * 0.5:
-                    self._retreat_after_contact(protocol, push_direction)
+                if completion_test is None:
+                    object_xy = np.asarray(samples[-1].position_m[:2], dtype=float)
+                    completed = (
+                        np.linalg.norm(object_xy - target_xy) <= world.config.target_radius_m * 0.5
+                    )
+                else:
+                    completed = completion_test(samples[-1])
+                if completed:
                     outcome = PushExecutionOutcome.COMPLETED
                     break
             return outcome, peak_contact_force_n

@@ -12,7 +12,7 @@ All notable changes to Curious Robot are documented here.
 ### Changed
 
 - Record the actual sequence of contact surfaces used by the controller so randomized-start decisions remain inspectable.
-- Persist settle timing, minimum planar travel, and opposing-face selection bounds in the versioned physical experiment protocol.
+- Persist settle timing, minimum planar travel, and opposing-face selection bounds in physical experiment protocol `1.2.0`.
 - Version the T-bar controller preset as `1.1.0` so older one-attempt policies cannot silently execute the new yaw-correction and retry contract.
 - Refresh Agent Lab media from a successful randomized-start Reality → Twin → Reality run.
 
