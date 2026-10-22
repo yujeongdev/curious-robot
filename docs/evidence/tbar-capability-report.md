@@ -3,7 +3,7 @@
 > Adjacent documents: [Validation](../validation.md) · [Architecture](../architecture.md)
 
 2026-10-22. Scope: one evaluator-seeded NVIDIA Newton acceptance run for
-`push-t-bar-v1@1.1.0`.
+`push-t-bar-v1@1.2.0`.
 Basis: the documented `lab-friction` command with seed `7`; generated artifacts
 remain local and excluded from Git.
 
@@ -12,6 +12,9 @@ remain local and excluded from Git.
 - Terminal success: `true`
 - Planar target error: `0.007912 m` against a `0.030 m` tolerance
 - Wrapped yaw error: `0.081075 rad` (`4.645°`) against a `9°` MVP tolerance
+- Maximum registered T-shape corner error: `0.013464 m`
+- RMS registered T-shape corner error: `0.009798 m`
+- Controller translation target: `0.015 m`; controller yaw target: `4.5°`
 - Selected candidate: `push_tbar_fast`
 - Selected contact plan: `0.080 m/s`, `0.012 m` push height,
   `+0.0125 m` lateral contact offset
@@ -26,12 +29,12 @@ hash, but different bounded contact plans.
 
 ## Authority and identity evidence
 
-- Reality experiment world: `06d6e53e-0de0-430a-a0bc-0a8160b94d70`
+- Reality experiment world: `3d437273-0eaa-4d85-a2f2-389984e4eccb`
 - Twin candidate worlds:
-  - `706b104f-8608-4938-a30a-4f55e2307462`
-  - `807713cd-2040-45c2-bfe3-f3a8bf19f62f`
-  - `abec66bb-f37d-4362-9cf7-f100e65c55e5` (selected)
-- Fresh Reality deployment world: `f3bb0ccb-b091-40ed-92e1-4ac83991e849`
+  - `37fb445d-a8ba-4528-9fe1-ab580ed8927b`
+  - `f8e506f8-5bc7-4081-9aba-72c8171fc9c9`
+  - `820af06f-d080-4656-926e-2d0951177873` (selected)
+- Fresh Reality deployment world: `4b3ea4b5-08ba-42dd-8787-249050848d03`
 - Public geometry: one T-bar rigid body, two non-overlapping box parts
 - Floor goal: the same two-part T-bar geometry projected at the target pose
 - Geometry hash: `sha256:a3e9d55450c4813a039f75718cea15322400df1b6d86d3f857ee9345cf953682`
@@ -48,6 +51,11 @@ The 9° tolerance is the explicit first-MVP contract for friction-only,
 observed-yaw T-bar pushing. The research acceptance target remains ≤5° across at
 least 8 of 10 evaluator seeds after planar COM/yaw-inertia identification is
 added. The 2.35° pre-COM result was discarded and is not used as evidence.
+
+The registered-corner metric uses only the versioned public T-bar geometry. It
+pairs corresponding corners of the stem and crossbar after applying observed
+and target planar transforms. The retained seed does not yet meet the proposed
+`12 mm` maximum-corner research gate, so no multi-seed precision claim is made.
 
 The separately retained integrated Agent Lab run
 `edc7af93-d574-499f-957b-fb45def44922` also completed successfully after two

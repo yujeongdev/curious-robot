@@ -43,6 +43,7 @@ fail-closed until their physical acceptance gates pass.
 - versioned cube/T-bar task and public-geometry catalogs
 - three independent T-bar Twin candidates followed by fresh-Reality deployment
 - observed-yaw correction and adaptive public-face recovery pushes for randomized T-bar starts
+- exact T-shape registration metrics: center, wrapped yaw, maximum corner, and RMS corner error
 - live and replayable dual-world Agent Lab that separates Reality experiments
   and deployment from learned-Twin calibration and prediction
 - visual playback and numerical physics re-execution as separate modes

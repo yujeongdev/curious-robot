@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
+from curious_robot.objects import get_object_archetype, registered_planar_corner_error
 from curious_robot.tasks import wrapped_yaw_error
 
 from .artifact_store import open_agent_artifact_capability, open_evaluator_artifact_capability
@@ -78,6 +79,22 @@ def _evaluator_worker(connection, artifact_root: Path) -> None:  # noqa: ANN001
                 if payload.yaw_tolerance_rad is None
                 else yaw_error <= payload.yaw_tolerance_rad
             )
+            shape_error = registered_planar_corner_error(
+                get_object_archetype(
+                    payload.object_id,
+                    payload.object_archetype_version,
+                ),
+                observed_xy_yaw=(
+                    payload.observed_final_position_m[0],
+                    payload.observed_final_position_m[1],
+                    payload.observed_final_yaw_rad,
+                ),
+                target_xy_yaw=(
+                    payload.target_position_m[0],
+                    payload.target_position_m[1],
+                    payload.target_yaw_rad,
+                ),
+            )
             controller_completed = payload.controller_outcome == "completed"
             success = (
                 target_error <= target_radius
@@ -103,6 +120,8 @@ def _evaluator_worker(connection, artifact_root: Path) -> None:  # noqa: ANN001
                         "success": success,
                         "target_error_m": target_error,
                         "yaw_error_rad": yaw_error,
+                        "maximum_registered_corner_error_m": shape_error.maximum_corner_error_m,
+                        "rms_registered_corner_error_m": shape_error.rms_corner_error_m,
                         "terminal": True,
                     },
                     provenance=(deployment_ref,),

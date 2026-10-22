@@ -9,7 +9,10 @@ from curious_robot.belief import initial_belief_for_object
 from curious_robot.control import (
     NewtonFrankaController,
     PushExecutionOutcome,
+    RefinementAction,
+    refinement_goal,
     requested_planar_goal,
+    select_refinement_action,
     terminal_push_outcome,
 )
 from curious_robot.objects import CUBE_V1, T_BAR_V1, get_object_archetype
@@ -29,7 +32,7 @@ def test_catalog_preserves_cube_and_adds_non_overlapping_compound_t_bar() -> Non
     assert get_object_archetype("cube", "1.0.0") is CUBE_V1
     assert get_task_preset("push-cube-v1") is PUSH_CUBE_V1
     assert get_task_preset("push-t-bar-v1") is PUSH_T_BAR_V1
-    assert PUSH_T_BAR_V1.version == "1.1.0"
+    assert PUSH_T_BAR_V1.version == "1.2.0"
     assert {part.part_id for part in T_BAR_V1.parts} == {"stem", "crossbar"}
     assert T_BAR_V1.geometry_volume_m3 == pytest.approx(0.000175)
     assert T_BAR_V1.parts[0].center_object_m[0] + T_BAR_V1.parts[0].half_extents_m[0] == pytest.approx(
@@ -42,6 +45,10 @@ def test_catalog_preserves_cube_and_adds_non_overlapping_compound_t_bar() -> Non
     )
     assert PUSH_CUBE_V1.experiment_protocol_overrides.dynamic_probe.maximum_travel_m is None
     assert PUSH_T_BAR_V1.yaw_alignment.adaptive_translation_surface is True
+    assert PUSH_T_BAR_V1.goal.position_tolerance_m == pytest.approx(0.03)
+    assert PUSH_T_BAR_V1.goal.yaw_tolerance_rad == pytest.approx(math.radians(9.0))
+    assert PUSH_T_BAR_V1.yaw_alignment.stop_tolerance_fraction == pytest.approx(0.5)
+    assert PUSH_T_BAR_V1.yaw_alignment.position_stop_tolerance_fraction == pytest.approx(0.5)
 
 
 def test_public_archetypes_reject_hidden_physical_parameters() -> None:
@@ -162,13 +169,47 @@ def test_requested_push_goal_does_not_fall_back_to_catalog_target() -> None:
     assert goal.yaw_tolerance_rad == pytest.approx(0.05)
 
 
-def test_push_already_inside_full_goal_does_not_apply_stricter_yaw_correction(
+def test_t_bar_controller_target_is_stricter_than_public_acceptance() -> None:
+    refined = refinement_goal(PUSH_T_BAR_V1.goal, PUSH_T_BAR_V1.yaw_alignment)
+
+    assert refined.position_tolerance_m == pytest.approx(0.015)
+    assert refined.yaw_tolerance_rad == pytest.approx(math.radians(4.5))
+    pose = PlanarPose(x_m=0.166, y_m=0.0, yaw_rad=math.radians(4.0))
+    assert evaluate_planar_goal(PUSH_T_BAR_V1.goal, pose).success is True
+    assert evaluate_planar_goal(refined, pose).success is False
+
+
+def test_controller_skips_translation_when_only_public_yaw_remains() -> None:
+    yaw_only = evaluate_planar_goal(
+        PUSH_T_BAR_V1.goal,
+        PlanarPose(x_m=0.155, y_m=0.0, yaw_rad=math.radians(10.0)),
+    )
+    translation = evaluate_planar_goal(
+        PUSH_T_BAR_V1.goal,
+        PlanarPose(x_m=0.19, y_m=0.0, yaw_rad=0.0),
+    )
+
+    assert select_refinement_action(yaw_only) is RefinementAction.YAW_ONLY
+    assert select_refinement_action(translation) is RefinementAction.TRANSLATE
+
+
+def test_disabled_yaw_policy_preserves_cube_half_radius_settling_margin() -> None:
+    refined = refinement_goal(PUSH_CUBE_V1.goal, PUSH_CUBE_V1.yaw_alignment)
+
+    assert refined.position_tolerance_m == pytest.approx(
+        PUSH_CUBE_V1.goal.position_tolerance_m * 0.5
+    )
+    assert refined.yaw_tolerance_rad is None
+
+
+def test_push_already_inside_refinement_goal_does_not_apply_yaw_correction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    yaw_rad = math.radians(7.0)
+    yaw_rad = math.radians(2.0)
 
     class AlreadyAtGoalWorld:
         config = SimpleNamespace(
+            task_id="push-t-bar-v1",
             include_robot=True,
             maximum_tool_force_n=15.0,
             target_radius_m=0.03,
@@ -188,7 +229,7 @@ def test_push_already_inside_full_goal_does_not_apply_stricter_yaw_correction(
     controller = NewtonFrankaController(AlreadyAtGoalWorld())  # type: ignore[arg-type]
 
     def fail_if_yaw_alignment_runs(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
-        raise AssertionError("yaw alignment must not run after the full goal already passes")
+        raise AssertionError("yaw alignment must not run after the refinement goal passes")
 
     monkeypatch.setattr(controller, "_align_task_yaw", fail_if_yaw_alignment_runs)
     result = controller.execute_push(

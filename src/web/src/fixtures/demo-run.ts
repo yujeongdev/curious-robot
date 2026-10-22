@@ -127,7 +127,7 @@ export const demoEvents: AgentEvent[] = [
   frame(8, "execute", 0.61, 0),
   complete("execute"),
   enter("verify"),
-  makeEvent("verification.completed", "verify", { success: true, goal_predicates: { cube_in_target: true, robot_safe: true }, prediction_residual_m: 0.0186, tolerance_m: 0.035 }),
+  makeEvent("verification.completed", "verify", { success: true, goal_predicates: { cube_in_target: true, robot_safe: true }, prediction_residual_m: 0.0186, maximum_registered_corner_error_m: 0.012, rms_registered_corner_error_m: 0.008, tolerance_m: 0.035 }),
   complete("verify"),
   enter("learn"),
   makeEvent("learning.completed", "learn", { affected_parameters: [], retained_prior_parameters: ["mass_kg"], residual_evidence: [], follow_up_decision: "Physical push verified. Retain bounded effective friction estimates and the unchanged mass prior; do not infer mass or grasp capability from task success." }),

@@ -2,6 +2,22 @@
 
 All notable changes to Curious Robot are documented here.
 
+## [0.2.3] - 2026-10-22
+
+### Added
+
+- Measure public-geometry T-shape registration with maximum and RMS corresponding-corner error.
+- Show shape-registration precision in the CLI capability report and Agent Lab verification evidence.
+
+### Changed
+
+- Version the T-bar task controller as `1.2.0` and persist its 15 mm translation-stop fraction explicitly.
+- Keep the validated single-pass yaw contact timing after experimental repeated corrections were shown to destabilize the asymmetric T-bar.
+
+### Validation
+
+- Retained CUDA seed: `7.91 mm` center error, `4.65°` yaw error, `13.46 mm` maximum corner error, and `9.80 mm` RMS corner error.
+
 ## [0.2.2] - 2026-10-22
 
 ### Added

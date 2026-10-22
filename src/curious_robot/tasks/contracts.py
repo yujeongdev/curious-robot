@@ -88,6 +88,7 @@ class YawAlignmentPolicy(FrozenModel):
     speed_m_s: float = Field(default=0.03, gt=0.0, le=0.10)
     push_height_m: float = Field(default=0.012, ge=0.0, le=0.05)
     stop_tolerance_fraction: float = Field(default=0.5, gt=0.0, le=1.0)
+    position_stop_tolerance_fraction: float = Field(default=0.5, gt=0.0, le=1.0)
     adaptive_translation_surface: bool = False
 
     @model_validator(mode="after")

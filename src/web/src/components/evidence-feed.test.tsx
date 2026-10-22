@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { demoEvents } from "../fixtures/demo-run";
 import { reduceRunEvents } from "../state/run-reducer";
@@ -12,6 +12,7 @@ describe("EvidenceFeed", () => {
     expect(screen.getAllByText(/belief updated/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/censored breakaway interval/i)).toBeInTheDocument();
     expect(screen.getByText(/task verified/i)).toBeInTheDocument();
+    expect(screen.getByText(/Shape max/i)).toHaveTextContent("12.0 mm");
     expect(screen.getAllByText("REALITY").length).toBeGreaterThan(0);
     expect(screen.getAllByText("TWIN").length).toBeGreaterThan(0);
     expect(screen.getAllByText("INFERENCE").length).toBeGreaterThan(0);
@@ -29,5 +30,23 @@ describe("EvidenceFeed", () => {
       ...toolEvent,
       payload: { ...toolEvent.payload, tool_name: "unknown_future_tool" },
     })).toBe("SYSTEM");
+  });
+
+  it("does not fabricate zero shape error for historical null metrics", () => {
+    cleanup();
+    const historicalEvents = demoEvents.map((event) => event.type === "verification.completed"
+      ? {
+          ...event,
+          payload: {
+            ...event.payload,
+            maximum_registered_corner_error_m: null,
+            rms_registered_corner_error_m: null,
+          },
+        }
+      : event);
+
+    render(<EvidenceFeed run={reduceRunEvents(historicalEvents)} />);
+
+    expect(screen.queryByText(/Shape max/i)).not.toBeInTheDocument();
   });
 });
