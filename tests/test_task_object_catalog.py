@@ -193,10 +193,13 @@ def test_controller_skips_translation_when_only_public_yaw_remains() -> None:
     assert select_refinement_action(translation) is RefinementAction.TRANSLATE
 
 
-def test_disabled_alignment_policy_preserves_cube_goal() -> None:
+def test_disabled_yaw_policy_preserves_cube_half_radius_settling_margin() -> None:
     refined = refinement_goal(PUSH_CUBE_V1.goal, PUSH_CUBE_V1.yaw_alignment)
 
-    assert refined is PUSH_CUBE_V1.goal
+    assert refined.position_tolerance_m == pytest.approx(
+        PUSH_CUBE_V1.goal.position_tolerance_m * 0.5
+    )
+    assert refined.yaw_tolerance_rad is None
 
 
 def test_push_already_inside_refinement_goal_does_not_apply_yaw_correction(

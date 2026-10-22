@@ -147,8 +147,6 @@ def refinement_goal(
 ) -> PlanarGoal:
     """Derive the stricter observable precision gate used by the controller."""
 
-    if not policy.enabled:
-        return goal
     yaw_tolerance = (
         None
         if goal.yaw_tolerance_rad is None
