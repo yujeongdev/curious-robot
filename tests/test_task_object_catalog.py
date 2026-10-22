@@ -47,11 +47,8 @@ def test_catalog_preserves_cube_and_adds_non_overlapping_compound_t_bar() -> Non
     assert PUSH_T_BAR_V1.yaw_alignment.adaptive_translation_surface is True
     assert PUSH_T_BAR_V1.goal.position_tolerance_m == pytest.approx(0.015)
     assert PUSH_T_BAR_V1.goal.yaw_tolerance_rad == pytest.approx(math.radians(5.0))
-    assert PUSH_T_BAR_V1.yaw_alignment.stop_tolerance_fraction == pytest.approx(0.6)
-    assert PUSH_T_BAR_V1.yaw_alignment.position_stop_tolerance_fraction == pytest.approx(0.66)
-    assert PUSH_T_BAR_V1.yaw_alignment.fine_maximum_attempts == 1
-    assert PUSH_T_BAR_V1.yaw_alignment.fine_correction_travel_m == pytest.approx(0.006)
-    assert PUSH_T_BAR_V1.yaw_alignment.fine_speed_m_s == pytest.approx(0.015)
+    assert PUSH_T_BAR_V1.yaw_alignment.stop_tolerance_fraction == pytest.approx(1.0)
+    assert PUSH_T_BAR_V1.yaw_alignment.position_stop_tolerance_fraction == pytest.approx(1.0)
 
 
 def test_public_archetypes_reject_hidden_physical_parameters() -> None:
@@ -172,13 +169,13 @@ def test_requested_push_goal_does_not_fall_back_to_catalog_target() -> None:
     assert goal.yaw_tolerance_rad == pytest.approx(0.05)
 
 
-def test_t_bar_refinement_goal_is_stricter_than_public_acceptance() -> None:
+def test_t_bar_controller_goal_matches_the_tightened_public_acceptance() -> None:
     refined = refinement_goal(PUSH_T_BAR_V1.goal, PUSH_T_BAR_V1.yaw_alignment)
 
-    assert refined.position_tolerance_m == pytest.approx(0.0099)
-    assert refined.yaw_tolerance_rad == pytest.approx(math.radians(3.0))
-    pose = PlanarPose(x_m=0.158, y_m=0.0, yaw_rad=math.radians(4.0))
-    assert evaluate_planar_goal(PUSH_T_BAR_V1.goal, pose).success is True
+    assert refined.position_tolerance_m == pytest.approx(0.015)
+    assert refined.yaw_tolerance_rad == pytest.approx(math.radians(5.0))
+    pose = PlanarPose(x_m=0.166, y_m=0.0, yaw_rad=math.radians(4.0))
+    assert evaluate_planar_goal(PUSH_T_BAR_V1.goal, pose).success is False
     assert evaluate_planar_goal(refined, pose).success is False
 
 
@@ -186,7 +183,7 @@ def test_refinement_skips_translation_when_only_yaw_remains() -> None:
     refined = refinement_goal(PUSH_T_BAR_V1.goal, PUSH_T_BAR_V1.yaw_alignment)
     yaw_only = evaluate_planar_goal(
         refined,
-        PlanarPose(x_m=0.155, y_m=0.0, yaw_rad=math.radians(4.0)),
+        PlanarPose(x_m=0.155, y_m=0.0, yaw_rad=math.radians(6.0)),
     )
     translation = evaluate_planar_goal(
         refined,
