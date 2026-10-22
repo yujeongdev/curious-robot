@@ -27,6 +27,7 @@ from typing import Any, Protocol
 
 from .event_store import EventStore
 from .events import EVENT_ADAPTER, AgentEvent, DiscoveryStage, validate_public_data
+from .tasks import get_task_preset
 
 MAX_IPC_MESSAGE_BYTES = 512 * 1024
 TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "abandoned"})
@@ -74,6 +75,7 @@ class EventRepository(Protocol):
 
 @dataclass(frozen=True)
 class RunConfiguration:
+    task_id: str = "push-cube-v1"
     seed: int = 7
     device: str = "cuda:0"
     include_robot: bool = True
@@ -83,7 +85,10 @@ class RunConfiguration:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> RunConfiguration:
+        task_id = str(value.get("task_id", "push-cube-v1"))
+        get_task_preset(task_id)
         known = {
+            "task_id": task_id,
             "seed": int(value.get("seed", 7)),
             "device": str(value.get("device", "cuda:0")),
             "include_robot": bool(value.get("include_robot", True)),
@@ -95,6 +100,7 @@ class RunConfiguration:
 
     def public_dict(self) -> dict[str, Any]:
         return {
+            "task_id": self.task_id,
             "seed": self.seed,
             "device": self.device,
             "include_robot": self.include_robot,
@@ -258,7 +264,16 @@ def _worker_bootstrap(
         controls=gate,
     )
     try:
-        sink.emit({"type": "run.started", "payload": {"state": "running", "worker_pid": os.getpid()}})
+        sink.emit(
+            {
+                "type": "run.started",
+                "payload": {
+                    "state": "running",
+                    "worker_pid": os.getpid(),
+                    "task_id": context.configuration.task_id,
+                },
+            }
+        )
         result = _resolve_entrypoint(entrypoint)(context)
         _emit_output_artifacts(context)
         payload = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
@@ -339,12 +354,15 @@ def default_newton_worker(context: WorkerContext) -> Any:
     from .runner import run_episode
 
     kwargs: dict[str, Any] = {
+        "task_id": context.configuration.task_id,
         "seed": context.configuration.seed,
         "output_directory": context.output_directory,
         "device": context.configuration.device,
         "include_robot": context.configuration.include_robot,
     }
     parameters = inspect.signature(run_episode).parameters
+    if "task_id" not in parameters:
+        kwargs.pop("task_id")
     if "event_sink" in parameters:
         kwargs["event_sink"] = context.events
     if "control_gate" in parameters:

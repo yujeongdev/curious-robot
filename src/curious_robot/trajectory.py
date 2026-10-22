@@ -12,6 +12,10 @@ class CartesianTrackingError(RuntimeError):
     """Raised when a Cartesian command cannot reach its target within tolerance."""
 
 
+class IKUnreachableError(RuntimeError):
+    """Raised when a bounded Cartesian target has no accepted IK solution."""
+
+
 @dataclass(frozen=True, slots=True)
 class CartesianMotionResult:
     physics_steps: int

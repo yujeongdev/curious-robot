@@ -1,6 +1,7 @@
 from curious_robot.belief import initial_belief
 from curious_robot.planning import (
     DEFAULT_EXPERIMENTS,
+    candidate_actions,
     evaluate_information_gain,
     propose_experiment,
     select_next_action,
@@ -33,6 +34,14 @@ def test_action_selection_is_input_order_invariant() -> None:
         select_next_action([push, pick]).selected_action_id
         == select_next_action([pick, push]).selected_action_id
     )
+
+
+def test_t_bar_task_exposes_three_independent_push_candidates() -> None:
+    actions = candidate_actions((0.15, 0.0, 0.02), task_id="push-t-bar-v1")
+    assert len(actions) == 3
+    assert len({action.action_id for action in actions}) == 3
+    assert {action.kind for action in actions} == {"push"}
+    assert len({(action.speed_m_s, action.max_force_n, action.push_height_m) for action in actions}) == 3
 
 
 def outcome(action_id: str, error: float, probability: float, force: float) -> PredictedOutcome:

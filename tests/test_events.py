@@ -111,10 +111,27 @@ def test_visual_frame_requires_stable_unique_body_and_asset_ids() -> None:
         VisualFramePayload.model_validate(payload)
 
     payload["bodies"] = (body,)
+    payload["object_geometry"] = {
+        "archetype_id": "t-bar",
+        "archetype_version": "1.0.0",
+        "geometry_hash": "sha256:" + "a" * 64,
+        "body_id": "cube",
+        "parts": [
+            {
+                "part_id": "stem",
+                "center_object_m": (-0.01, 0.0, 0.0),
+                "half_extents_m": (0.04, 0.01, 0.02),
+            }
+        ],
+    }
     frame = SimulationVisualFrameEvent(
         **common(), frame_id=4, sim_time_s=0.5, payload=VisualFramePayload.model_validate(payload)
     )
     assert frame.payload.scene == "truth"
+    assert frame.payload.object_geometry.archetype_id == "t-bar"
+    invalid_geometry = {**payload, "object_geometry": {**payload["object_geometry"], "body_id": "missing"}}
+    with pytest.raises(ValidationError, match="must reference a body"):
+        VisualFramePayload.model_validate(invalid_geometry)
     assert frame.frame_id == frame.payload.frame_id
 
     mismatched = frame.model_copy(update={"frame_id": 5})

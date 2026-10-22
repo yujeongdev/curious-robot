@@ -23,9 +23,10 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt  # noqa: E402
 
-from .belief import initial_belief
+from .belief import initial_belief_for_object
 from .environment import PhysicalParameters, StepControl, TruthEnvironment, WorldConfig
 from .events import DiscoveryStage
+from .objects import get_object_archetype
 from .planner_adapters import DeterministicPlannerAdapter, PlannerAdapter
 from .planning import action_utility, candidate_actions
 from .ports import RobotRealityAdapter
@@ -38,7 +39,16 @@ from .sysid import (
     estimate_mass,
     estimate_static_friction,
 )
+from .tasks import (
+    PlanarPose,
+    evaluate_planar_goal,
+    get_task_definition,
+    get_task_preset,
+    wrapped_yaw_error,
+    yaw_from_quaternion_xyzw,
+)
 from .tools import RobotTools
+from .world_config import object_kind_from_archetype_id
 
 
 class EventSink(Protocol):
@@ -137,6 +147,7 @@ def _distribution(estimate) -> dict[str, Any]:
 
 def run_episode(
     *,
+    task_id: str = "push-cube-v1",
     seed: int,
     output_directory: str | Path,
     device: str = "cuda:0",
@@ -148,6 +159,13 @@ def run_episode(
 ) -> EpisodeResult:
     output = Path(output_directory)
     output.mkdir(parents=True, exist_ok=True)
+    task = get_task_preset(task_id)
+    task_definition = get_task_definition(task.task_definition_id, task.task_definition_version)
+    archetype = get_object_archetype(task.object_archetype_id, task.object_archetype_version)
+    object_kind = object_kind_from_archetype_id(archetype.archetype_id)
+    support_height_m = -min(
+        part.center_object_m[2] - part.half_extents_m[2] for part in archetype.parts
+    )
     # Public seeds control controllers and observation noise. Hidden scenario
     # physics uses independent entropy so an open-source agent cannot derive
     # truth values from the public run configuration.
@@ -159,7 +177,7 @@ def run_episode(
         raise ValueError("CURIOUS_ROBOT_EVALUATOR_SCENARIO_SEED must be in [0, 2**63)")
     scenario_rng = np.random.default_rng(scenario_seed)
     bounds = material_bounds or {}
-    mass_range = bounds.get("mass_kg", (0.08, 0.45))
+    mass_range = bounds.get("mass_kg", task.default_mass_range_kg)
     if not isinstance(mass_range, (list, tuple)) or len(mass_range) != 2:
         raise ValueError("material_bounds.mass_kg must be [minimum, maximum]")
     mass_low, mass_high = (float(value) for value in mass_range)
@@ -169,15 +187,17 @@ def run_episode(
     surface_family = SurfaceFamily(str(family_value)) if family_value else None
     mass = float(scenario_rng.uniform(mass_low, mass_high))
     surface = sample_surface_profile(scenario_seed + 1_000, surface_family)
+    x_low, x_high, y_low, y_high = task.initial_position_jitter_m
     initial = (
-        float(scenario_rng.uniform(-0.16, -0.10)),
-        float(scenario_rng.uniform(-0.03, 0.03)),
-        0.025,
+        float(task.initial_pose.x_m + scenario_rng.uniform(x_low, x_high)),
+        float(task.initial_pose.y_m + scenario_rng.uniform(y_low, y_high)),
+        support_height_m,
     )
     truth = PhysicalParameters(
         mass,
         surface.effective_static_friction,
         surface.effective_dynamic_friction,
+        com_m=archetype.uniform_density_centroid_m,
         restitution=surface.restitution,
     )
     scenario_commitment = hashlib.sha256(
@@ -187,14 +207,24 @@ def run_episode(
                 "truth": asdict(truth),
                 "surface": asdict(surface),
                 "initial_position_m": initial,
+                "task_preset_id": task.preset_id,
+                "task_preset_hash": task.preset_hash,
+                "object_geometry_hash": archetype.geometry_hash,
             },
             sort_keys=True,
         ).encode()
     ).hexdigest()
     truth_config = WorldConfig(
+        task_id=task.preset_id,
         device=device,
         initial_position_m=initial,
+        initial_yaw_rad=task.initial_pose.yaw_rad,
+        target_position_m=(task.goal.target.x_m, task.goal.target.y_m, support_height_m),
+        target_radius_m=task.goal.position_tolerance_m,
+        target_yaw_rad=task.goal.target.yaw_rad,
+        target_yaw_tolerance_rad=task.goal.yaw_tolerance_rad,
         include_robot=include_robot,
+        object_kind=object_kind,
         seed=seed,
     )
     episode_events = _EpisodeEvents(event_sink)
@@ -208,9 +238,13 @@ def run_episode(
     )
     initial_observation = reality.observe_object_pose()
     config = replace(truth_config, initial_position_m=initial_observation.pose.position_m)
+    task_belief = initial_belief_for_object(
+        archetype.archetype_id,
+        archetype.version,
+    )
     tools = RobotTools(
         RobotRealityAdapter(reality),
-        initial_belief(),
+        task_belief,
         config,
         control_gate=control_gate,
         event_sink=event_sink,
@@ -218,11 +252,12 @@ def run_episode(
     planner = planner or DeterministicPlannerAdapter()
     belief_history: list[PhysicalBelief] = [tools.belief]
     completed: set[str] = set()
+    deployment_reality: TruthEnvironment | None = None
     try:
         _log("OBSERVE", "capturing robot, object, and target state")
         tools.observe_scene()
         experiment_iteration = 0
-        for _ in range(4):
+        for _ in range(task_definition.maximum_experiments):
             episode_events.enter(DiscoveryStage.REASON, iteration=experiment_iteration)
             baseline = tools.propose_experiment(completed)
             if baseline.selected:
@@ -286,8 +321,10 @@ def run_episode(
                         tools.belief.parameters[ParameterName.STATIC_FRICTION],
                     )
                 ]
-            else:
+            elif selected == "multi_orientation_com":
                 estimates = [tools.estimate_center_of_mass()]
+            else:
+                raise RuntimeError(f"no validated experiment dispatcher for {selected}")
             evidence = tools.evidence[-1] if tools.evidence else None
             episode_events.emit(
                 "tool.completed",
@@ -314,7 +351,8 @@ def run_episode(
                             "evidence_id": evidence.evidence_id,
                             "sensor_kind": "native_contact_force_and_camera_pose",
                             "producer": evidence.metadata.get(
-                                "producer", "Newton SensorContact robot-tool ↔ cube"
+                                "producer",
+                                f"Newton SensorContact robot-tool ↔ {archetype.archetype_id}",
                             ),
                             "frame": "world",
                             "units": "SI",
@@ -322,6 +360,12 @@ def run_episode(
                                 "measured_force_n": measured_force,
                                 "object_position_m": float(sample.position_m[0]),
                                 "object_velocity_mps": float(sample.velocity_m_s[0]),
+                                "object_yaw_rad": yaw_from_quaternion_xyzw(
+                                    sample.orientation_xyzw
+                                ),
+                                "object_yaw_rate_rad_s": float(
+                                    sample.angular_velocity_rad_s[2]
+                                ),
                             },
                             "valid": sample.contact_valid,
                         },
@@ -372,7 +416,9 @@ def run_episode(
                     {
                         "belief_revision": tools.belief.revision,
                         "world_instance_id": tools.belief_world.world_instance_id,
-                        "body_manifest_id": "franka-cube-v1",
+                        "body_manifest_id": f"franka-{archetype.archetype_id}-v1",
+                        "task_id": task.preset_id,
+                        "object_geometry_hash": archetype.geometry_hash,
                         "parameter_names": [parameter.value for parameter in ParameterName],
                     },
                 )
@@ -385,8 +431,8 @@ def run_episode(
             experiment_iteration += 1
 
         episode_events.enter(DiscoveryStage.PREDICT, iteration=experiment_iteration)
-        _log("PREDICT", "rolling out push and pick-and-place in the independent belief simulation")
-        actions = candidate_actions(config.target_position_m)
+        _log("PREDICT", "rolling out independent task candidates in learned Newton worlds")
+        actions = candidate_actions(config.target_position_m, task_id=task.preset_id)
         outcomes = [tools.simulate_candidate_action(action) for action in actions]
         for outcome in outcomes:
             episode_events.emit(
@@ -395,7 +441,9 @@ def run_episode(
                     "action_id": outcome.action_id,
                     "scenario_id": outcome.action_id,
                     "final_position_m": outcome.final_position_m,
+                    "final_orientation_xyzw": outcome.final_orientation_xyzw,
                     "target_error_m": outcome.target_error_m,
+                    "target_yaw_error_rad": outcome.target_yaw_error_rad,
                     "success_probability": outcome.success_probability,
                     "peak_force_n": outcome.peak_force_n,
                     "tipping_margin": outcome.tipping_margin,
@@ -439,29 +487,59 @@ def run_episode(
         )
         _log("SELECT", f"{selected_action.action_id}: {decision.rationale}")
 
-        tools.return_object_home()
-        reality.settle(0.25)
+        if tools.belief_world is not None:
+            tools.belief_world.close()
+            tools.belief_world = None
+        reality.close()
+        deployment_reality = TruthEnvironment(
+            truth,
+            config,
+            control_gate=control_gate,
+            event_sink=event_sink,
+            scene="truth",
+            scenario_id="fresh-policy-deployment",
+        )
+        deployment_reality.settle(0.25)
+        deployment_observation = deployment_reality.observe_object_pose()
+        deployment_config = replace(
+            config,
+            initial_position_m=deployment_observation.pose.position_m,
+        )
+        deployment_tools = RobotTools(
+            RobotRealityAdapter(deployment_reality),
+            tools.belief,
+            deployment_config,
+            protocol=tools.protocol,
+            control_gate=control_gate,
+            event_sink=event_sink,
+        )
         if selected_action.kind == "pick_place":
-            tools.grasp_object()
-        initial_position, initial_orientation, initial_velocity = reality.cube_controller_state()
+            deployment_tools.grasp_object()
+        initial_position, initial_orientation, initial_velocity = (
+            deployment_reality.cube_controller_state()
+        )
         initial_final_pose = tuple(float(v) for v in initial_position)
         initial_body_q = (*initial_final_pose, *(float(v) for v in initial_orientation))
         initial_body_qd = tuple(float(v) for v in initial_velocity)
-        initial_joint_q = tuple(float(v) for v in reality.state_0.joint_q.numpy())
-        initial_joint_qd = tuple(float(v) for v in reality.state_0.joint_qd.numpy())
-        initial_joint_target_q = tuple(float(v) for v in reality.control.joint_target_q.numpy())
-        reality.clear_trace()
+        initial_joint_q = tuple(float(v) for v in deployment_reality.state_0.joint_q.numpy())
+        initial_joint_qd = tuple(float(v) for v in deployment_reality.state_0.joint_qd.numpy())
+        initial_joint_target_q = tuple(
+            float(v) for v in deployment_reality.control.joint_target_q.numpy()
+        )
+        deployment_reality.clear_trace()
         episode_events.enter(DiscoveryStage.EXECUTE)
         replay_path = output / "scene_replay.bin"
-        reality.start_recording(replay_path, stride=4)
+        deployment_reality.start_recording(replay_path, stride=4)
         controller_result = "completed"
         safety_event_ids: list[str] = []
         if selected_action.kind == "push":
-            execution = tools.execute_safe_push(
+            execution = deployment_tools.execute_safe_push(
                 selected_action.target_m,
                 selected_action.max_force_n,
                 speed_m_s=selected_action.speed_m_s,
                 push_height_m=selected_action.push_height_m,
+                lateral_contact_offset_m=selected_action.lateral_contact_offset_m,
+                contact_surface_id=selected_action.contact_surface_id,
             )
             final_samples = list(execution.samples)
             controller_result = execution.outcome.value
@@ -482,41 +560,59 @@ def run_episode(
                     )
                 )
         else:
-            final_samples = reality.execute_pick_place(
+            final_samples = deployment_reality.execute_pick_place(
                 selected_action.target_m,
                 selected_action.max_force_n,
                 assumed_mass_kg=tools.belief.parameters[ParameterName.MASS].mean,
             )
-        reality.stop_recording()
-        final_control_trace = list(reality.control_trace)
-        final_state_trace = list(reality.state_trace)
+        deployment_reality.stop_recording()
+        final_control_trace = list(deployment_reality.control_trace)
+        final_state_trace = list(deployment_reality.state_trace)
+        final_orientation_trace = list(deployment_reality.orientation_trace)
         if selected_action.kind == "pick_place":
-            tools.release_object()
-        observed = reality.observe_object_pose().pose.position_m
+            deployment_tools.release_object()
+        observed_pose = deployment_reality.observe_object_pose().pose
+        observed = observed_pose.position_m
         episode_events.emit(
             "action.executed",
             {
                 "action_id": selected_action.action_id,
                 "controller_result": controller_result,
                 "observed_terminal_position_m": observed,
+                "observed_terminal_orientation_xyzw": observed_pose.orientation_xyzw,
                 "safety_event_ids": safety_event_ids,
             },
         )
-        predicted = next(o.final_position_m for o in outcomes if o.action_id == selected_action.action_id)
+        selected_outcome = next(o for o in outcomes if o.action_id == selected_action.action_id)
+        predicted = selected_outcome.final_position_m
         prediction_error = tools.evaluate_prediction_error(predicted, observed)
+        observed_goal = evaluate_planar_goal(
+            task.goal,
+            PlanarPose(
+                x_m=observed[0],
+                y_m=observed[1],
+                yaw_rad=yaw_from_quaternion_xyzw(observed_pose.orientation_xyzw),
+            ),
+        )
+        predicted_yaw = yaw_from_quaternion_xyzw(selected_outcome.final_orientation_xyzw)
+        observed_yaw = yaw_from_quaternion_xyzw(observed_pose.orientation_xyzw)
+        prediction_yaw_error = wrapped_yaw_error(observed_yaw, predicted_yaw)
         episode_events.enter(DiscoveryStage.VERIFY)
-        success = tools.verify_task_success() and controller_result == "completed"
-        verification = tools.records[-1].result_summary
+        success = deployment_tools.verify_task_success() and controller_result == "completed"
+        verification = deployment_tools.records[-1].result_summary
+        tools.records.extend(deployment_tools.records)
         episode_events.emit(
             "verification.completed",
             {
                 "success": success,
                 "goal_predicates": {
-                    "target_region": bool(verification["target_region"]),
+                    **observed_goal.predicates,
                     "stable": bool(verification["stable"]),
                 },
                 "prediction_residual_m": prediction_error,
+                "prediction_yaw_residual_rad": prediction_yaw_error,
                 "tolerance_m": config.target_radius_m,
+                "yaw_tolerance_rad": task.goal.yaw_tolerance_rad,
             },
         )
         _log(
@@ -573,7 +669,10 @@ def run_episode(
             action_id=selected_action.action_id,
             observed_final_position_m=observed,
             predicted_final_position_m=predicted,
+            observed_final_orientation_xyzw=observed_pose.orientation_xyzw,
+            predicted_final_orientation_xyzw=selected_outcome.final_orientation_xyzw,
             prediction_error_m=prediction_error,
+            prediction_yaw_error_rad=prediction_yaw_error,
             success=success,
         )
         result = EpisodeResult(
@@ -604,6 +703,7 @@ def run_episode(
             initial_joint_target_q,
             final_control_trace,
             final_state_trace,
+            final_orientation_trace,
             final_samples,
             scenario_seed,
             scenario_commitment,
@@ -613,6 +713,8 @@ def run_episode(
     finally:
         if tools.belief_world is not None:
             tools.belief_world.close()
+        if deployment_reality is not None:
+            deployment_reality.close()
         reality.close()
 
 
@@ -635,10 +737,13 @@ def _write_artifacts(
     initial_joint_target_q: tuple[float, ...],
     final_control_trace: list[tuple[float, ...]],
     final_state_trace: list[tuple[float, float, float]],
+    final_orientation_trace: list[tuple[float, float, float, float]],
     final_samples,
     scenario_seed: int,
     scenario_commitment: str,
 ) -> None:
+    task = get_task_preset(config.task_id)
+    archetype = get_object_archetype(task.object_archetype_id, task.object_archetype_version)
     versions = {
         name: importlib.metadata.version(name)
         for name in ("newton", "warp-lang", "mujoco", "mujoco-warp", "numpy", "scipy", "pydantic")
@@ -652,6 +757,10 @@ def _write_artifacts(
         "dt_s": config.dt_s,
         "deterministic_mode": "RUN_TO_RUN",
         "scenario_commitment": scenario_commitment,
+        "task": task.model_dump(mode="json"),
+        "task_preset_hash": task.preset_hash,
+        "object_archetype": archetype.model_dump(mode="json"),
+        "object_geometry_hash": archetype.geometry_hash,
         "world_config": asdict(config),
         "experiment_protocol": tools.protocol.model_dump(mode="json"),
         "limitations": [
@@ -683,6 +792,8 @@ def _write_artifacts(
                 "y_m",
                 "z_m",
                 "vx_m_s",
+                "yaw_rad",
+                "yaw_rate_rad_s",
                 "force_x_n",
                 "measured_normal_n",
                 "contact_valid",
@@ -707,6 +818,8 @@ def _write_artifacts(
                         sample.timestamp_s,
                         *sample.position_m,
                         sample.velocity_m_s[0],
+                        yaw_from_quaternion_xyzw(sample.orientation_xyzw),
+                        sample.angular_velocity_rad_s[2],
                         sample.measured_force_n[0],
                         sample.measured_normal_load_n,
                         sample.contact_valid,
@@ -730,6 +843,14 @@ def _write_artifacts(
         "solver_config": {"iterations": 20, "nconmax": 256, "njmax": 512},
         "evaluation_truth": evaluator_truth,
         "private_scenario_seed": scenario_seed,
+        "task_id": task.preset_id,
+        "object_archetype_id": archetype.archetype_id,
+        "object_geometry_hash": archetype.geometry_hash,
+        "initial_object_position_m": initial_final_pose,
+        "initial_object_body_q": initial_body_q,
+        "initial_object_body_qd": initial_body_qd,
+        # Legacy cube keys keep v1 replay readers compatible. New readers use
+        # the object-neutral fields above.
         "initial_cube_position_m": initial_final_pose,
         "initial_cube_body_q": initial_body_q,
         "initial_cube_body_qd": initial_body_qd,
@@ -742,13 +863,17 @@ def _write_artifacts(
         },
         "control_sequence_joint_target_q": final_control_trace,
         "reference_trajectory_position_m": final_state_trace,
+        "reference_trajectory_orientation_xyzw": final_orientation_trace,
         "position_tolerance_m": 0.015 if config.include_robot else 0.005,
+        "reexecution_yaw_tolerance_rad": config.reexecution_yaw_tolerance_rad,
         "agent_tool_calls": [record.model_dump(mode="json") for record in tools.records],
         "belief_history": [belief.model_dump(mode="json") for belief in belief_history],
         "sensor_configuration": {
             "pose_noise_std_m": config.observation_noise_std,
             "force_noise_std_n": config.force_noise_std,
-            "force_producer": "Newton SensorContact CONTACT_F robot-tool ↔ cube",
+            "force_producer": (
+                f"Newton SensorContact CONTACT_F robot-tool ↔ {archetype.archetype_id}"
+            ),
         },
     }
     (output / "reexecution.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -798,7 +923,7 @@ def _write_artifacts(
                 "known_model_constants": {
                     "role": "versioned assumptions; never inferred from an episode",
                     "examples": [
-                        "cube geometry",
+                        "versioned object geometry",
                         "gravity convention",
                         "Franka kinematic description",
                     ],

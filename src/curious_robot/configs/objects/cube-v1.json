@@ -1,0 +1,22 @@
+{
+  "archetype_id": "cube",
+  "version": "1.0.0",
+  "label": "Known 50 mm cube",
+  "reference_frame": "geometric_center",
+  "parts": [
+    {"part_id": "cube", "center_object_m": [0.0, 0.0, 0.0], "half_extents_m": [0.025, 0.025, 0.025]}
+  ],
+  "support_polygon_xy_m": [[-0.025, -0.025], [0.025, -0.025], [0.025, 0.025], [-0.025, 0.025]],
+  "contact_surfaces": [
+    {
+      "surface_id": "rear_x", "part_id": "cube", "center_object_m": [-0.025, 0.0, 0.0],
+      "outward_normal_object": [-1.0, 0.0, 0.0], "tangent_object": [0.0, 1.0, 0.0],
+      "half_size_m": [0.025, 0.025]
+    },
+    {
+      "surface_id": "front_x", "part_id": "cube", "center_object_m": [0.025, 0.0, 0.0],
+      "outward_normal_object": [1.0, 0.0, 0.0], "tangent_object": [0.0, 1.0, 0.0],
+      "half_size_m": [0.025, 0.025]
+    }
+  ]
+}

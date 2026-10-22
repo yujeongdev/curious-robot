@@ -26,6 +26,7 @@ def test_media_script_help_documents_capture_contract() -> None:
     assert "fixed clock" in result.stdout
     assert "blank WebGL viewport" in result.stdout
     assert "--run DIR" in result.stdout
+    assert "--expect-task ID" in result.stdout
 
 
 def test_media_script_rejects_invalid_dimensions_before_capture() -> None:
@@ -40,3 +41,13 @@ def test_media_script_requires_a_committed_event_log(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "events.ndjson" in result.stderr
+
+
+def test_media_script_rejects_a_run_for_the_wrong_task(tmp_path: Path) -> None:
+    (tmp_path / "events.ndjson").write_text(
+        '{"type":"run.started","payload":{"task_id":"push-cube-v1"}}\n'
+    )
+    result = run_script("--run", str(tmp_path), "--expect-task", "push-t-bar-v1")
+
+    assert result.returncode != 0
+    assert "does not match --expect-task 'push-t-bar-v1'" in result.stderr

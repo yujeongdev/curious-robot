@@ -44,12 +44,13 @@ class NewtonSimulatedReality:
         *,
         device: str = "cuda:0",
         seed: int = 7,
+        task_id: str = "push-cube-v1",
         timeout_s: float = 900.0,
     ) -> None:
         private_seed_override = os.environ.get(_PRIVATE_SCENARIO_SEED_ENV)
         self._worker = SpawnedPortProcess(
             target=_reality_worker,
-            args=(artifact_root, device, seed, private_seed_override),
+            args=(artifact_root, device, seed, private_seed_override, task_id),
             name="curious-robot-reality",
             timeout_s=timeout_s,
             scrub_environment=(_PRIVATE_SCENARIO_SEED_ENV,),

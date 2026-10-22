@@ -132,15 +132,43 @@ def _successful_result(
     )
     patch = _put(stores, LabArtifactKind.WORLD_SPEC_PATCH, {}, provenance=(posterior,))
     twin = _put(stores, LabArtifactKind.TWIN_BUILD, {}, provenance=(patch,))
-    validation = _put(stores, LabArtifactKind.TWIN_VALIDATION_REPORT, {}, provenance=(twin,))
     action = next(item for item in candidate_actions(target) if item.kind == "push")
+    validation = _put(
+        stores,
+        LabArtifactKind.TWIN_VALIDATION_REPORT,
+        {
+            "valid": True,
+            "task_success": True,
+            "selected_action": action.model_dump(mode="json"),
+            "task_id": "push-cube-v1",
+            "task_version": "1.0.0",
+            "object_id": "cube",
+            "object_archetype_version": "1.0.0",
+            "geometry_hash": None,
+            "goal_target_m": list(target),
+            "goal_target_radius_m": 0.06,
+            "goal_target_yaw_rad": 0.0,
+            "goal_yaw_tolerance_rad": None,
+            "max_attempts": 2,
+            "protocol": protocol.model_dump(mode="json"),
+            "protocol_sha256": protocol_sha256(protocol),
+        },
+        provenance=(twin,),
+    )
     policy = _put(
         stores,
         LabArtifactKind.POLICY_ARTIFACT,
         {
             "action": action.model_dump(mode="json"),
+            "task_id": "push-cube-v1",
+            "task_version": "1.0.0",
+            "object_id": "cube",
+            "object_archetype_version": "1.0.0",
+            "geometry_hash": None,
             "goal_target_m": list(target),
             "goal_target_radius_m": 0.06,
+            "goal_target_yaw_rad": 0.0,
+            "goal_yaw_tolerance_rad": None,
             "max_attempts": 2,
             "protocol": protocol.model_dump(mode="json"),
             "protocol_sha256": protocol_sha256(protocol),
@@ -520,6 +548,7 @@ def test_reality_attempt_failure_closes_and_invalidates_invocation(
                 LabArtifactKind.CAPABILITY_ARTIFACT.value,
                 LabArtifactKind.CAPABILITY_ATTESTATION.value,
                 LabArtifactKind.POLICY_ARTIFACT.value,
+                    LabArtifactKind.TWIN_VALIDATION_REPORT.value,
                 LabArtifactKind.REALITY_DEPLOYMENT.value,
                 LabArtifactKind.TRAJECTORY_DATASET.value,
             }

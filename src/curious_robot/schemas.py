@@ -73,6 +73,8 @@ class MotionSample(FrozenModel):
     timestamp_s: float
     position_m: Vec3
     velocity_m_s: Vec3
+    orientation_xyzw: Quat = (0.0, 0.0, 0.0, 1.0)
+    angular_velocity_rad_s: Vec3 = (0.0, 0.0, 0.0)
     measured_force_n: Vec3
     contact_valid: bool = False
     contact_pair: tuple[str, str] | None = None
@@ -177,18 +179,26 @@ class ActionCandidate(FrozenModel):
     speed_m_s: float = Field(gt=0.0, le=0.15)
     max_force_n: float = Field(gt=0.0, le=15.0)
     push_height_m: float | None = Field(default=None, ge=0.0, le=0.05)
+    lateral_contact_offset_m: float = Field(default=0.0, ge=-0.03, le=0.03)
+    contact_surface_id: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def validate_finite_target(self) -> ActionCandidate:
         if not all(math.isfinite(value) for value in self.target_m):
             raise ValueError("action target must contain finite coordinates")
+        if self.kind == "push" and self.contact_surface_id is None:
+            raise ValueError("push action requires a public contact surface")
+        if self.kind == "pick_place" and self.contact_surface_id is not None:
+            raise ValueError("pick-and-place cannot name a push contact surface")
         return self
 
 
 class PredictedOutcome(FrozenModel):
     action_id: str
     final_position_m: Vec3
+    final_orientation_xyzw: Quat = (0.0, 0.0, 0.0, 1.0)
     target_error_m: float
+    target_yaw_error_rad: float | None = Field(default=None, ge=0.0, le=math.pi)
     success_probability: float
     tipping_margin: float
     peak_force_n: float
@@ -213,7 +223,10 @@ class ActionResult(FrozenModel):
     action_id: str
     observed_final_position_m: Vec3
     predicted_final_position_m: Vec3
+    observed_final_orientation_xyzw: Quat = (0.0, 0.0, 0.0, 1.0)
+    predicted_final_orientation_xyzw: Quat = (0.0, 0.0, 0.0, 1.0)
     prediction_error_m: float
+    prediction_yaw_error_rad: float | None = Field(default=None, ge=0.0, le=math.pi)
     success: bool
 
 

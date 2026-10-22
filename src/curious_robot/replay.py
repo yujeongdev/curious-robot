@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from .environment import PhysicalParameters, TruthEnvironment, WorldConfig
+from .tasks import wrapped_yaw_error, yaw_from_quaternion_xyzw
 
 
 def verify_reexecution(manifest_path: str | Path) -> dict[str, object]:
@@ -19,8 +20,9 @@ def verify_reexecution(manifest_path: str | Path) -> dict[str, object]:
     world_config = manifest["world_config"]
     config_fields = WorldConfig.__dataclass_fields__
     config_values = {key: value for key, value in world_config.items() if key in config_fields}
+    initial_position, initial_body_q, initial_body_qd = resolve_initial_object_state(manifest)
     config_values.update(
-        initial_position_m=tuple(manifest["initial_cube_position_m"]),
+        initial_position_m=initial_position,
         observation_noise_std=0.0,
         force_noise_std=0.0,
         seed=manifest["seed"],
@@ -37,10 +39,11 @@ def verify_reexecution(manifest_path: str | Path) -> dict[str, object]:
         config,
     )
     actual: list[tuple[float, float, float]] = []
+    actual_orientations: list[tuple[float, float, float, float]] = []
     try:
         world.set_cube_state(
-            tuple(manifest["initial_cube_body_q"]),
-            tuple(manifest["initial_cube_body_qd"]),
+            initial_body_q,
+            initial_body_qd,
         )
         world.set_joint_state(
             tuple(manifest["initial_joint_q"]),
@@ -54,6 +57,7 @@ def verify_reexecution(manifest_path: str | Path) -> dict[str, object]:
             world.control.joint_target_q.assign(tuple(float(value) for value in joint_target_q))
             world.step()
         actual = list(world.state_trace)
+        actual_orientations = list(world.orientation_trace)
     finally:
         world.close()
     expected = np.asarray(manifest["reference_trajectory_position_m"], dtype=float)
@@ -68,17 +72,71 @@ def verify_reexecution(manifest_path: str | Path) -> dict[str, object]:
     else:
         error = np.linalg.norm(actual_array - expected, axis=1)
         tolerance = float(manifest["position_tolerance_m"])
+        expected_orientations = manifest.get("reference_trajectory_orientation_xyzw")
+        max_yaw_error = 0.0
+        yaw_tolerance = None
+        if expected_orientations is not None:
+            if len(expected_orientations) != len(actual_orientations):
+                return _write_report(
+                    path,
+                    {
+                        "passed": False,
+                        "reason": "orientation trajectory shape mismatch",
+                        "expected_samples": len(expected_orientations),
+                        "actual_samples": len(actual_orientations),
+                    },
+                )
+            yaw_errors = [
+                wrapped_yaw_error(
+                    yaw_from_quaternion_xyzw(tuple(actual_quaternion)),
+                    yaw_from_quaternion_xyzw(tuple(expected_quaternion)),
+                )
+                for actual_quaternion, expected_quaternion in zip(
+                    actual_orientations,
+                    expected_orientations,
+                    strict=True,
+                )
+            ]
+            max_yaw_error = max(yaw_errors, default=0.0)
+            yaw_tolerance = float(manifest["reexecution_yaw_tolerance_rad"])
         report = {
-            "passed": bool(np.max(error, initial=0.0) <= tolerance),
+            "passed": bool(
+                np.max(error, initial=0.0) <= tolerance
+                and (yaw_tolerance is None or max_yaw_error <= yaw_tolerance)
+            ),
             "max_position_error_m": float(np.max(error, initial=0.0)),
             "rmse_position_m": float(np.sqrt(np.mean(error**2))) if len(error) else 0.0,
             "position_tolerance_m": tolerance,
+            "max_yaw_error_rad": max_yaw_error if yaw_tolerance is not None else None,
+            "yaw_tolerance_rad": yaw_tolerance,
             "samples": len(error),
             "determinism_scope": "same GPU, driver, packages, solver settings, and control trace",
         }
+    return _write_report(path, report)
+
+
+def _write_report(path: Path, report: dict[str, object]) -> dict[str, object]:
     report_path = path.with_name("reexecution_report.json")
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     return report
+
+
+def resolve_initial_object_state(
+    manifest: dict[str, object],
+) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]:
+    """Resolve v2 object-neutral state with explicit v1 cube compatibility."""
+
+    def value(new_key: str, legacy_key: str) -> tuple[float, ...]:
+        raw = manifest[new_key] if new_key in manifest else manifest[legacy_key]
+        if not isinstance(raw, list):
+            raise TypeError(f"{new_key} must be an array")
+        return tuple(float(item) for item in raw)
+
+    return (
+        value("initial_object_position_m", "initial_cube_position_m"),
+        value("initial_object_body_q", "initial_cube_body_q"),
+        value("initial_object_body_qd", "initial_cube_body_qd"),
+    )
 
 
 def main(argv: list[str] | None = None) -> None:

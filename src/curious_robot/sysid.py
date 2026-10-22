@@ -40,6 +40,14 @@ def estimate_mass(evidence: ExperimentEvidence, noise_floor_fraction: float = 0.
 
 def estimate_static_friction(evidence: ExperimentEvidence, mass: ParameterEstimate) -> ParameterEstimate:
     """Return an interval-censored coefficient from measured breakaway force."""
+    if "excessive_yaw_motion" in evidence.quality_flags:
+        return _unidentifiable(
+            ParameterName.STATIC_FRICTION,
+            (0.20, 0.90),
+            "1",
+            evidence,
+            "object rotation exceeded the translational friction estimator envelope",
+        )
     samples = [sample for sample in evidence.samples if sample.contact_valid]
     minimum_samples = int(evidence.metadata.get("minimum_valid_contact_samples", 1))
     coverage = float(evidence.metadata.get("contact_coverage_fraction", 1.0))
@@ -117,6 +125,14 @@ def estimate_dynamic_friction(
     mass: ParameterEstimate,
     static_friction: ParameterEstimate,
 ) -> ParameterEstimate:
+    if "excessive_yaw_motion" in evidence.quality_flags:
+        return _unidentifiable(
+            ParameterName.DYNAMIC_FRICTION,
+            (0.10, 0.60),
+            "1",
+            evidence,
+            "object rotation exceeded the translational friction estimator envelope",
+        )
     minimum_samples = int(evidence.metadata.get("minimum_valid_contact_samples", 5))
     coverage = float(evidence.metadata.get("contact_coverage_fraction", 1.0))
     minimum_coverage = float(evidence.metadata.get("minimum_contact_coverage_fraction", 0.0))

@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .events import validate_public_data
+from .objects import get_object_archetype
 from .run_manager import (
     ActiveRunError,
     CursorError,
@@ -29,6 +30,7 @@ from .run_manager import (
     RunManager,
     RunNotFoundError,
 )
+from .tasks import get_task_definition, get_task_preset, list_task_presets
 
 CONTROL_TOKEN_HEADER = "X-Curious-Robot-Control-Token"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -37,6 +39,7 @@ SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    task_id: str = Field(default="push-cube-v1", min_length=1, max_length=64)
     seed: int = 7
     device: str = Field(default="cuda:0", min_length=1, max_length=64)
     include_robot: bool = True
@@ -48,6 +51,15 @@ class RunRequest(BaseModel):
     @classmethod
     def material_bounds_are_public(cls, value: dict[str, Any]) -> dict[str, Any]:
         validate_public_data(value)
+        return value
+
+    @field_validator("task_id")
+    @classmethod
+    def task_is_allowlisted(cls, value: str) -> str:
+        try:
+            get_task_preset(value)
+        except KeyError as error:
+            raise ValueError(str(error)) from error
         return value
 
 
@@ -63,7 +75,7 @@ def create_app(
     run_manager = manager or RunManager(artifact_root)
     token = control_token or secrets.token_urlsafe(32)
     hosts = allowed_hosts or frozenset({"127.0.0.1", "localhost", "::1", "testserver"})
-    app = FastAPI(title="Curious Robot Agent Lab", version="0.1.0")
+    app = FastAPI(title="Curious Robot Agent Lab", version="0.1.1")
     app.state.run_manager = run_manager
     app.state.control_token = token
     web_root = _resolve_static_dir(static_dir)
@@ -112,6 +124,29 @@ def create_app(
                 status_code=409,
                 detail={"message": "another run is active", "active_run_id": exc.run_id},
             ) from exc
+
+    @app.get("/api/tasks")
+    async def list_tasks() -> list[dict[str, Any]]:
+        result = []
+        for preset in list_task_presets():
+            definition = get_task_definition(
+                preset.task_definition_id,
+                preset.task_definition_version,
+            )
+            archetype = get_object_archetype(
+                preset.object_archetype_id,
+                preset.object_archetype_version,
+            )
+            result.append(
+                {
+                    "task_id": preset.preset_id,
+                    "objective": definition.objective,
+                    "object_label": archetype.label,
+                    "requires_yaw": preset.goal.requires_yaw,
+                    "candidate_count": len(preset.action_candidates),
+                }
+            )
+        return result
 
     @app.get("/api/runs")
     async def list_runs(run_status: str | None = Query(default=None, alias="status")) -> list[dict[str, Any]]:

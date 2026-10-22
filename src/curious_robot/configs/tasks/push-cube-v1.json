@@ -1,0 +1,25 @@
+{
+  "preset_id": "push-cube-v1", "version": "1.0.0",
+  "task_definition_id": "planar-translation", "task_definition_version": "1.0.0",
+  "object_archetype_id": "cube", "object_archetype_version": "1.0.0",
+  "initial_pose": {"x_m": -0.12, "y_m": 0.0, "yaw_rad": 0.0},
+  "initial_position_jitter_m": [-0.04, 0.02, -0.03, 0.03],
+  "default_mass_range_kg": [0.08, 0.45],
+  "experiment_contact_surface_id": "rear_x",
+  "goal": {
+    "target": {"x_m": 0.15, "y_m": 0.0, "yaw_rad": 0.0},
+    "position_tolerance_m": 0.06, "yaw_tolerance_rad": null
+  },
+  "action_candidates": [
+    {
+      "action_id": "push_straight_low", "kind": "push", "speed_m_s": 0.04,
+      "max_force_n": 15.0, "push_height_m": 0.015, "lateral_contact_offset_m": 0.0,
+      "contact_surface_id": "rear_x"
+    },
+    {
+      "action_id": "pick_and_place", "kind": "pick_place", "speed_m_s": 0.03,
+      "max_force_n": 12.0, "push_height_m": null, "lateral_contact_offset_m": 0.0,
+      "contact_surface_id": null
+    }
+  ]
+}

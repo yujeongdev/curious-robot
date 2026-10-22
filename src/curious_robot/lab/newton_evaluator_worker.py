@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
+from curious_robot.tasks import wrapped_yaw_error
+
 from .artifact_store import open_agent_artifact_capability, open_evaluator_artifact_capability
 from .contracts import (
     ArtifactEnvelope,
@@ -67,20 +69,40 @@ def _evaluator_worker(connection, artifact_root: Path) -> None:  # noqa: ANN001
             target = np.asarray(payload.target_position_m[:2], dtype=float)
             target_radius = payload.target_radius_m
             target_error = float(np.linalg.norm(final - target))
+            yaw_error = wrapped_yaw_error(
+                payload.observed_final_yaw_rad,
+                payload.target_yaw_rad,
+            )
+            yaw_within_tolerance = (
+                True
+                if payload.yaw_tolerance_rad is None
+                else yaw_error <= payload.yaw_tolerance_rad
+            )
             controller_completed = payload.controller_outcome == "completed"
-            success = target_error <= target_radius and not payload.safety_tripped and controller_completed
+            success = (
+                target_error <= target_radius
+                and yaw_within_tolerance
+                and not payload.safety_tripped
+                and controller_completed
+            )
+            target_predicate = (
+                "t_bar_in_target_pose" if payload.object_id == "t-bar" else "cube_in_target"
+            )
             reference = evaluator_store.put(
                 ArtifactEnvelope(
                     kind=LabArtifactKind.EVALUATION_REPORT.value,
                     visibility=ArtifactVisibility.EVALUATOR,
                     payload={
                         "goal_predicates": {
-                            "cube_in_target": target_error <= target_radius,
+                            target_predicate: target_error <= target_radius and yaw_within_tolerance,
+                            "position_within_tolerance": target_error <= target_radius,
+                            "yaw_within_tolerance": yaw_within_tolerance,
                             "controller_completed": controller_completed,
                             "robot_safe": not payload.safety_tripped,
                         },
                         "success": success,
                         "target_error_m": target_error,
+                        "yaw_error_rad": yaw_error,
                         "terminal": True,
                     },
                     provenance=(deployment_ref,),

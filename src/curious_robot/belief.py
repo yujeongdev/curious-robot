@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .objects import get_object_archetype
 from .schemas import ParameterEstimate, ParameterName, PhysicalBelief
 
 
@@ -19,6 +20,42 @@ def initial_belief() -> PhysicalBelief:
             ParameterName.COM_X: _prior(ParameterName.COM_X, 0.0, 0.005, (-0.015, 0.015), "m"),
             ParameterName.COM_Y: _prior(ParameterName.COM_Y, 0.0, 0.005, (-0.015, 0.015), "m"),
             ParameterName.COM_Z: _prior(ParameterName.COM_Z, 0.0, 0.003, (-0.010, 0.010), "m"),
+        }
+    )
+
+
+def initial_belief_for_object(archetype_id: str, version: str) -> PhysicalBelief:
+    """Return broad material priors plus the object's public uniform-density COM."""
+
+    belief = initial_belief()
+    archetype = get_object_archetype(archetype_id, version)
+    parameters = dict(belief.parameters)
+    for name, value in zip(
+        (ParameterName.COM_X, ParameterName.COM_Y, ParameterName.COM_Z),
+        archetype.uniform_density_centroid_m,
+        strict=True,
+    ):
+        parameters[name] = ParameterEstimate(
+            name=name,
+            mean=value,
+            std=0.0,
+            interval95=(value, value),
+            physical_bounds=(value, value),
+            units="m",
+            status="bounded",
+            method="public uniform-density geometry assumption",
+            assumptions=("uniform density; not identified from episode evidence",),
+        )
+    return belief.model_copy(
+        update={
+            "parameters": parameters,
+            "assumptions": (
+                f"rigid {archetype.archetype_id} with known public geometry",
+                "uniform-density COM fixed from public geometry",
+                "horizontal stationary table",
+                "Coulomb friction is an effective model",
+                "yaw inertia is not independently identified",
+            ),
         }
     )
 

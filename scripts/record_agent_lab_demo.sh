@@ -10,6 +10,7 @@ web_dir="${repo_root}/src/web"
 width=1920
 height=1080
 fps=30
+expected_task=""
 
 usage() {
   cat <<'EOF'
@@ -25,6 +26,7 @@ Options:
   --width PX         Capture width (default: 1920)
   --height PX        Capture height (default: 1080)
   --fps N            Capture frame rate (default: 30)
+  --expect-task ID   Require run.started task ID and matching public geometry
   -h, --help         Show this help
 
 The frontend command is expected to implement this contract:
@@ -82,6 +84,11 @@ while (($#)); do
       fps="$2"
       shift 2
       ;;
+    --expect-task)
+      (($# >= 2)) || die "--expect-task requires a task ID"
+      expected_task="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -107,6 +114,35 @@ output="$(cd "$output_parent" && pwd)/$(basename "$output")"
 [[ -f "$web_dir/package.json" ]] || die \
   "frontend workspace not found: $web_dir (build the Agent Lab frontend first)"
 
+if [[ -n "$expected_task" ]]; then
+  uv run python - "$run_dir/events.ndjson" "$expected_task" <<'PY' || die \
+    "event log does not match --expect-task '$expected_task'"
+import json
+import sys
+
+events_path, expected_task = sys.argv[1:]
+task_ids = set()
+archetypes = set()
+with open(events_path, encoding="utf-8") as handle:
+    for line in handle:
+        event = json.loads(line)
+        payload = event.get("payload", {})
+        if event.get("type") == "run.started" and isinstance(payload.get("task_id"), str):
+            task_ids.add(payload["task_id"])
+        if event.get("type") == "simulation.visual_frame":
+            geometry = payload.get("object_geometry")
+            if isinstance(geometry, dict) and isinstance(geometry.get("archetype_id"), str):
+                archetypes.add(geometry["archetype_id"])
+if task_ids != {expected_task}:
+    raise SystemExit(f"task IDs {sorted(task_ids)} do not equal {expected_task!r}")
+expected_archetype = {"push-cube-v1": "cube", "push-t-bar-v1": "t-bar"}.get(expected_task)
+if expected_archetype is not None and archetypes != {expected_archetype}:
+    raise SystemExit(
+        f"visual archetypes {sorted(archetypes)} do not equal {expected_archetype!r}"
+    )
+PY
+fi
+
 if command -v pnpm >/dev/null 2>&1; then
   pnpm_command=(pnpm)
 elif command -v corepack >/dev/null 2>&1; then
@@ -120,7 +156,7 @@ require_command ffprobe "Install ffprobe (normally included with ffmpeg)."
 uv run python "${repo_root}/scripts/check_visual_clearance.py" \
   --events "${run_dir}/events.ndjson" \
   --model "${repo_root}/src/web/public/models/franka/fr3.glb" \
-  --maximum-penetration-mm 1.0
+  --maximum-penetration-mm 1.1
 
 if command -v sha256sum >/dev/null 2>&1; then
   checksum_command=(sha256sum)

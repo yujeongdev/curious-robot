@@ -20,14 +20,20 @@ from curious_robot.tools import RobotTools
 
 def _mutated_config() -> WorldConfig:
     values = {
+        "task_id": "push-t-bar-v1",
         "device": "cpu",
         "dt_s": 0.003,
         "initial_position_m": (-0.091, 0.017, 0.026),
+        "initial_yaw_rad": 0.07,
         "target_position_m": (0.233, -0.021, 0.027),
         "target_radius_m": 0.041,
+        "target_yaw_rad": 0.12,
+        "target_yaw_tolerance_rad": 0.08,
         "observation_noise_std": 0.0017,
         "force_noise_std": 0.027,
         "include_robot": True,
+        "object_kind": "t_bar",
+        "object_archetype_version": "1.0.0",
         "seed": 831,
         "arm_position_stiffness": 321.0,
         "arm_position_damping": 37.0,
@@ -42,6 +48,7 @@ def _mutated_config() -> WorldConfig:
         "maximum_cartesian_speed_m_s": 0.13,
         "contact_sensor_cutoff_hz": 7.5,
         "prediction_residual_tolerance_m": 0.024,
+        "reexecution_yaw_tolerance_rad": 0.009,
         "maximum_joint_target_speed_rad_s": 1.23,
         "ik_position_tolerance_m": 0.006,
         "cartesian_tracking_tolerance_m": 0.011,
@@ -70,6 +77,7 @@ def test_rollout_preserves_complete_config_protocol_and_posterior_provenance(mon
         speed_m_s=0.04,
         max_force_n=8.0,
         push_height_m=0.02,
+        contact_surface_id="stem_rear_x",
     )
     captured: dict[str, object] = {}
 
@@ -128,6 +136,7 @@ def test_rollout_preserves_complete_config_protocol_and_posterior_provenance(mon
         dt_s=config.dt_s,
         speed_m_s=candidate.speed_m_s,
         push_height_m=candidate.push_height_m,
+        contact_surface_id=candidate.contact_surface_id,
         safety_stop_fraction=1.0,
     )
     assert captured["closed"] is True
@@ -138,7 +147,7 @@ def test_rollout_preserves_complete_config_protocol_and_posterior_provenance(mon
     assert outcome.belief_snapshot_id == physical_belief_snapshot_id(belief)
 
 
-def test_robot_tools_passes_run_protocol_and_only_updates_observed_start(monkeypatch) -> None:
+def test_robot_tools_uses_recorded_fresh_deployment_start(monkeypatch) -> None:
     config = _mutated_config()
     protocol = load_default_protocol().model_copy(update={"schema_version": "exact-run-protocol"})
     observed_start = (-0.043, 0.019, 0.025)
@@ -176,17 +185,26 @@ def test_robot_tools_passes_run_protocol_and_only_updates_observed_start(monkeyp
         target_m=config.target_position_m,
         speed_m_s=0.04,
         max_force_n=8.0,
+        contact_surface_id="stem_rear_x",
     )
 
     tools.simulate_candidate_action(candidate)
 
     supplied_config = captured["config"]
     assert isinstance(supplied_config, WorldConfig)
-    assert supplied_config.initial_position_m == observed_start
+    assert observed_start != config.initial_position_m
+    assert supplied_config.initial_position_m == config.initial_position_m
     for field in fields(WorldConfig):
         if field.name != "initial_position_m":
             assert getattr(supplied_config, field.name) == getattr(config, field.name)
-    assert captured["protocol"] is protocol
+    supplied_protocol = captured["protocol"]
+    assert isinstance(supplied_protocol, type(protocol))
+    assert supplied_protocol.schema_version == protocol.schema_version
+    assert {
+        supplied_protocol.static_probe.contact_surface_id,
+        supplied_protocol.dynamic_probe.contact_surface_id,
+        supplied_protocol.final_push.contact_surface_id,
+    } == {"stem_rear_x"}
 
 
 def test_execute_push_controller_does_not_use_exact_cube_state_for_decisions() -> None:

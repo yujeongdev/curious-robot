@@ -1,0 +1,8 @@
+{
+  "task_definition_id": "planar-pose-match",
+  "version": "1.0.0",
+  "objective": "Move the object to the target position and yaw without tipping.",
+  "permitted_action_families": ["controlled_push"],
+  "permitted_experiment_ids": ["static_breakaway_ramp", "dynamic_controlled_slide"],
+  "maximum_experiments": 3
+}

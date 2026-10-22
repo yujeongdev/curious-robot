@@ -160,6 +160,13 @@ def distill_friction_capability(
         raise ValueError("evaluation report payload must be an object")
     if evaluation_payload.get("terminal") is not True or evaluation_payload.get("success") is not True:
         raise ValueError("only a successful terminal evaluation can be distilled")
+    dataset = TrajectoryDatasetPayload.model_validate(
+        stores.agent.get(result.trajectory_dataset).payload
+    )
+    if dataset.task.object_id != "cube" or dataset.task.task_id != "push-cube-v1":
+        raise ValueError(
+            "deterministic capability distillation is fail-closed for non-cube task geometry"
+        )
 
     lineage = (
         (result.trajectory_dataset, result.capability_gap),
@@ -182,7 +189,6 @@ def distill_friction_capability(
     ):
         raise ValueError("capability inventory gap is not closed")
 
-    dataset = TrajectoryDatasetPayload.model_validate(stores.agent.get(result.trajectory_dataset).payload)
     posterior_envelope = stores.agent.get(result.parameter_posterior)
     if not isinstance(posterior_envelope.payload, dict):
         raise ValueError("posterior payload must be an object")

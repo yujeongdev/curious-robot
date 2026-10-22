@@ -19,8 +19,8 @@ class SurfaceFamily(StrEnum):
 class SurfaceProfile:
     """Evaluator-only physical and visual parameters.
 
-    The friction values describe the effective cube-surface interaction. They
-    are not separately identifiable cube and table material coefficients.
+    The friction values describe the effective object-surface interaction. They
+    are not separately identifiable object and table material coefficients.
     """
 
     family: SurfaceFamily

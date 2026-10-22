@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from .schemas import (
     ActionCandidate,
@@ -15,38 +17,15 @@ from .schemas import (
     PhysicalBelief,
     PredictedOutcome,
 )
+from .tasks import get_task_preset
 
-DEFAULT_EXPERIMENTS = (
-    ExperimentCandidate(
-        candidate_id="static_breakaway_ramp",
-        experiment="probe_static",
-        targets=(ParameterName.STATIC_FRICTION,),
-        expected_std_fraction=0.18,
-        duration_s=2.0,
-        cost=0.08,
-        risk=0.08,
-        max_force_n=8.0,
-    ),
-    ExperimentCandidate(
-        candidate_id="dynamic_controlled_slide",
-        experiment="probe_dynamic",
-        targets=(ParameterName.DYNAMIC_FRICTION,),
-        expected_std_fraction=0.20,
-        duration_s=4.0,
-        cost=0.14,
-        risk=0.12,
-        max_force_n=12.0,
-    ),
-    ExperimentCandidate(
-        candidate_id="multi_orientation_com",
-        experiment="estimate_com",
-        targets=(ParameterName.COM_X, ParameterName.COM_Y, ParameterName.COM_Z),
-        expected_std_fraction=0.30,
-        duration_s=4.0,
-        cost=0.25,
-        risk=0.25,
-        max_force_n=12.0,
-    ),
+_EXPERIMENT_CATALOG_PATH = Path(__file__).with_name("configs") / "experiment_candidates.json"
+_EXPERIMENT_CATALOG = json.loads(_EXPERIMENT_CATALOG_PATH.read_text(encoding="utf-8"))
+if _EXPERIMENT_CATALOG.get("schema_version") != "1.0.0":
+    raise RuntimeError("unsupported experiment candidate catalog schema")
+DEFAULT_EXPERIMENTS = tuple(
+    ExperimentCandidate.model_validate(candidate)
+    for candidate in _EXPERIMENT_CATALOG["candidates"]
 )
 
 
@@ -120,23 +99,18 @@ def propose_experiment(
     return ExperimentPlan(selected=selected, scores=scores, rationale=rationale)
 
 
-def candidate_actions(target_m: tuple[float, float, float]) -> tuple[ActionCandidate, ...]:
-    return (
+def candidate_actions(
+    target_m: tuple[float, float, float],
+    *,
+    task_id: str = "push-cube-v1",
+) -> tuple[ActionCandidate, ...]:
+    preset = get_task_preset(task_id)
+    return tuple(
         ActionCandidate(
-            action_id="push_straight_low",
-            kind="push",
+            **template.model_dump(mode="python"),
             target_m=target_m,
-            speed_m_s=0.04,
-            max_force_n=15.0,
-            push_height_m=0.015,
-        ),
-        ActionCandidate(
-            action_id="pick_and_place",
-            kind="pick_place",
-            target_m=target_m,
-            speed_m_s=0.03,
-            max_force_n=12.0,
-        ),
+        )
+        for template in preset.action_candidates
     )
 
 
