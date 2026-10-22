@@ -20,8 +20,10 @@ This page distinguishes executed evidence from planned capability.
   compound geometry, so success means aligning the T-bar with a T-shaped
   silhouette rather than entering a circular region.
 - The executed T-bar acceptance run passed both its 30 mm planar-position and
-  9° wrapped-yaw predicates for the first friction-only MVP. Its experiment,
-  candidate, and deployment worlds had distinct identities.
+  9° wrapped-yaw predicates for the first friction-only MVP. The retained seed
+  finished at `7.91 mm` center error and `4.65°` yaw error. Exact public-geometry
+  registration measured `13.46 mm` maximum and `9.80 mm` RMS corner error.
+  Its experiment, candidate, and deployment worlds had distinct identities.
 - A randomized-start Agent Lab run sampled initial yaw `-7.32°`, used
   `crossbar_right_y → crossbar_right_y → stem_rear_x`, and passed in fresh
   Reality with `8.83 mm` position error, `8.49°` yaw error, and `2.98 mm`
@@ -59,6 +61,10 @@ from a committed event recording and published with a versioned release.
   is likewise not independently identified by the current friction probes.
 - Deterministic capability distillation and hardware deployment reject T-bar
   policies until geometry-aware applicability has its own acceptance evidence.
+- A single retained seed is not a general precision claim. The proposed
+  held-out gate is at least 8 of 10 episodes with position ≤10 mm, yaw ≤5°,
+  and maximum registered-corner error ≤12 mm, while every episode must remain
+  inside the existing 30 mm/9° task contract.
 
 ## Release gates
 

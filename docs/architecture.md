@@ -189,6 +189,10 @@ into a target manifest and projected onto the tabletop at the configured goal
 pose. Event validation requires the target archetype, version, geometry hash,
 and every compound part to exactly match the manipulated object. Goal success
 then evaluates the object's planar position and wrapped yaw against that pose.
+The terminal Evaluator also transforms every public XY corner of both rigid
+parts through the observed and target poses. It reports maximum and RMS
+registered-corner error, so shape overlap is measured directly rather than
+inferred from the center point alone.
 
 The current random-start controller samples initial T-bar yaw in the validated
 `[-8°, -5°]` Franka reachability envelope. It first pushes the appropriate

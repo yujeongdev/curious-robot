@@ -49,7 +49,9 @@ the isolated laboratory workers' event bridge and add task/attempt history.
 - held-out position, yaw, and force validation
 - explicit task/object/protocol/posterior identities in every policy artifact
 - current MVP: position ≤30 mm and yaw ≤9° in one retained evaluator-seeded run
+- report maximum and RMS registered T-shape corner error in CLI and Agent Lab
 - bounded random-start yaw `[-8°, -5°]` with observed-yaw side push and adaptive face recovery
-- research target: position ≤30 mm and yaw ≤5° in at least 8 of 10 evaluator-seeded episodes
+- research target: ≥8/10 held-out episodes at ≤10 mm position, ≤5° yaw,
+  and ≤12 mm maximum registered corner error
 - expand the random-start envelope symmetrically after wrist-orientation-aware side contact is validated
 - unsupported T-bar hardware deployment remains fail-closed
