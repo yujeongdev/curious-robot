@@ -86,11 +86,6 @@ class YawAlignmentPolicy(FrozenModel):
     maximum_attempts: int = Field(default=0, ge=0, le=4)
     correction_travel_m: float = Field(default=0.0, ge=0.0, le=0.05)
     speed_m_s: float = Field(default=0.03, gt=0.0, le=0.10)
-    fine_maximum_attempts: int = Field(default=0, ge=0, le=3)
-    fine_precontact_offset_m: float = Field(default=0.0, ge=0.0, le=0.08)
-    fine_command_increment_m: float = Field(default=0.0, ge=0.0, le=0.001)
-    fine_correction_travel_m: float = Field(default=0.0, ge=0.0, le=0.01)
-    fine_speed_m_s: float = Field(default=0.005, gt=0.0, le=0.03)
     push_height_m: float = Field(default=0.012, ge=0.0, le=0.05)
     stop_tolerance_fraction: float = Field(default=0.5, gt=0.0, le=1.0)
     position_stop_tolerance_fraction: float = Field(default=0.5, gt=0.0, le=1.0)
@@ -103,14 +98,8 @@ class YawAlignmentPolicy(FrozenModel):
             or not self.counterclockwise_surface_id
             or self.maximum_attempts == 0
             or self.correction_travel_m == 0.0
-            or self.fine_maximum_attempts == 0
-            or self.fine_precontact_offset_m == 0.0
-            or self.fine_command_increment_m == 0.0
-            or self.fine_correction_travel_m == 0.0
         ):
-            raise ValueError(
-                "enabled yaw alignment requires surfaces and coarse/fine motion bounds"
-            )
+            raise ValueError("enabled yaw alignment requires surfaces, attempts, and travel")
         return self
 
 

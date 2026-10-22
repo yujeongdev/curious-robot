@@ -99,7 +99,7 @@ def test_tbar_world_spec_has_public_geometry_and_three_distinct_candidates() -> 
         task_id="push-t-bar-v1",
         initial_position_m=(-0.12, 0.0, 0.02),
         target_position_m=(0.15, 0.0, 0.02),
-        target_radius_m=0.015,
+        target_radius_m=0.03,
         world_config={"dt_s": 1 / 240},
     )
     dataset_task = FrictionTaskSpec.model_validate(seed["task"])

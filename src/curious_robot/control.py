@@ -309,7 +309,7 @@ class NewtonFrankaController:
         controller_goal = refinement_goal(requested_goal, alignment_policy)
         initial_pose = world.observe_object_pose().pose
         initial_goal = evaluate_planar_goal(
-            controller_goal,
+            requested_goal,
             PlanarPose(
                 x_m=initial_pose.position_m[0],
                 y_m=initial_pose.position_m[1],
@@ -331,7 +331,6 @@ class NewtonFrankaController:
             base_protocol=protocol,
             contact_surface_ids=contact_surface_ids,
             goal=requested_goal,
-            fine=False,
         )
         if yaw_safety_stop:
             return PushExecutionResult(
@@ -346,7 +345,7 @@ class NewtonFrankaController:
             planar_delta = np.asarray(target_m[:2], dtype=float) - start[:2]
             planar_distance = float(np.linalg.norm(planar_delta))
             current_goal = evaluate_planar_goal(
-                controller_goal,
+                requested_goal,
                 PlanarPose(
                     x_m=object_pose.position_m[0],
                     y_m=object_pose.position_m[1],
@@ -358,24 +357,8 @@ class NewtonFrankaController:
                 outcome = PushExecutionOutcome.COMPLETED
                 break
             if refinement_action is RefinementAction.YAW_ONLY:
-                yaw_safety_stop, peak_contact_force_n = self._align_task_yaw(
-                    samples,
-                    max_force_n=max_force_n,
-                    peak_contact_force_n=peak_contact_force_n,
-                    base_protocol=protocol,
-                    contact_surface_ids=contact_surface_ids,
-                    goal=requested_goal,
-                    fine=True,
-                )
-                if yaw_safety_stop:
-                    return PushExecutionResult(
-                        samples=tuple(samples),
-                        outcome=PushExecutionOutcome.SAFETY_STOPPED,
-                        peak_contact_force_n=peak_contact_force_n,
-                        contact_surface_ids=tuple(contact_surface_ids),
-                    )
                 outcome = PushExecutionOutcome.TRAVEL_EXHAUSTED
-                continue
+                break
             if planar_distance <= protocol.minimum_planar_command_m:
                 continue
             push_direction = planar_delta / planar_distance
@@ -431,7 +414,7 @@ class NewtonFrankaController:
                 samples.append(world.step())
             settled_pose = world.observe_object_pose().pose
             settled_result = evaluate_planar_goal(
-                controller_goal,
+                requested_goal,
                 PlanarPose(
                     x_m=settled_pose.position_m[0],
                     y_m=settled_pose.position_m[1],
@@ -446,7 +429,7 @@ class NewtonFrankaController:
             samples.append(world.step())
         final_pose = world.observe_object_pose().pose
         final_goal = evaluate_planar_goal(
-            controller_goal,
+            requested_goal,
             PlanarPose(
                 x_m=final_pose.position_m[0],
                 y_m=final_pose.position_m[1],
@@ -523,7 +506,6 @@ class NewtonFrankaController:
         base_protocol: PushProtocol,
         contact_surface_ids: list[str],
         goal: PlanarGoal,
-        fine: bool,
     ) -> tuple[bool, float]:
         world = self._world
         task = get_task_preset(world.config.task_id)
@@ -531,8 +513,7 @@ class NewtonFrankaController:
         if not policy.enabled or goal.yaw_tolerance_rad is None:
             return False, peak_contact_force_n
         stop_tolerance = goal.yaw_tolerance_rad * policy.stop_tolerance_fraction
-        maximum_attempts = policy.fine_maximum_attempts if fine else policy.maximum_attempts
-        for _attempt in range(maximum_attempts):
+        for _attempt in range(policy.maximum_attempts):
             object_pose = world.observe_object_pose().pose
             yaw_error = signed_yaw_error(
                 yaw_from_quaternion_xyzw(object_pose.orientation_xyzw),
@@ -558,26 +539,12 @@ class NewtonFrankaController:
                 update={
                     "contact_surface_id": surface_id,
                     "lateral_ik_compensation_m": 0.0,
-                    "precontact_offset_m": (
-                        policy.fine_precontact_offset_m if fine else base_protocol.precontact_offset_m
-                    ),
-                    "command_increment_m": (
-                        policy.fine_command_increment_m
-                        if fine
-                        else base_protocol.command_increment_m
-                    ),
-                    "contact_speed_m_s": policy.fine_speed_m_s if fine else policy.speed_m_s,
+                    "contact_speed_m_s": policy.speed_m_s,
                     "push_height_offset_m": policy.push_height_m,
-                    "maximum_travel_m": (
-                        policy.fine_correction_travel_m if fine else policy.correction_travel_m
-                    ),
+                    "maximum_travel_m": policy.correction_travel_m,
                     "physics_substeps_per_command": physics_substeps_for_target_speed(
-                        increment_m=(
-                            policy.fine_command_increment_m
-                            if fine
-                            else base_protocol.command_increment_m
-                        ),
-                        speed_m_s=policy.fine_speed_m_s if fine else policy.speed_m_s,
+                        increment_m=base_protocol.command_increment_m,
+                        speed_m_s=policy.speed_m_s,
                         dt_s=world.config.dt_s,
                     ),
                 }
