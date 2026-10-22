@@ -73,6 +73,7 @@ def plan_contact_start_xy(
     push_direction_xy: np.ndarray,
     precontact_offset_m: float,
     lateral_offset_m: float,
+    opposing_surface_max_dot: float,
 ) -> np.ndarray:
     """Resolve a bounded pre-contact point from a public object-local face."""
 
@@ -85,11 +86,23 @@ def plan_contact_start_xy(
     tangent_direction /= max(float(np.linalg.norm(tangent_direction)), 1.0e-12)
     push_direction = np.asarray(push_direction_xy, dtype=float)
     push_direction /= max(float(np.linalg.norm(push_direction)), 1.0e-12)
-    if float(np.dot(outward_normal, push_direction)) > -0.8:
+    if float(np.dot(outward_normal, push_direction)) > opposing_surface_max_dot:
         raise ValueError("selected contact surface does not oppose the commanded push direction")
     center_to_face_m = abs(float(np.dot(surface_center_offset[:2], outward_normal)))
     clearance_m = max(0.0, precontact_offset_m - center_to_face_m)
     return surface_center[:2] + outward_normal * clearance_m + tangent_direction * lateral_offset_m
+
+
+def terminal_push_outcome(
+    prior: PushExecutionOutcome,
+    *,
+    goal_success: bool,
+) -> PushExecutionOutcome:
+    """Make the final settled pose authoritative without hiding a safety stop."""
+
+    if prior is PushExecutionOutcome.SAFETY_STOPPED:
+        return prior
+    return PushExecutionOutcome.COMPLETED if goal_success else PushExecutionOutcome.TRAVEL_EXHAUSTED
 
 
 class NewtonFrankaController:
@@ -260,7 +273,7 @@ class NewtonFrankaController:
             if current_goal.success:
                 outcome = PushExecutionOutcome.COMPLETED
                 break
-            if planar_distance <= 1.0e-6:
+            if planar_distance <= protocol.minimum_planar_command_m:
                 break
             push_direction = planar_delta / planar_distance
             surface = self._translation_contact_surface(
@@ -304,7 +317,7 @@ class NewtonFrankaController:
             )
             if outcome is PushExecutionOutcome.SAFETY_STOPPED:
                 break
-            for _ in range(max(1, round(0.15 / world.config.dt_s))):
+            for _ in range(max(1, round(protocol.post_attempt_settle_s / world.config.dt_s))):
                 samples.append(world.step())
             settled_pose = world.observe_object_pose().pose
             settled_goal = get_task_preset(world.config.task_id).goal
@@ -320,7 +333,7 @@ class NewtonFrankaController:
                 outcome = PushExecutionOutcome.COMPLETED
                 break
             outcome = PushExecutionOutcome.TRAVEL_EXHAUSTED
-        for _ in range(round(0.35 / world.config.dt_s)):
+        for _ in range(round(protocol.terminal_settle_s / world.config.dt_s)):
             samples.append(world.step())
         final_pose = world.observe_object_pose().pose
         final_goal = evaluate_planar_goal(
@@ -331,8 +344,7 @@ class NewtonFrankaController:
                 yaw_rad=yaw_from_quaternion_xyzw(final_pose.orientation_xyzw),
             ),
         )
-        if outcome is PushExecutionOutcome.TRAVEL_EXHAUSTED and final_goal.success:
-            outcome = PushExecutionOutcome.COMPLETED
+        outcome = terminal_push_outcome(outcome, goal_success=final_goal.success)
         return PushExecutionResult(
             samples=tuple(samples),
             outcome=outcome,
@@ -381,7 +393,7 @@ class NewtonFrankaController:
         if not candidates:
             raise ValueError("no public contact surface admits the requested push operating point")
         alignment, selected = min(candidates, key=lambda item: (item[0], item[1].surface_id))
-        if alignment > -0.8:
+        if alignment > protocol.opposing_surface_max_dot:
             raise ValueError("no public contact surface opposes the requested push direction")
         return world.validate_contact_operating_point(
             surface_id=selected.surface_id,
@@ -486,6 +498,7 @@ class NewtonFrankaController:
             push_direction_xy=push_direction,
             precontact_offset_m=protocol.precontact_offset_m,
             lateral_offset_m=protocol.lateral_ik_compensation_m,
+            opposing_surface_max_dot=protocol.opposing_surface_max_dot,
         )
         self.command_cartesian_at_speed(
             (float(contact_start_xy[0]), float(contact_start_xy[1]), protocol.safe_height_m),

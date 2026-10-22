@@ -3,18 +3,20 @@
 > Adjacent documents: [Validation](../validation.md) · [Architecture](../architecture.md)
 
 2026-10-22. Scope: one evaluator-seeded NVIDIA Newton acceptance run for `push-t-bar-v1`.
-Basis: `artifacts/tbar-lab-final` generated locally and excluded from Git.
+Basis: the documented `lab-friction` command with seed `7`; generated artifacts
+remain local and excluded from Git.
 
 ## Result
 
 - Terminal success: `true`
-- Planar target error: `0.014483 m` against a `0.030 m` tolerance
-- Wrapped yaw error: `0.133697 rad` (`7.660°`) against a `9°` MVP tolerance
-- Selected candidate: `push_tbar_fast`
-- Selected contact plan: `0.080 m/s`, `0.012 m` push height,
-  `+0.0125 m` lateral contact offset
-- Peak predicted candidate force: `2.903 N`; observed deployment peak: `5.481 N`
-- Dynamic-friction posterior: `0.486538 ± 0.196771`
+- Planar target error: `0.011934 m` against a `0.030 m` tolerance
+- Wrapped yaw error: `0.154066 rad` (`8.827°`) against a `9°` MVP tolerance
+- Selected candidate: `push_tbar_nominal`
+- Selected contact plan: `0.040 m/s`, `0.012 m` push height,
+  `+0.008 m` lateral contact offset
+- Peak predicted candidate force: `2.988 N`; observed deployment peak: `5.408 N`
+- Dynamic-friction posterior: `0.482877 ± 0.195249`
+- Physical experiment protocol: `sha256:b1199368e0aae7e42abf19ef8168430155bd459e2fb328467739998d1c7a5445`
 
 The candidate was selected from three independently allocated Newton Twin
 worlds. All three used the same evidence-backed posterior and public geometry
@@ -22,12 +24,12 @@ hash, but different bounded contact plans.
 
 ## Authority and identity evidence
 
-- Reality experiment world: `2cabd430-5cb3-48ec-bb65-5c434d748e57`
+- Reality experiment world: `abd1c8ea-24fe-44a3-835b-a9aea8681f84`
 - Twin candidate worlds:
-  - `93d9d33f-8b4d-4a48-ae20-4512ab4d017b` (controller-rejected)
-  - `7f8b68f3-d9bf-49d8-9378-04be8a7d0556`
-  - `0d7e8192-556c-4e28-b9ef-208909225ae9` (selected)
-- Fresh Reality deployment world: `a23bc61d-b059-4403-a8fb-d10828a7e223`
+  - `ac3a0681-5187-496a-9053-355e97099b12` (controller-rejected)
+  - `a6383126-2765-4d8b-afdc-537289ea52ad` (selected)
+  - `d4680cdd-62e4-4449-8b92-8460ca70afd9`
+- Fresh Reality deployment world: `6c630751-9898-4ee0-bb96-cf397eb3d35b`
 - Public geometry: one T-bar rigid body, two non-overlapping box parts
 - Floor goal: the same two-part T-bar geometry projected at the target pose
 - Geometry hash: `sha256:a3e9d55450c4813a039f75718cea15322400df1b6d86d3f857ee9345cf953682`
@@ -35,6 +37,10 @@ hash, but different bounded contact plans.
 The experiment, every candidate, and deployment identifiers are distinct.
 The evaluator passed `position_within_tolerance`, `yaw_within_tolerance`,
 `controller_completed`, and `robot_safe`.
+
+The retained evaluator seed sampled initial yaw `-7.32°`. Success was checked
+again after the configured terminal settling interval; the controller cannot
+retain an earlier success if the T-bar later drifts outside the pose goal.
 
 The 9° tolerance is the explicit first-MVP contract for friction-only,
 observed-yaw T-bar pushing. The research acceptance target remains ≤5° across at

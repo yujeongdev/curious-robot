@@ -6,7 +6,11 @@ import pytest
 from pydantic import ValidationError
 
 from curious_robot.belief import initial_belief_for_object
-from curious_robot.control import NewtonFrankaController
+from curious_robot.control import (
+    NewtonFrankaController,
+    PushExecutionOutcome,
+    terminal_push_outcome,
+)
 from curious_robot.objects import CUBE_V1, T_BAR_V1, get_object_archetype
 from curious_robot.protocol import load_default_protocol
 from curious_robot.schemas import ParameterName, Pose
@@ -127,6 +131,20 @@ def test_t_bar_translation_recovery_selects_an_opposing_public_face() -> None:
     assert lateral.surface_id == "crossbar_right_y"
 
 
+@pytest.mark.parametrize(
+    ("prior", "goal_success", "expected"),
+    [
+        (PushExecutionOutcome.COMPLETED, False, PushExecutionOutcome.TRAVEL_EXHAUSTED),
+        (PushExecutionOutcome.TRAVEL_EXHAUSTED, True, PushExecutionOutcome.COMPLETED),
+        (PushExecutionOutcome.SAFETY_STOPPED, True, PushExecutionOutcome.SAFETY_STOPPED),
+    ],
+)
+def test_terminal_push_outcome_uses_final_settled_pose_unless_safety_stopped(
+    prior: PushExecutionOutcome,
+    goal_success: bool,
+    expected: PushExecutionOutcome,
+) -> None:
+    assert terminal_push_outcome(prior, goal_success=goal_success) is expected
 
 
 def test_task_preset_rejects_nonfinite_randomization_bounds() -> None:
