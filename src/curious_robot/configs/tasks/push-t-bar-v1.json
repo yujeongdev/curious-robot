@@ -1,5 +1,5 @@
 {
-  "preset_id": "push-t-bar-v1", "version": "1.0.0",
+  "preset_id": "push-t-bar-v1", "version": "1.1.0",
   "task_definition_id": "planar-pose-match", "task_definition_version": "1.0.0",
   "object_archetype_id": "t-bar", "object_archetype_version": "1.0.0",
   "initial_pose": {"x_m": -0.12, "y_m": 0.0, "yaw_rad": 0.0},

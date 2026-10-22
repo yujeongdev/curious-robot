@@ -29,6 +29,7 @@ def test_catalog_preserves_cube_and_adds_non_overlapping_compound_t_bar() -> Non
     assert get_object_archetype("cube", "1.0.0") is CUBE_V1
     assert get_task_preset("push-cube-v1") is PUSH_CUBE_V1
     assert get_task_preset("push-t-bar-v1") is PUSH_T_BAR_V1
+    assert PUSH_T_BAR_V1.version == "1.1.0"
     assert {part.part_id for part in T_BAR_V1.parts} == {"stem", "crossbar"}
     assert T_BAR_V1.geometry_volume_m3 == pytest.approx(0.000175)
     assert T_BAR_V1.parts[0].center_object_m[0] + T_BAR_V1.parts[0].half_extents_m[0] == pytest.approx(
@@ -159,6 +160,46 @@ def test_requested_push_goal_does_not_fall_back_to_catalog_target() -> None:
     assert goal.target == PlanarPose(x_m=0.31, y_m=-0.07, yaw_rad=0.4)
     assert goal.position_tolerance_m == pytest.approx(0.012)
     assert goal.yaw_tolerance_rad == pytest.approx(0.05)
+
+
+def test_push_already_inside_full_goal_does_not_apply_stricter_yaw_correction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    yaw_rad = math.radians(7.0)
+
+    class AlreadyAtGoalWorld:
+        config = SimpleNamespace(
+            include_robot=True,
+            maximum_tool_force_n=15.0,
+            target_radius_m=0.03,
+            target_yaw_rad=0.0,
+            target_yaw_tolerance_rad=math.radians(9.0),
+        )
+
+        @staticmethod
+        def observe_object_pose():  # noqa: ANN205
+            return SimpleNamespace(
+                pose=Pose(
+                    position_m=(0.15, 0.0, 0.02),
+                    orientation_xyzw=(0.0, 0.0, math.sin(yaw_rad / 2.0), math.cos(yaw_rad / 2.0)),
+                )
+            )
+
+    controller = NewtonFrankaController(AlreadyAtGoalWorld())  # type: ignore[arg-type]
+
+    def fail_if_yaw_alignment_runs(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise AssertionError("yaw alignment must not run after the full goal already passes")
+
+    monkeypatch.setattr(controller, "_align_task_yaw", fail_if_yaw_alignment_runs)
+    result = controller.execute_push(
+        (0.15, 0.0, 0.02),
+        max_force_n=5.0,
+        protocol=load_default_protocol().final_push,
+    )
+
+    assert result.outcome is PushExecutionOutcome.COMPLETED
+    assert result.samples == ()
+    assert result.contact_surface_ids == ()
 
 
 def test_task_preset_rejects_nonfinite_randomization_bounds() -> None:

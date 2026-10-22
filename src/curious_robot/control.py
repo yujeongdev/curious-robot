@@ -264,6 +264,21 @@ class NewtonFrankaController:
             target_yaw_rad=world.config.target_yaw_rad,
             yaw_tolerance_rad=world.config.target_yaw_tolerance_rad,
         )
+        initial_pose = world.observe_object_pose().pose
+        initial_goal = evaluate_planar_goal(
+            requested_goal,
+            PlanarPose(
+                x_m=initial_pose.position_m[0],
+                y_m=initial_pose.position_m[1],
+                yaw_rad=yaw_from_quaternion_xyzw(initial_pose.orientation_xyzw),
+            ),
+        )
+        if initial_goal.success:
+            return PushExecutionResult(
+                samples=(),
+                outcome=PushExecutionOutcome.COMPLETED,
+                peak_contact_force_n=0.0,
+            )
         self.release_compliance()
         self.set_gripper(0.0)
         yaw_safety_stop, peak_contact_force_n = self._align_task_yaw(

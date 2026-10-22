@@ -2,19 +2,20 @@
 
 > Adjacent documents: [Validation](../validation.md) · [Architecture](../architecture.md)
 
-2026-10-22. Scope: one evaluator-seeded NVIDIA Newton acceptance run for `push-t-bar-v1`.
+2026-10-22. Scope: one evaluator-seeded NVIDIA Newton acceptance run for
+`push-t-bar-v1@1.1.0`.
 Basis: the documented `lab-friction` command with seed `7`; generated artifacts
 remain local and excluded from Git.
 
 ## Result
 
 - Terminal success: `true`
-- Planar target error: `0.011387 m` against a `0.030 m` tolerance
-- Wrapped yaw error: `0.154066 rad` (`8.827°`) against a `9°` MVP tolerance
-- Selected candidate: `push_tbar_nominal`
-- Selected contact plan: `0.040 m/s`, `0.012 m` push height,
-  `+0.008 m` lateral contact offset
-- Peak predicted candidate force: `2.988 N`; observed deployment peak: `5.408 N`
+- Planar target error: `0.013871 m` against a `0.030 m` tolerance
+- Wrapped yaw error: `0.115756 rad` (`6.632°`) against a `9°` MVP tolerance
+- Selected candidate: `push_tbar_fast`
+- Selected contact plan: `0.080 m/s`, `0.012 m` push height,
+  `+0.0125 m` lateral contact offset
+- Peak predicted candidate force: `2.834 N`; observed deployment peak: `5.839 N`
 - Dynamic-friction posterior: `0.482877 ± 0.195249`
 - Physical experiment protocol: `sha256:b1199368e0aae7e42abf19ef8168430155bd459e2fb328467739998d1c7a5445`
 
@@ -24,12 +25,12 @@ hash, but different bounded contact plans.
 
 ## Authority and identity evidence
 
-- Reality experiment world: `12ce3edd-427e-43ee-a818-6c3fe8bcdb21`
+- Reality experiment world: `96229071-022e-42be-a49e-bb4cbdfff244`
 - Twin candidate worlds:
-  - `6e8db37e-9e64-4e5b-86d9-296455c1a270` (controller-rejected)
-  - `4a993732-d70d-4416-8d36-2b7418666ff5` (selected)
-  - `fce54e26-2251-4664-92c8-3c39439610c7`
-- Fresh Reality deployment world: `e13d932b-5f56-412f-a049-16bb70cd5a4a`
+  - `bef09d9c-4f18-4fb3-9131-4e95733b0792`
+  - `3a60eabc-6e48-4996-8d80-fc9f9976e272`
+  - `a2ae87d5-e1e3-46aa-8cf8-ccc2653e69bb` (selected)
+- Fresh Reality deployment world: `bc051552-8083-4fcb-b5c4-fc6685f0fbd6`
 - Public geometry: one T-bar rigid body, two non-overlapping box parts
 - Floor goal: the same two-part T-bar geometry projected at the target pose
 - Geometry hash: `sha256:a3e9d55450c4813a039f75718cea15322400df1b6d86d3f857ee9345cf953682`
