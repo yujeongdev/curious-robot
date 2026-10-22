@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,13 +34,17 @@ class PushProtocol(BaseModel):
     minimum_contact_coverage_fraction: float = Field(ge=0.0, le=1.0)
     minimum_valid_contact_samples: int = Field(gt=0)
     maximum_yaw_excursion_rad: float = Field(ge=0.0, le=3.141592653589793)
+    minimum_planar_command_m: float = Field(gt=0.0, le=0.01)
+    opposing_surface_max_dot: float = Field(ge=-1.0, lt=0.0)
+    post_attempt_settle_s: float = Field(ge=0.0, le=2.0)
+    terminal_settle_s: float = Field(ge=0.0, le=2.0)
     contact_surface_id: str = Field(min_length=1)
 
 
 class PhysicalExperimentProtocol(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: str
+    schema_version: Literal["1.2.0"]
     static_probe: PushProtocol
     dynamic_probe: PushProtocol
     final_push: PushProtocol

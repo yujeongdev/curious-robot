@@ -2,6 +2,24 @@
 
 All notable changes to Curious Robot are documented here.
 
+## [0.2.2] - 2026-10-22
+
+### Added
+
+- Randomize the T-bar's initial position and yaw within the validated `[-8°, -5°]` Franka reachability envelope.
+- Correct yaw with bounded crossbar pushes, then re-observe settled pose and recover translation from the best opposing public contact face.
+
+### Changed
+
+- Record the actual sequence of contact surfaces used by the controller so randomized-start decisions remain inspectable.
+- Persist settle timing, minimum planar travel, and opposing-face selection bounds in physical experiment protocol `1.2.0`.
+- Version the T-bar controller preset as `1.1.0` so older one-attempt policies cannot silently execute the new yaw-correction and retry contract.
+- Refresh Agent Lab media from a successful randomized-start Reality → Twin → Reality run.
+
+### Fixed
+
+- Make the final settled Newton pose authoritative so a T-bar that drifts out of tolerance cannot retain an earlier success result.
+
 ## [0.2.1] - 2026-10-22
 
 ### Fixed

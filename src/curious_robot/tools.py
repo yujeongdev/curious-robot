@@ -111,7 +111,10 @@ class RobotTools:
                     }
                 ),
                 "final_push": self.protocol.final_push.model_copy(
-                    update={"contact_surface_id": contact_surface_id}
+                    update={
+                        "contact_surface_id": contact_surface_id,
+                        **overrides.final_push.model_dump(exclude_none=True),
+                    }
                 ),
             }
         )
@@ -261,6 +264,7 @@ class RobotTools:
                 "sample_count": len(result.samples),
                 "outcome": result.outcome.value,
                 "peak_contact_force_n": result.peak_contact_force_n,
+                "contact_surface_ids": result.contact_surface_ids,
             },
         )
         return result
@@ -327,6 +331,7 @@ class RobotTools:
             push_direction_xy=np.asarray((1.0, 0.0)),
             precontact_offset_m=protocol.precontact_offset_m,
             lateral_offset_m=protocol.lateral_ik_compensation_m,
+            opposing_surface_max_dot=protocol.opposing_surface_max_dot,
         )
         tool = self.reality.observe_tool_pose().position_m
         self.release_force_control()

@@ -39,7 +39,7 @@ def test_runtime_reality_capability_hides_privileged_newton_state() -> None:
 
 def test_physical_experiment_protocol_is_versioned_and_not_episode_truth() -> None:
     protocol = load_default_protocol()
-    assert protocol.schema_version == "1.1.0"
+    assert protocol.schema_version == "1.2.0"
     assert protocol.static_probe.maximum_horizontal_force_n == 15.0
     assert protocol.final_push.maximum_attempts >= 1
     serialized = protocol.model_dump_json()
