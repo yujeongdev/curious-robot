@@ -29,6 +29,7 @@ hash, but different bounded contact plans.
   - `0d7e8192-556c-4e28-b9ef-208909225ae9` (selected)
 - Fresh Reality deployment world: `a23bc61d-b059-4403-a8fb-d10828a7e223`
 - Public geometry: one T-bar rigid body, two non-overlapping box parts
+- Floor goal: the same two-part T-bar geometry projected at the target pose
 - Geometry hash: `sha256:a3e9d55450c4813a039f75718cea15322400df1b6d86d3f857ee9345cf953682`
 
 The experiment, every candidate, and deployment identifiers are distinct.
