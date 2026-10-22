@@ -7,9 +7,12 @@ describe("run reducer", () => {
     const first = reduceRunEvents(demoEvents);
     const second = reduceRunEvents(demoEvents);
     expect(first.status).toBe("completed");
+    expect(first.taskId).toBe("push-cube-v1");
     expect(first.verification?.success).toBe(true);
     expect(first.worldFrames.truth?.frame.frame_id).toBe(8);
     expect(first.worldFrames.belief?.frame.frame_id).toBe(6);
+    expect(first.predictionEvents).toHaveLength(2);
+    expect(first.selectedActionId).toBe("push_straight_low");
     expect(first.activeScene).toBeNull();
     expect(first.lastSequence).toBe(demoEvents.length);
     expect(first.beliefs.effective_static_friction?.mean).toBeCloseTo(.55);

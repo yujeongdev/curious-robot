@@ -98,7 +98,7 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
         <div className="run-identity">
           <span className="eyebrow">Run</span>
           <strong className="mono">{isSyntheticPreview ? "SYNTHETIC PREVIEW" : runId.slice(0, 12)}</strong>
-          <span className="mono metadata">{isSyntheticPreview ? "illustrative data · no GPU execution" : "seed 7 · cuda:0"}</span>
+          <span className="mono metadata">{isSyntheticPreview ? "illustrative data · no GPU execution" : `${run.taskId ?? "task pending"} · Newton GPU`}</span>
         </div>
         <div className="mode-tabs" role="tablist" aria-label="Workspace mode">
           <button role="tab" aria-selected={mode === "live"} onClick={() => setMode("live")}><Radio /> {isSyntheticPreview ? "Preview" : "Live"}</button>

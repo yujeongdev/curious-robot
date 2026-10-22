@@ -1,12 +1,13 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, Cpu, FlaskConical, Play, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { createRun, type CreateRunInput } from "../api/events";
+import { createRun, loadTasks, type CreateRunInput } from "../api/events";
 import { Button } from "../components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 
 const preset: CreateRunInput = {
+  task_id: "push-t-bar-v1",
   seed: 7,
   device: "cuda:0",
   include_robot: true,
@@ -20,6 +21,7 @@ export function NewRunRoute() {
   const [config, setConfig] = useState(preset);
   const [customOpen, setCustomOpen] = useState(false);
   const autorunStarted = useRef(false);
+  const tasks = useQuery({ queryKey: ["task-catalog"], queryFn: loadTasks });
   const mutation = useMutation({
     mutationFn: createRun,
     onSuccess: ({ run_id }) => navigate({ to: "/runs/$runId", params: { runId: run_id } }),
@@ -29,8 +31,9 @@ export function NewRunRoute() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("autorun") !== "1" || autorunStarted.current) return;
     autorunStarted.current = true;
-    const autorunConfig = {
+    const autorunConfig: CreateRunInput = {
       ...preset,
+      task_id: params.get("task") ?? preset.task_id,
       seed: Number(params.get("seed") ?? preset.seed),
       device: params.get("device") ?? preset.device,
     };
@@ -49,7 +52,7 @@ export function NewRunRoute() {
         <div className="mission-copy">
           <span className="eyebrow">Discover physics · simulate · act · learn</span>
           <h1>Watch a robot turn contact into physical knowledge.</h1>
-          <p>Franka does not receive the cube’s mass or surface friction. It chooses a bounded experiment, measures the outcome, updates an independent Newton belief world, and acts on the evidence.</p>
+          <p>Franka does not receive the object’s mass or surface friction. It experiments in the Reality stand-in, patches evidence-backed parameters into independent Newton Twins, then deploys the selected controller back to fresh Reality.</p>
           <div className="mission-actions">
             <Button variant="primary" onClick={runDemo} disabled={mutation.isPending}>
               {mutation.isPending ? <RotateCw className="spin" /> : <Play />} {mutation.isPending ? "Preparing Newton…" : "Run discovery demo"}
@@ -63,12 +66,12 @@ export function NewRunRoute() {
               <Button variant="secondary" size="compact" onClick={previewFixture}>Open synthetic preview</Button>
             </div>
           )}
-          <p className="preset-line"><Cpu /> Preset <strong>discovery-demo-v1</strong> · seed 7 · cuda:0 · recording on</p>
+          <p className="preset-line"><Cpu /> Task <strong>{config.task_id}</strong> · seed {config.seed} · {config.device} · recording on</p>
         </div>
-        <div className="preview-scene" aria-label="Preview of Franka robot and unknown cube">
+        <div className="preview-scene" aria-label={`Preview of Franka robot and ${config.task_id === "push-t-bar-v1" ? "unknown T-bar" : "unknown cube"}`}>
           <div className="preview-grid" />
           <div className="preview-robot"><i /><i /><i /><i /></div>
-          <div className="preview-cube">?</div>
+          <div className={`preview-cube ${config.task_id === "push-t-bar-v1" ? "preview-tbar" : ""}`}>?</div>
           <div className="preview-target"><span>TARGET</span></div>
           <div className="preview-label">SURFACE <strong>UNKNOWN</strong></div>
         </div>
@@ -84,6 +87,10 @@ export function NewRunRoute() {
         <CollapsibleTrigger className="config-trigger"><span><span className="eyebrow">Research controls</span><strong>Configure run</strong></span><ChevronDown /></CollapsibleTrigger>
         <CollapsibleContent>
           <div className="config-grid">
+            <label>Task<select value={config.task_id} onChange={(event) => setConfig({ ...config, task_id: event.target.value })}>{(tasks.data ?? [
+              { task_id: "push-t-bar-v1", object_label: "Known compound T-bar", requires_yaw: true },
+              { task_id: "push-cube-v1", object_label: "Known 50 mm cube", requires_yaw: false },
+            ]).map((task) => <option key={task.task_id} value={task.task_id}>{task.object_label} · {task.requires_yaw ? "pose" : "position"}</option>)}</select></label>
             <label>Random seed<input type="number" value={config.seed} onChange={(event) => setConfig({ ...config, seed: Number(event.target.value) })} /></label>
             <label>Device<select value={config.device} onChange={(event) => setConfig({ ...config, device: event.target.value })}><option>cuda:0</option><option>cpu</option></select></label>
             <label className="check-row"><input type="checkbox" checked={config.include_robot} onChange={(event) => setConfig({ ...config, include_robot: event.target.checked })} /> Full Franka articulation</label>

@@ -65,7 +65,7 @@ function complete(stage: DetailedStage, iteration = 0, outcome = "completed") {
 }
 
 export const demoEvents: AgentEvent[] = [
-  makeEvent("run.started", null, { state: "preparing", preset: "synthetic-ui-preview", data_provenance: "synthetic_illustration", reason: demoPreviewNotice }, { sim: 0 }),
+  makeEvent("run.started", null, { state: "preparing", task_id: "push-cube-v1", preset: "synthetic-ui-preview", data_provenance: "synthetic_illustration", reason: demoPreviewNotice }, { sim: 0 }),
   enter("observe"),
   makeEvent("rationale.published", "observe", { summary: "Geometry is known. Physical pusher experiments can constrain effective cube–surface friction; mass remains a prior because bilateral grasp and lift are unvalidated.", evidence_ids: [], considered_option_ids: [], selected_option_id: "inspect-scene" }),
   frame(1, "observe", 0.28),

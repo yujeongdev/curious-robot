@@ -35,6 +35,21 @@ export const bodyTransformSchema = z.object({
   orientation_xyzw: quaternionSchema,
 });
 
+export const visualRigidBoxPartSchema = z.object({
+  part_id: z.string(),
+  center_object_m: vector3Schema,
+  half_extents_m: vector3Schema.refine((value) => value.every((item) => Number.isFinite(item) && item > 0), "half extents must be finite and positive"),
+  orientation_object_xyzw: quaternionSchema.default([0, 0, 0, 1]).refine((value) => Math.abs(Math.hypot(...value) - 1) <= 1e-6, "orientation must be a unit quaternion"),
+});
+
+export const objectGeometryVisualSchema = z.object({
+  archetype_id: z.string(),
+  archetype_version: z.string(),
+  geometry_hash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  body_id: z.string(),
+  parts: z.array(visualRigidBoxPartSchema).min(1),
+});
+
 export const contactSchema = z.object({
   position_m: vector3Schema,
   normal_world: vector3Schema,
@@ -62,14 +77,24 @@ export const visualFramePayloadSchema = z.object({
   action_id: z.string().nullable().optional(),
   belief_revision: z.number().int().nullable().optional(),
   body_manifest_id: z.string(),
+  object_geometry: objectGeometryVisualSchema.nullable().optional(),
   tool_tip_radius_m: z.number().positive().nullable().optional(),
   sim_time_s: z.number(),
   presentation_time_s: z.number(),
   bodies: z.array(bodyTransformSchema),
   contacts: z.array(contactSchema).default([]),
   vectors: z.array(vectorVisualSchema).default([]),
-  target_region: z.object({ center_m: vector3Schema, radius_m: z.number().positive() }).optional(),
+  target_region: z.object({
+    center_m: vector3Schema,
+    radius_m: z.number().positive(),
+    yaw_rad: z.number().default(0),
+    yaw_tolerance_rad: z.number().positive().nullable().optional(),
+  }).optional(),
   camera_hint: z.object({ preset: z.string(), target_m: vector3Schema.nullable().optional() }).nullable().optional(),
+}).superRefine((frame, context) => {
+  if (frame.object_geometry && !frame.bodies.some((body) => body.body_id === frame.object_geometry?.body_id)) {
+    context.addIssue({ code: "custom", message: "object geometry body must exist in frame", path: ["object_geometry", "body_id"] });
+  }
 });
 
 export const agentEventSchema = z.object({
