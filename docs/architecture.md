@@ -27,16 +27,17 @@ private evaluator truth ──> Newton/MuJoCo Warp reality
 - MuJoCo Warp owns Franka articulation, gravity, rigid body integration, and
   native contact.
 - Native surface `mu` represents static breakaway. A velocity-hysteretic
-  correction applied through `State.body_f` reduces sliding resistance to the
-  independently randomized dynamic coefficient.
+  planar-force correction applied through `State.body_f` reduces translational
+  sliding resistance to the independently randomized dynamic coefficient. It
+  does not calibrate rotational friction or torsional contact for the T-bar;
+  yaw residuals remain explicit model mismatch.
 - Joint commands and high-level tool targets are distinct from measured force.
   The tool force producer is Newton `SensorContact` over MuJoCo Warp's native
-  `CONTACT_F` observable for robot-tool ↔ cube contact pairs.
-- The validated experiment path uses a visible spherical tool tip rigidly
-  mounted at the Franka TCP. Its emitted radius and pose are shared with the
-  Agent Lab mirror, and it is the only robot shape authorized to contact the
-  cube. The controller moves Franka joints; no public action applies a force
-  directly to the cube.
+  `CONTACT_F` observable for robot end-effector ↔ object contact pairs.
+- The validated experiment path uses the Franka hand/finger collision geometry
+  plus a visible spherical tool tip rigidly mounted at the TCP. Their Newton
+  transforms are shared with the Agent Lab mirror. The controller moves Franka
+  joints; no public action applies a force directly to the object.
 - Bilateral finger grasp/lift has not passed its physical acceptance gate.
   Pick-and-place and weighing are therefore reported unavailable instead of
   using a weld, teleport, or cube-force surrogate.
@@ -124,7 +125,6 @@ The official interfaces underlying the seam are
 and ROS 2 Jazzy
 [`franka_hardware`](https://frankarobotics.github.io/docs/doc/franka_ros2_jazzy/franka_hardware/doc/index.html).
 
-The complete ownership and value-flow contract is
 The public boundary and executed limitations are summarized in
 [`validation.md`](validation.md).
 
@@ -177,6 +177,13 @@ The WorldSpec and PolicyArtifact both carry the exact versioned physical
 experiment protocol snapshot and SHA-256; Twin validation and fresh Reality
 deployment reject a mismatched snapshot.
 
+The same pipeline accepts `push-cube-v1` and `push-t-bar-v1`. Task and object
+definitions are separate allowlisted JSON contracts. The T-bar is one Newton
+body with two collision parts; its public geometry hash is bound through the
+dataset, WorldSpec, policy, deployment, and evaluator. Three independent Twin
+worlds evaluate typed lateral contact plans before one is admitted to fresh
+Reality. T-bar capability distillation remains fail-closed.
+
 Successful terminal runs can be distilled into an agent-visible
 `CapabilityArtifact`. The trusted coordinator declassifies only the evaluator's
 success decision into a public `CapabilityAttestation`; the evaluator payload
@@ -207,5 +214,5 @@ workers. It remains available for the Agent Lab demo and must not be cited as
 process-isolated. This distinction keeps the completed friction slice from
 overstating the older runner's authority boundary.
 
-The full contract and migration order are documented in
-The next task/object generalization is tracked in [`roadmap.md`](roadmap.md).
+Remaining identification and hardware extensions are tracked in
+[`roadmap.md`](roadmap.md).

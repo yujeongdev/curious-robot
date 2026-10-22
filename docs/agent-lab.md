@@ -19,9 +19,9 @@ experiment, belief update, and manipulation decision.
 The desktop layout reserves the primary region for two synchronized Newton
 viewports and the secondary region for the evidence feed:
 
-- **Simulated Reality** shows only robot experiments and fresh deployment. It
+- **Reality Stand-in · Hidden Physics** shows only robot experiments and fresh deployment. It
   owns the hidden episode dynamics but exposes only public observations.
-- **Learned Newton Twin** shows only posterior calibration and counterfactual
+- **Learned Newton Twin · Estimated Physics** shows only posterior calibration and counterfactual
   action rollouts. Its parameters come from evidence-backed belief updates.
 
 Both panes retain their last committed frame on one causal event cursor. Their
@@ -29,16 +29,17 @@ local simulation times are independent: while one world advances, the other is
 explicitly marked `HELD`. The UI never copies a Reality transform into the Twin
 to make them appear synchronized.
 
-A four-step flow rail makes the world transition explicit:
+A five-step causal bridge makes the authority transition explicit:
 
 1. Reality experiment
-2. Posterior update and Twin rebuild
-3. Twin validation
-4. Fresh Reality deployment
+2. Observation boundary
+3. Posterior update and Twin rebuild
+4. Two or three independent Twin candidate validations
+5. Fresh Reality deployment
 
 Evidence cards are independently labeled `REALITY`, `TWIN`, `INFERENCE`, or
 `SYSTEM`. A synchronized telemetry dock keeps measured force, posterior
-parameters, and predicted-versus-observed outcomes in separate regions. Mobile
+parameters, candidate worlds, and predicted-versus-observed outcomes in separate regions. Mobile
 views retain both states and use a 42svh world selector to show one at a time.
 
 The stage rail groups the execution into six phases:
