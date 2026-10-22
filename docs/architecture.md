@@ -190,6 +190,12 @@ pose. Event validation requires the target archetype, version, geometry hash,
 and every compound part to exactly match the manipulated object. Goal success
 then evaluates the object's planar position and wrapped yaw against that pose.
 
+The current random-start controller samples initial T-bar yaw in the validated
+`[-8°, -5°]` Franka reachability envelope. It first pushes the appropriate
+crossbar side using observed yaw, then translates from the best opposing public
+face; after settling, it re-observes the complete pose and may recover. This is
+a bounded, one-sided MVP envelope, not a claim of arbitrary-orientation control.
+
 Successful terminal runs can be distilled into an agent-visible
 `CapabilityArtifact`. The trusted coordinator declassifies only the evaluator's
 success decision into a public `CapabilityAttestation`; the evaluator payload

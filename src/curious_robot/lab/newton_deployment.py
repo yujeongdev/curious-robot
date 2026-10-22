@@ -44,6 +44,7 @@ def execute_deployment(
     identity: RuntimeIdentity,
     hidden_parameters,  # noqa: ANN001
     hidden_initial_position: tuple[float, float, float],
+    hidden_initial_yaw_rad: float,
     experiment_world_id: str | None,
     capability_sessions: dict[str, dict],
     device: str,
@@ -194,6 +195,7 @@ def execute_deployment(
             capability_payload=capability_payload,
             hidden_parameters=hidden_parameters,
             hidden_initial_position=hidden_initial_position,
+            hidden_initial_yaw_rad=hidden_initial_yaw_rad,
             protocol=protocol,
             device=device,
             seed=seed,
@@ -311,6 +313,7 @@ def _world_and_tools(
     capability_payload,  # noqa: ANN001
     hidden_parameters,  # noqa: ANN001
     hidden_initial_position: tuple[float, float, float],
+    hidden_initial_yaw_rad: float,
     protocol: PhysicalExperimentProtocol,
     device: str,
     seed: int,
@@ -327,7 +330,7 @@ def _world_and_tools(
         task_id=task_id,
         device=device,
         initial_position_m=hidden_initial_position,
-        initial_yaw_rad=get_task_preset(task_id).initial_pose.yaw_rad,
+        initial_yaw_rad=hidden_initial_yaw_rad,
         target_position_m=target_position_m,
         target_radius_m=target_radius_m,
         target_yaw_rad=target_yaw_rad,

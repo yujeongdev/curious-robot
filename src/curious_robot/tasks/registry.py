@@ -61,6 +61,16 @@ def get_task_preset(preset_id: str) -> TaskPreset:
     surfaces = {surface.surface_id: surface for surface in archetype.contact_surfaces}
     if preset.experiment_contact_surface_id not in surfaces:
         raise ValueError("task experiment contact surface is absent from its object archetype")
+    if preset.yaw_alignment.enabled:
+        for surface_id in (
+            preset.yaw_alignment.clockwise_surface_id,
+            preset.yaw_alignment.counterclockwise_surface_id,
+        ):
+            surface = surfaces.get(surface_id or "")
+            if surface is None:
+                raise ValueError("yaw-alignment surface is absent from its object archetype")
+            if preset.yaw_alignment.push_height_m > surface.half_size_m[1]:
+                raise ValueError("yaw-alignment push height lies outside its contact face")
     for action in preset.action_candidates:
         if action.kind != "push":
             continue

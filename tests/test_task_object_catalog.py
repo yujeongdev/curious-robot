@@ -1,11 +1,15 @@
 import math
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 
 from curious_robot.belief import initial_belief_for_object
+from curious_robot.control import NewtonFrankaController
 from curious_robot.objects import CUBE_V1, T_BAR_V1, get_object_archetype
-from curious_robot.schemas import ParameterName
+from curious_robot.protocol import load_default_protocol
+from curious_robot.schemas import ParameterName, Pose
 from curious_robot.tasks import (
     PUSH_CUBE_V1,
     PUSH_T_BAR_V1,
@@ -26,7 +30,12 @@ def test_catalog_preserves_cube_and_adds_non_overlapping_compound_t_bar() -> Non
         T_BAR_V1.parts[1].center_object_m[0] - T_BAR_V1.parts[1].half_extents_m[0]
     )
     assert PUSH_T_BAR_V1.experiment_protocol_overrides.dynamic_probe.maximum_travel_m == 0.07
+    assert PUSH_T_BAR_V1.experiment_protocol_overrides.final_push.maximum_attempts == 3
+    assert PUSH_T_BAR_V1.initial_yaw_jitter_rad == pytest.approx(
+        (-math.radians(8.0), -math.radians(5.0))
+    )
     assert PUSH_CUBE_V1.experiment_protocol_overrides.dynamic_probe.maximum_travel_m is None
+    assert PUSH_T_BAR_V1.yaw_alignment.adaptive_translation_surface is True
 
 
 def test_public_archetypes_reject_hidden_physical_parameters() -> None:
@@ -83,6 +92,43 @@ def test_t_bar_contact_operating_point_is_bounded_by_stem_face() -> None:
         )
 
 
+def test_t_bar_translation_recovery_selects_an_opposing_public_face() -> None:
+    task_config = SimpleNamespace(task_id="push-t-bar-v1")
+
+    class FakeWorld:
+        config = task_config
+
+        @staticmethod
+        def validate_contact_operating_point(
+            *, surface_id: str, lateral_offset_m: float, push_height_object_m: float
+        ):
+            return T_BAR_V1.validate_contact_operating_point(
+                surface_id=surface_id,
+                lateral_offset_m=lateral_offset_m,
+                push_height_object_m=push_height_object_m,
+            )
+
+    controller = NewtonFrankaController(FakeWorld())  # type: ignore[arg-type]
+    protocol = load_default_protocol().final_push.model_copy(
+        update={"contact_surface_id": "stem_rear_x", "lateral_ik_compensation_m": 0.008}
+    )
+    pose = Pose(position_m=(0.0, 0.0, 0.02))
+    forward = controller._translation_contact_surface(
+        pose,
+        push_direction=np.asarray((1.0, 0.0)),
+        protocol=protocol,
+    )
+    lateral = controller._translation_contact_surface(
+        pose,
+        push_direction=np.asarray((0.0, 1.0)),
+        protocol=protocol,
+    )
+    assert forward.surface_id == "stem_rear_x"
+    assert lateral.surface_id == "crossbar_right_y"
+
+
+
+
 def test_task_preset_rejects_nonfinite_randomization_bounds() -> None:
     payload = PUSH_T_BAR_V1.model_dump()
     payload["initial_position_jitter_m"] = (
@@ -90,6 +136,13 @@ def test_task_preset_rejects_nonfinite_randomization_bounds() -> None:
         *payload["initial_position_jitter_m"][1:],
     )
     with pytest.raises(ValidationError, match="must be finite"):
+        type(PUSH_T_BAR_V1).model_validate(payload)
+
+
+def test_task_preset_rejects_unsafe_initial_yaw_randomization() -> None:
+    payload = PUSH_T_BAR_V1.model_dump()
+    payload["initial_yaw_jitter_rad"] = (-math.pi / 2.0, math.pi / 2.0)
+    with pytest.raises(ValidationError, match="initial-yaw jitter"):
         type(PUSH_T_BAR_V1).model_validate(payload)
 
 

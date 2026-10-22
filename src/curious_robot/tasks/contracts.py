@@ -68,11 +68,38 @@ class PushProtocolOverrides(FrozenModel):
     """Task-specific physical-probe bounds layered over the global protocol."""
 
     maximum_travel_m: float | None = Field(default=None, gt=0.0)
+    maximum_attempts: int | None = Field(default=None, gt=0, le=3)
 
 
 class ExperimentProtocolOverrides(FrozenModel):
     static_probe: PushProtocolOverrides = PushProtocolOverrides()
     dynamic_probe: PushProtocolOverrides = PushProtocolOverrides()
+    final_push: PushProtocolOverrides = PushProtocolOverrides()
+
+
+class YawAlignmentPolicy(FrozenModel):
+    """Bounded pre-translation side-push policy for planar pose tasks."""
+
+    enabled: bool = False
+    clockwise_surface_id: str | None = None
+    counterclockwise_surface_id: str | None = None
+    maximum_attempts: int = Field(default=0, ge=0, le=4)
+    correction_travel_m: float = Field(default=0.0, ge=0.0, le=0.05)
+    speed_m_s: float = Field(default=0.03, gt=0.0, le=0.10)
+    push_height_m: float = Field(default=0.012, ge=0.0, le=0.05)
+    stop_tolerance_fraction: float = Field(default=0.5, gt=0.0, le=1.0)
+    adaptive_translation_surface: bool = False
+
+    @model_validator(mode="after")
+    def validate_enabled_policy(self) -> YawAlignmentPolicy:
+        if self.enabled and (
+            not self.clockwise_surface_id
+            or not self.counterclockwise_surface_id
+            or self.maximum_attempts == 0
+            or self.correction_travel_m == 0.0
+        ):
+            raise ValueError("enabled yaw alignment requires surfaces, attempts, and travel")
+        return self
 
 
 class TaskPreset(FrozenModel):
@@ -86,9 +113,11 @@ class TaskPreset(FrozenModel):
     object_archetype_version: str
     initial_pose: PlanarPose
     initial_position_jitter_m: tuple[float, float, float, float]
+    initial_yaw_jitter_rad: tuple[float, float] = (0.0, 0.0)
     default_mass_range_kg: tuple[float, float]
     experiment_contact_surface_id: str = Field(min_length=1)
     experiment_protocol_overrides: ExperimentProtocolOverrides = ExperimentProtocolOverrides()
+    yaw_alignment: YawAlignmentPolicy = YawAlignmentPolicy()
     goal: PlanarGoal
     action_candidates: tuple[ActionTemplate, ...] = Field(min_length=1, max_length=8)
 
@@ -100,11 +129,18 @@ class TaskPreset(FrozenModel):
         x_low, x_high, y_low, y_high = self.initial_position_jitter_m
         if not all(
             math.isfinite(value)
-            for value in (*self.initial_position_jitter_m, *self.default_mass_range_kg)
+            for value in (
+                *self.initial_position_jitter_m,
+                *self.initial_yaw_jitter_rad,
+                *self.default_mass_range_kg,
+            )
         ):
             raise ValueError("task randomization bounds must be finite")
         if x_low > x_high or y_low > y_high:
             raise ValueError("initial-position jitter bounds must be ordered")
+        yaw_low, yaw_high = self.initial_yaw_jitter_rad
+        if yaw_low > yaw_high or yaw_low < -math.pi / 4.0 or yaw_high > math.pi / 4.0:
+            raise ValueError("initial-yaw jitter must be ordered within [-pi/4, pi/4]")
         if (
             self.default_mass_range_kg[0] < 0.02
             or self.default_mass_range_kg[0] > self.default_mass_range_kg[1]
@@ -154,3 +190,9 @@ def wrapped_yaw_error(observed_yaw_rad: float, target_yaw_rad: float) -> float:
     """Return the shortest absolute angular distance in ``[0, π]``."""
 
     return abs((observed_yaw_rad - target_yaw_rad + math.pi) % (2.0 * math.pi) - math.pi)
+
+
+def signed_yaw_error(observed_yaw_rad: float, target_yaw_rad: float) -> float:
+    """Return the shortest signed correction from observed yaw to target yaw."""
+
+    return (target_yaw_rad - observed_yaw_rad + math.pi) % (2.0 * math.pi) - math.pi

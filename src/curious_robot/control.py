@@ -11,14 +11,22 @@ import newton
 import numpy as np
 import warp as wp
 
-from .objects import ContactSurface
-from .schemas import MotionSample
+from .objects import ContactSurface, get_object_archetype
+from .schemas import MotionSample, Pose
+from .tasks import (
+    PlanarPose,
+    evaluate_planar_goal,
+    get_task_preset,
+    signed_yaw_error,
+    yaw_from_quaternion_xyzw,
+)
 from .trajectory import (
     CartesianMotionResult,
     CartesianTrackingError,
     IKUnreachableError,
     minimum_jerk_blend,
     minimum_jerk_duration_s,
+    physics_substeps_for_target_speed,
 )
 
 if TYPE_CHECKING:
@@ -37,6 +45,7 @@ class PushExecutionResult:
     samples: tuple[MotionSample, ...]
     outcome: PushExecutionOutcome
     peak_contact_force_n: float
+    contact_surface_ids: tuple[str, ...] = ()
 
     @property
     def safety_tripped(self) -> bool:
@@ -216,44 +225,72 @@ class NewtonFrankaController:
         if not math.isfinite(max_force_n) or not 0.0 < max_force_n <= world.config.maximum_tool_force_n:
             raise ValueError(f"max force must be in (0, {world.config.maximum_tool_force_n:g}] N")
         samples: list[MotionSample] = []
+        contact_surface_ids: list[str] = []
         peak_contact_force_n = 0.0
         outcome = PushExecutionOutcome.TRAVEL_EXHAUSTED
         self.release_compliance()
         self.set_gripper(0.0)
+        yaw_safety_stop, peak_contact_force_n = self._align_task_yaw(
+            samples,
+            max_force_n=max_force_n,
+            peak_contact_force_n=peak_contact_force_n,
+            base_protocol=protocol,
+            contact_surface_ids=contact_surface_ids,
+        )
+        if yaw_safety_stop:
+            return PushExecutionResult(
+                samples=tuple(samples),
+                outcome=PushExecutionOutcome.SAFETY_STOPPED,
+                peak_contact_force_n=peak_contact_force_n,
+                contact_surface_ids=tuple(contact_surface_ids),
+            )
         for _attempt in range(protocol.maximum_attempts):
             object_pose = world.observe_object_pose().pose
             start = np.asarray(object_pose.position_m, dtype=float)
             planar_delta = np.asarray(target_m[:2], dtype=float) - start[:2]
             planar_distance = float(np.linalg.norm(planar_delta))
-            if planar_distance <= world.config.target_radius_m:
+            current_goal = evaluate_planar_goal(
+                get_task_preset(world.config.task_id).goal,
+                PlanarPose(
+                    x_m=object_pose.position_m[0],
+                    y_m=object_pose.position_m[1],
+                    yaw_rad=yaw_from_quaternion_xyzw(object_pose.orientation_xyzw),
+                ),
+            )
+            if current_goal.success:
                 outcome = PushExecutionOutcome.COMPLETED
                 break
+            if planar_distance <= 1.0e-6:
+                break
             push_direction = planar_delta / planar_distance
-            surface = world.validate_contact_operating_point(
-                surface_id=protocol.contact_surface_id,
-                lateral_offset_m=protocol.lateral_ik_compensation_m,
-                push_height_object_m=protocol.push_height_offset_m,
+            surface = self._translation_contact_surface(
+                object_pose,
+                push_direction=push_direction,
+                protocol=protocol,
             )
-            tool = world.observe_tool_pose().position_m
-            self.command_cartesian_at_speed(
-                (tool[0], tool[1], protocol.safe_height_m), protocol.approach_speed_m_s
+            contact_surface_ids.append(surface.surface_id)
+            alignment_policy = get_task_preset(world.config.task_id).yaw_alignment
+            translation_protocol = (
+                protocol.model_copy(
+                    update={
+                        "lateral_ik_compensation_m": 0.0,
+                        "contact_speed_m_s": alignment_policy.speed_m_s,
+                        "push_height_offset_m": alignment_policy.push_height_m,
+                        "physics_substeps_per_command": physics_substeps_for_target_speed(
+                            increment_m=protocol.command_increment_m,
+                            speed_m_s=alignment_policy.speed_m_s,
+                            dt_s=world.config.dt_s,
+                        ),
+                    }
+                )
+                if surface.surface_id != protocol.contact_surface_id
+                else protocol
             )
-            contact_start_xy = plan_contact_start_xy(
-                object_position_m=object_pose.position_m,
-                object_orientation_xyzw=object_pose.orientation_xyzw,
+            contact_start_xy, push_z = self._approach_contact(
+                object_pose,
                 surface=surface,
-                push_direction_xy=push_direction,
-                precontact_offset_m=protocol.precontact_offset_m,
-                lateral_offset_m=protocol.lateral_ik_compensation_m,
-            )
-            self.command_cartesian_at_speed(
-                (float(contact_start_xy[0]), float(contact_start_xy[1]), protocol.safe_height_m),
-                protocol.approach_speed_m_s,
-            )
-            push_z = float(start[2] + protocol.push_height_offset_m)
-            self.command_cartesian_at_speed(
-                (float(contact_start_xy[0]), float(contact_start_xy[1]), push_z),
-                protocol.contact_speed_m_s,
+                push_direction=push_direction,
+                protocol=translation_protocol,
             )
             outcome, peak_contact_force_n = self._execute_contact_ramp(
                 samples,
@@ -263,24 +300,203 @@ class NewtonFrankaController:
                 target_xy=np.asarray(target_m[:2], dtype=float),
                 max_force_n=max_force_n,
                 peak_contact_force_n=peak_contact_force_n,
-                protocol=protocol,
+                protocol=translation_protocol,
             )
-            if outcome is not PushExecutionOutcome.TRAVEL_EXHAUSTED:
+            if outcome is PushExecutionOutcome.SAFETY_STOPPED:
                 break
+            for _ in range(max(1, round(0.15 / world.config.dt_s))):
+                samples.append(world.step())
+            settled_pose = world.observe_object_pose().pose
+            settled_goal = get_task_preset(world.config.task_id).goal
+            settled_result = evaluate_planar_goal(
+                settled_goal,
+                PlanarPose(
+                    x_m=settled_pose.position_m[0],
+                    y_m=settled_pose.position_m[1],
+                    yaw_rad=yaw_from_quaternion_xyzw(settled_pose.orientation_xyzw),
+                ),
+            )
+            if settled_result.success:
+                outcome = PushExecutionOutcome.COMPLETED
+                break
+            outcome = PushExecutionOutcome.TRAVEL_EXHAUSTED
         for _ in range(round(0.35 / world.config.dt_s)):
             samples.append(world.step())
-        final_xy = np.asarray(world.observe_object_pose().pose.position_m[:2], dtype=float)
-        if (
-            outcome is PushExecutionOutcome.TRAVEL_EXHAUSTED
-            and np.linalg.norm(final_xy - np.asarray(target_m[:2], dtype=float))
-            <= world.config.target_radius_m
-        ):
+        final_pose = world.observe_object_pose().pose
+        final_goal = evaluate_planar_goal(
+            get_task_preset(world.config.task_id).goal,
+            PlanarPose(
+                x_m=final_pose.position_m[0],
+                y_m=final_pose.position_m[1],
+                yaw_rad=yaw_from_quaternion_xyzw(final_pose.orientation_xyzw),
+            ),
+        )
+        if outcome is PushExecutionOutcome.TRAVEL_EXHAUSTED and final_goal.success:
             outcome = PushExecutionOutcome.COMPLETED
         return PushExecutionResult(
             samples=tuple(samples),
             outcome=outcome,
             peak_contact_force_n=peak_contact_force_n,
+            contact_surface_ids=tuple(contact_surface_ids),
         )
+
+    def _translation_contact_surface(
+        self,
+        object_pose: Pose,
+        *,
+        push_direction: np.ndarray,
+        protocol: PushProtocol,
+    ) -> ContactSurface:
+        world = self._world
+        task = get_task_preset(world.config.task_id)
+        if not task.yaw_alignment.adaptive_translation_surface:
+            return world.validate_contact_operating_point(
+                surface_id=protocol.contact_surface_id,
+                lateral_offset_m=protocol.lateral_ik_compensation_m,
+                push_height_object_m=protocol.push_height_offset_m,
+            )
+        archetype = get_object_archetype(
+            task.object_archetype_id,
+            task.object_archetype_version,
+        )
+        candidates: list[tuple[float, ContactSurface]] = []
+        for surface in archetype.contact_surfaces:
+            lateral_offset = (
+                protocol.lateral_ik_compensation_m
+                if surface.surface_id == protocol.contact_surface_id
+                else 0.0
+            )
+            if (
+                abs(lateral_offset) > surface.half_size_m[0]
+                or abs(protocol.push_height_offset_m - surface.center_object_m[2])
+                > surface.half_size_m[1]
+            ):
+                continue
+            outward = _rotate_vector(
+                object_pose.orientation_xyzw,
+                surface.outward_normal_object,
+            )[:2]
+            outward /= max(float(np.linalg.norm(outward)), 1.0e-12)
+            candidates.append((float(np.dot(outward, push_direction)), surface))
+        if not candidates:
+            raise ValueError("no public contact surface admits the requested push operating point")
+        alignment, selected = min(candidates, key=lambda item: (item[0], item[1].surface_id))
+        if alignment > -0.8:
+            raise ValueError("no public contact surface opposes the requested push direction")
+        return world.validate_contact_operating_point(
+            surface_id=selected.surface_id,
+            lateral_offset_m=(
+                protocol.lateral_ik_compensation_m
+                if selected.surface_id == protocol.contact_surface_id
+                else 0.0
+            ),
+            push_height_object_m=protocol.push_height_offset_m,
+        )
+
+    def _align_task_yaw(
+        self,
+        samples: list[MotionSample],
+        *,
+        max_force_n: float,
+        peak_contact_force_n: float,
+        base_protocol: PushProtocol,
+        contact_surface_ids: list[str],
+    ) -> tuple[bool, float]:
+        world = self._world
+        task = get_task_preset(world.config.task_id)
+        policy = task.yaw_alignment
+        if not policy.enabled or task.goal.yaw_tolerance_rad is None:
+            return False, peak_contact_force_n
+        stop_tolerance = task.goal.yaw_tolerance_rad * policy.stop_tolerance_fraction
+        for _attempt in range(policy.maximum_attempts):
+            object_pose = world.observe_object_pose().pose
+            yaw_error = signed_yaw_error(
+                yaw_from_quaternion_xyzw(object_pose.orientation_xyzw),
+                task.goal.target.yaw_rad,
+            )
+            if abs(yaw_error) <= stop_tolerance:
+                return False, peak_contact_force_n
+            surface_id = (
+                policy.counterclockwise_surface_id
+                if yaw_error > 0.0
+                else policy.clockwise_surface_id
+            )
+            if surface_id is None:
+                raise RuntimeError("enabled yaw alignment is missing a contact surface")
+            surface = world.object_contact_surface(surface_id)
+            contact_surface_ids.append(surface.surface_id)
+            outward = _rotate_vector(
+                object_pose.orientation_xyzw,
+                surface.outward_normal_object,
+            )[:2]
+            push_direction = -outward / max(float(np.linalg.norm(outward)), 1.0e-12)
+            correction_protocol = base_protocol.model_copy(
+                update={
+                    "contact_surface_id": surface_id,
+                    "lateral_ik_compensation_m": 0.0,
+                    "contact_speed_m_s": policy.speed_m_s,
+                    "push_height_offset_m": policy.push_height_m,
+                    "maximum_travel_m": policy.correction_travel_m,
+                    "physics_substeps_per_command": physics_substeps_for_target_speed(
+                        increment_m=base_protocol.command_increment_m,
+                        speed_m_s=policy.speed_m_s,
+                        dt_s=world.config.dt_s,
+                    ),
+                }
+            )
+            contact_start_xy, push_z = self._approach_contact(
+                object_pose,
+                surface=surface,
+                push_direction=push_direction,
+                protocol=correction_protocol,
+            )
+            outcome, peak_contact_force_n = self._execute_contact_ramp(
+                samples,
+                contact_start_xy=contact_start_xy,
+                push_direction=push_direction,
+                push_z=push_z,
+                target_xy=np.asarray(world.config.target_position_m[:2], dtype=float),
+                max_force_n=max_force_n,
+                peak_contact_force_n=peak_contact_force_n,
+                protocol=correction_protocol,
+            )
+            if outcome is PushExecutionOutcome.SAFETY_STOPPED:
+                return True, peak_contact_force_n
+            if outcome is PushExecutionOutcome.TRAVEL_EXHAUSTED:
+                self._retreat_after_contact(correction_protocol, push_direction)
+        return False, peak_contact_force_n
+
+    def _approach_contact(
+        self,
+        object_pose: Pose,
+        *,
+        surface: ContactSurface,
+        push_direction: np.ndarray,
+        protocol: PushProtocol,
+    ) -> tuple[np.ndarray, float]:
+        tool = self._world.observe_tool_pose().position_m
+        self.command_cartesian_at_speed(
+            (tool[0], tool[1], protocol.safe_height_m),
+            protocol.approach_speed_m_s,
+        )
+        contact_start_xy = plan_contact_start_xy(
+            object_position_m=object_pose.position_m,
+            object_orientation_xyzw=object_pose.orientation_xyzw,
+            surface=surface,
+            push_direction_xy=push_direction,
+            precontact_offset_m=protocol.precontact_offset_m,
+            lateral_offset_m=protocol.lateral_ik_compensation_m,
+        )
+        self.command_cartesian_at_speed(
+            (float(contact_start_xy[0]), float(contact_start_xy[1]), protocol.safe_height_m),
+            protocol.approach_speed_m_s,
+        )
+        push_z = float(object_pose.position_m[2] + protocol.push_height_offset_m)
+        self.command_cartesian_at_speed(
+            (float(contact_start_xy[0]), float(contact_start_xy[1]), push_z),
+            protocol.contact_speed_m_s,
+        )
+        return contact_start_xy, push_z
     def hold_current_joint_positions(self, duration_s: float) -> None:
         world = self._world
         world.control.joint_target_q.assign(world.state_0.joint_q.numpy())

@@ -56,7 +56,7 @@ def _reality_worker(  # noqa: ANN001
     from curious_robot.objects import get_object_archetype
     from curious_robot.ports import RobotRealityAdapter
     from curious_robot.surface import sample_surface_profile
-    from curious_robot.tasks import get_task_preset
+    from curious_robot.tasks import get_task_preset, yaw_from_quaternion_xyzw
     from curious_robot.tools import RobotTools
     from curious_robot.world_config import (
         PhysicalParameters,
@@ -114,6 +114,10 @@ def _reality_worker(  # noqa: ANN001
         float(task_preset.initial_pose.y_m + scenario_rng.uniform(y_low, y_high)),
         object_support_z_m,
     )
+    yaw_low, yaw_high = task_preset.initial_yaw_jitter_rad
+    hidden_initial_yaw_rad = float(
+        task_preset.initial_pose.yaw_rad + scenario_rng.uniform(yaw_low, yaw_high)
+    )
     service_nonce = str(uuid4())
     identity = RuntimeIdentity.for_current_process(
         authority=PortAuthority.REALITY,
@@ -148,7 +152,7 @@ def _reality_worker(  # noqa: ANN001
                     task_id=task_id,
                     device=device,
                     initial_position_m=hidden_initial_position,
-                    initial_yaw_rad=task_preset.initial_pose.yaw_rad,
+                    initial_yaw_rad=hidden_initial_yaw_rad,
                     target_position_m=(
                         task_preset.goal.target.x_m,
                         task_preset.goal.target.y_m,
@@ -169,8 +173,15 @@ def _reality_worker(  # noqa: ANN001
                 )
                 try:
                     world.settle()
-                    observed_initial = world.observe_object_pose().pose.position_m
-                    public_config = replace(config, initial_position_m=observed_initial)
+                    observed_initial_pose = world.observe_object_pose().pose
+                    observed_initial = observed_initial_pose.position_m
+                    public_config = replace(
+                        config,
+                        initial_position_m=observed_initial,
+                        initial_yaw_rad=yaw_from_quaternion_xyzw(
+                            observed_initial_pose.orientation_xyzw
+                        ),
+                    )
                     tools = RobotTools(
                         RobotRealityAdapter(world),
                         initial_belief(),
@@ -248,6 +259,7 @@ def _reality_worker(  # noqa: ANN001
                     identity=identity,
                     hidden_parameters=hidden_parameters,
                     hidden_initial_position=hidden_initial_position,
+                    hidden_initial_yaw_rad=hidden_initial_yaw_rad,
                     experiment_world_id=experiment_world_id,
                     capability_sessions=capability_sessions,
                     device=device,

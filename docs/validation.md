@@ -22,12 +22,17 @@ This page distinguishes executed evidence from planned capability.
 - The executed T-bar acceptance run passed both its 30 mm planar-position and
   9° wrapped-yaw predicates for the first friction-only MVP. Its experiment,
   candidate, and deployment worlds had distinct identities.
+- A randomized-start Agent Lab run sampled initial yaw `-7.32°`, used
+  `crossbar_right_y → crossbar_right_y → stem_rear_x`, and passed in fresh
+  Reality with `8.83 mm` position error, `8.49°` yaw error, and `2.98 mm`
+  Twin–Reality position residual. The validated random-yaw envelope is
+  currently `[-8°, -5°]`; positive and arbitrary yaw remain unsupported.
 - Public artifacts exclude sampled mass, friction, restitution, and private
   scenario seed values.
 - Visual replay and numerical re-execution are independently tested. For the
   retained integrated T-bar run, re-execution passed the 15 mm position bound
-  (`10.62 mm` maximum error) but failed the 0.010 rad yaw determinism bound
-  (`0.161 rad` maximum error); the generated report remains `passed: false`.
+  (`11.24 mm` maximum error) but failed the 0.010 rad yaw determinism bound
+  (`0.101 rad` maximum error); the generated report remains `passed: false`.
 
 The latest cube run is summarized in the
 [friction capability report](evidence/friction-capability-report.md). Executed

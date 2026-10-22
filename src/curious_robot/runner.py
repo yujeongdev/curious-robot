@@ -193,6 +193,8 @@ def run_episode(
         float(task.initial_pose.y_m + scenario_rng.uniform(y_low, y_high)),
         support_height_m,
     )
+    yaw_low, yaw_high = task.initial_yaw_jitter_rad
+    initial_yaw = float(task.initial_pose.yaw_rad + scenario_rng.uniform(yaw_low, yaw_high))
     truth = PhysicalParameters(
         mass,
         surface.effective_static_friction,
@@ -207,6 +209,7 @@ def run_episode(
                 "truth": asdict(truth),
                 "surface": asdict(surface),
                 "initial_position_m": initial,
+                "initial_yaw_rad": initial_yaw,
                 "task_preset_id": task.preset_id,
                 "task_preset_hash": task.preset_hash,
                 "object_geometry_hash": archetype.geometry_hash,
@@ -218,7 +221,7 @@ def run_episode(
         task_id=task.preset_id,
         device=device,
         initial_position_m=initial,
-        initial_yaw_rad=task.initial_pose.yaw_rad,
+        initial_yaw_rad=initial_yaw,
         target_position_m=(task.goal.target.x_m, task.goal.target.y_m, support_height_m),
         target_radius_m=task.goal.position_tolerance_m,
         target_yaw_rad=task.goal.target.yaw_rad,
@@ -237,7 +240,11 @@ def run_episode(
         scenario_id="simulated-reality",
     )
     initial_observation = reality.observe_object_pose()
-    config = replace(truth_config, initial_position_m=initial_observation.pose.position_m)
+    config = replace(
+        truth_config,
+        initial_position_m=initial_observation.pose.position_m,
+        initial_yaw_rad=yaw_from_quaternion_xyzw(initial_observation.pose.orientation_xyzw),
+    )
     task_belief = initial_belief_for_object(
         archetype.archetype_id,
         archetype.version,
@@ -504,6 +511,9 @@ def run_episode(
         deployment_config = replace(
             config,
             initial_position_m=deployment_observation.pose.position_m,
+            initial_yaw_rad=yaw_from_quaternion_xyzw(
+                deployment_observation.pose.orientation_xyzw
+            ),
         )
         deployment_tools = RobotTools(
             RobotRealityAdapter(deployment_reality),

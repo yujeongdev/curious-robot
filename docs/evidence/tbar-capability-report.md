@@ -37,16 +37,23 @@ The evaluator passed `position_within_tolerance`, `yaw_within_tolerance`,
 `controller_completed`, and `robot_safe`.
 
 The 9° tolerance is the explicit first-MVP contract for friction-only,
-open-loop T-bar pushing. The research acceptance target remains ≤5° across at
+observed-yaw T-bar pushing. The research acceptance target remains ≤5° across at
 least 8 of 10 evaluator seeds after planar COM/yaw-inertia identification is
 added. The 2.35° pre-COM result was discarded and is not used as evidence.
 
 The separately retained integrated Agent Lab run
-`743bee64-e2da-4996-bd90-0eaa37f06a9d` also completed successfully after two
+`edc7af93-d574-499f-957b-fb45def44922` also completed successfully after two
 agent-selected probes and three Twin rollouts. Its physics re-execution passed
 the 15 mm position comparison but failed the stricter yaw determinism check
-(0.161 rad observed versus 0.010 rad tolerance). This nondeterminism is
+(0.101 rad observed versus 0.010 rad tolerance). This nondeterminism is
 reported rather than reclassified as a deterministic replay pass.
+
+That integrated run sampled initial yaw `-7.32°`. The selected policy used two
+observed-yaw corrections on `crossbar_right_y`, then translated from
+`stem_rear_x`. Fresh Reality finished with `8.83 mm` position error and
+`8.49°` wrapped-yaw error; the Twin–Reality position residual was `2.98 mm`.
+The current validated random-yaw envelope is intentionally bounded to
+`[-8°, -5°]`; symmetric arbitrary-yaw placement remains future work.
 
 ## Boundary
 
