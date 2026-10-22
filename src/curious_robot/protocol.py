@@ -33,10 +33,12 @@ class PushProtocol(BaseModel):
     minimum_contact_coverage_fraction: float = Field(ge=0.0, le=1.0)
     minimum_valid_contact_samples: int = Field(gt=0)
     maximum_yaw_excursion_rad: float = Field(ge=0.0, le=3.141592653589793)
-    minimum_planar_command_m: float = Field(gt=0.0, le=0.01)
-    opposing_surface_max_dot: float = Field(ge=-1.0, lt=0.0)
-    post_attempt_settle_s: float = Field(ge=0.0, le=2.0)
-    terminal_settle_s: float = Field(ge=0.0, le=2.0)
+    # Defaults preserve validation of persisted schema 1.1.0 artifacts. The
+    # canonical config writes every value explicitly for new runs.
+    minimum_planar_command_m: float = Field(default=1.0e-6, gt=0.0, le=0.01)
+    opposing_surface_max_dot: float = Field(default=-0.8, ge=-1.0, lt=0.0)
+    post_attempt_settle_s: float = Field(default=0.15, ge=0.0, le=2.0)
+    terminal_settle_s: float = Field(default=0.35, ge=0.0, le=2.0)
     contact_surface_id: str = Field(min_length=1)
 
 

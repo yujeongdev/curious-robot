@@ -14,6 +14,7 @@ import warp as wp
 from .objects import ContactSurface, get_object_archetype
 from .schemas import MotionSample, Pose
 from .tasks import (
+    PlanarGoal,
     PlanarPose,
     evaluate_planar_goal,
     get_task_preset,
@@ -103,6 +104,22 @@ def terminal_push_outcome(
     if prior is PushExecutionOutcome.SAFETY_STOPPED:
         return prior
     return PushExecutionOutcome.COMPLETED if goal_success else PushExecutionOutcome.TRAVEL_EXHAUSTED
+
+
+def requested_planar_goal(
+    target_m: tuple[float, float, float],
+    *,
+    position_tolerance_m: float,
+    target_yaw_rad: float,
+    yaw_tolerance_rad: float | None,
+) -> PlanarGoal:
+    """Build the controller goal from the requested world target contract."""
+
+    return PlanarGoal(
+        target=PlanarPose(x_m=target_m[0], y_m=target_m[1], yaw_rad=target_yaw_rad),
+        position_tolerance_m=position_tolerance_m,
+        yaw_tolerance_rad=yaw_tolerance_rad,
+    )
 
 
 class NewtonFrankaController:
@@ -241,6 +258,12 @@ class NewtonFrankaController:
         contact_surface_ids: list[str] = []
         peak_contact_force_n = 0.0
         outcome = PushExecutionOutcome.TRAVEL_EXHAUSTED
+        requested_goal = requested_planar_goal(
+            target_m,
+            position_tolerance_m=world.config.target_radius_m,
+            target_yaw_rad=world.config.target_yaw_rad,
+            yaw_tolerance_rad=world.config.target_yaw_tolerance_rad,
+        )
         self.release_compliance()
         self.set_gripper(0.0)
         yaw_safety_stop, peak_contact_force_n = self._align_task_yaw(
@@ -249,6 +272,7 @@ class NewtonFrankaController:
             peak_contact_force_n=peak_contact_force_n,
             base_protocol=protocol,
             contact_surface_ids=contact_surface_ids,
+            goal=requested_goal,
         )
         if yaw_safety_stop:
             return PushExecutionResult(
@@ -263,7 +287,7 @@ class NewtonFrankaController:
             planar_delta = np.asarray(target_m[:2], dtype=float) - start[:2]
             planar_distance = float(np.linalg.norm(planar_delta))
             current_goal = evaluate_planar_goal(
-                get_task_preset(world.config.task_id).goal,
+                requested_goal,
                 PlanarPose(
                     x_m=object_pose.position_m[0],
                     y_m=object_pose.position_m[1],
@@ -320,9 +344,8 @@ class NewtonFrankaController:
             for _ in range(max(1, round(protocol.post_attempt_settle_s / world.config.dt_s))):
                 samples.append(world.step())
             settled_pose = world.observe_object_pose().pose
-            settled_goal = get_task_preset(world.config.task_id).goal
             settled_result = evaluate_planar_goal(
-                settled_goal,
+                requested_goal,
                 PlanarPose(
                     x_m=settled_pose.position_m[0],
                     y_m=settled_pose.position_m[1],
@@ -337,7 +360,7 @@ class NewtonFrankaController:
             samples.append(world.step())
         final_pose = world.observe_object_pose().pose
         final_goal = evaluate_planar_goal(
-            get_task_preset(world.config.task_id).goal,
+            requested_goal,
             PlanarPose(
                 x_m=final_pose.position_m[0],
                 y_m=final_pose.position_m[1],
@@ -413,18 +436,19 @@ class NewtonFrankaController:
         peak_contact_force_n: float,
         base_protocol: PushProtocol,
         contact_surface_ids: list[str],
+        goal: PlanarGoal,
     ) -> tuple[bool, float]:
         world = self._world
         task = get_task_preset(world.config.task_id)
         policy = task.yaw_alignment
-        if not policy.enabled or task.goal.yaw_tolerance_rad is None:
+        if not policy.enabled or goal.yaw_tolerance_rad is None:
             return False, peak_contact_force_n
-        stop_tolerance = task.goal.yaw_tolerance_rad * policy.stop_tolerance_fraction
+        stop_tolerance = goal.yaw_tolerance_rad * policy.stop_tolerance_fraction
         for _attempt in range(policy.maximum_attempts):
             object_pose = world.observe_object_pose().pose
             yaw_error = signed_yaw_error(
                 yaw_from_quaternion_xyzw(object_pose.orientation_xyzw),
-                task.goal.target.yaw_rad,
+                goal.target.yaw_rad,
             )
             if abs(yaw_error) <= stop_tolerance:
                 return False, peak_contact_force_n

@@ -9,6 +9,7 @@ from curious_robot.belief import initial_belief_for_object
 from curious_robot.control import (
     NewtonFrankaController,
     PushExecutionOutcome,
+    requested_planar_goal,
     terminal_push_outcome,
 )
 from curious_robot.objects import CUBE_V1, T_BAR_V1, get_object_archetype
@@ -145,6 +146,19 @@ def test_terminal_push_outcome_uses_final_settled_pose_unless_safety_stopped(
     expected: PushExecutionOutcome,
 ) -> None:
     assert terminal_push_outcome(prior, goal_success=goal_success) is expected
+
+
+def test_requested_push_goal_does_not_fall_back_to_catalog_target() -> None:
+    goal = requested_planar_goal(
+        (0.31, -0.07, 0.02),
+        position_tolerance_m=0.012,
+        target_yaw_rad=0.4,
+        yaw_tolerance_rad=0.05,
+    )
+
+    assert goal.target == PlanarPose(x_m=0.31, y_m=-0.07, yaw_rad=0.4)
+    assert goal.position_tolerance_m == pytest.approx(0.012)
+    assert goal.yaw_tolerance_rad == pytest.approx(0.05)
 
 
 def test_task_preset_rejects_nonfinite_randomization_bounds() -> None:
