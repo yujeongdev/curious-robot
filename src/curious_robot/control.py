@@ -575,8 +575,6 @@ class NewtonFrankaController:
             if outcome is PushExecutionOutcome.SAFETY_STOPPED:
                 return True, peak_contact_force_n
             self._retreat_after_contact(correction_protocol, push_direction)
-            for _ in range(max(1, round(base_protocol.post_attempt_settle_s / world.config.dt_s))):
-                samples.append(world.step())
         return False, peak_contact_force_n
 
     def _approach_contact(

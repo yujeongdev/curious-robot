@@ -19,7 +19,7 @@
     "correction_travel_m": 0.02,
     "speed_m_s": 0.03,
     "push_height_m": 0.006,
-    "stop_tolerance_fraction": 0.33,
+    "stop_tolerance_fraction": 0.5,
     "position_stop_tolerance_fraction": 0.5,
     "adaptive_translation_surface": true
   },

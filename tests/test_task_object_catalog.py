@@ -47,7 +47,7 @@ def test_catalog_preserves_cube_and_adds_non_overlapping_compound_t_bar() -> Non
     assert PUSH_T_BAR_V1.yaw_alignment.adaptive_translation_surface is True
     assert PUSH_T_BAR_V1.goal.position_tolerance_m == pytest.approx(0.03)
     assert PUSH_T_BAR_V1.goal.yaw_tolerance_rad == pytest.approx(math.radians(9.0))
-    assert PUSH_T_BAR_V1.yaw_alignment.stop_tolerance_fraction == pytest.approx(0.33)
+    assert PUSH_T_BAR_V1.yaw_alignment.stop_tolerance_fraction == pytest.approx(0.5)
     assert PUSH_T_BAR_V1.yaw_alignment.position_stop_tolerance_fraction == pytest.approx(0.5)
 
 
@@ -173,7 +173,7 @@ def test_t_bar_controller_target_is_stricter_than_public_acceptance() -> None:
     refined = refinement_goal(PUSH_T_BAR_V1.goal, PUSH_T_BAR_V1.yaw_alignment)
 
     assert refined.position_tolerance_m == pytest.approx(0.015)
-    assert refined.yaw_tolerance_rad == pytest.approx(math.radians(2.97))
+    assert refined.yaw_tolerance_rad == pytest.approx(math.radians(4.5))
     pose = PlanarPose(x_m=0.166, y_m=0.0, yaw_rad=math.radians(4.0))
     assert evaluate_planar_goal(PUSH_T_BAR_V1.goal, pose).success is True
     assert evaluate_planar_goal(refined, pose).success is False
