@@ -18,6 +18,7 @@ from .control import (
     NewtonFrankaController,
     PushExecutionResult,
 )
+from .objects import ContactSurface, get_object_archetype
 from .protocol import PhysicalExperimentProtocol, PushProtocol, configure_push_protocol, protocol_sha256
 from .schemas import (
     ActionCandidate,
@@ -29,16 +30,18 @@ from .schemas import (
     PredictedOutcome,
     WrenchObservation,
 )
+from .tasks import PlanarPose, evaluate_planar_goal, get_task_preset, yaw_from_quaternion_xyzw
 from .trajectory import CartesianMotionResult
 from .world_config import (
-    CUBE_EDGE_M,
     FRANKA_BASE_POSITION_M,
     FRANKA_HAND_TO_TCP_M,
     FRANKA_READY_JOINT_Q,
     GRAVITY,
     PhysicalParameters,
     WorldConfig,
+    compound_box_inertia,
     physical_belief_snapshot_id,
+    resolved_object_geometry,
 )
 
 
@@ -81,6 +84,7 @@ class NewtonWorld:
         self.last_tool_contact_normal_world = np.zeros(3)
         self.last_tool_contact_active = False
         self.last_tool_contact_shape_label: str | None = None
+        self.last_object_contact_shape_label: str | None = None
         self._sliding = False
         self._grasped = False
         self._compliance_enabled = False
@@ -94,6 +98,7 @@ class NewtonWorld:
         self.world_config_id = config.config_id
         self.control_trace: list[tuple[float, ...]] = []
         self.state_trace: list[tuple[float, float, float]] = []
+        self.orientation_trace: list[tuple[float, float, float, float]] = []
         self._recorder = None
         self._record_stride = 4
         self._step_count = 0
@@ -142,25 +147,52 @@ class NewtonWorld:
                 builder.joint_target_ke[7:9] = [self.config.gripper_position_stiffness] * 2
                 builder.joint_target_kd[7:9] = [self.config.gripper_position_damping] * 2
             ik_builder = copy.deepcopy(builder)
-        density = self._parameters.mass_kg / CUBE_EDGE_M**3
-        cube_material = newton.ModelBuilder.ShapeConfig(
+        geometry = resolved_object_geometry(self.config)
+        inertia = compound_box_inertia(
+            geometry,
+            self._parameters.mass_kg,
+            self._parameters.com_m,
+        )
+        object_material = newton.ModelBuilder.ShapeConfig(
             mu=self._parameters.static_friction,
-            density=density,
+            density=0.0,
             restitution=self._parameters.restitution,
         )
-        self.cube_body = builder.add_body(
-            xform=wp.transform(wp.vec3(*self.config.initial_position_m), wp.quat_identity()),
-            label="unknown_cube",
+        self.object_body = builder.add_body(
+            xform=wp.transform(
+                wp.vec3(*self.config.initial_position_m),
+                wp.quat(
+                    0.0,
+                    0.0,
+                    math.sin(self.config.initial_yaw_rad / 2.0),
+                    math.cos(self.config.initial_yaw_rad / 2.0),
+                ),
+            ),
+            com=wp.vec3(*self._parameters.com_m),
+            inertia=wp.mat33(*(value for row in inertia for value in row)),
+            mass=self._parameters.mass_kg,
+            lock_inertia=True,
+            label=geometry.body_label,
         )
-        cube_shape = builder.add_shape_box(
-            self.cube_body,
-            hx=CUBE_EDGE_M / 2,
-            hy=CUBE_EDGE_M / 2,
-            hz=CUBE_EDGE_M / 2,
-            cfg=cube_material,
-            label="unknown_cube_collision",
-        )
-        self._cube_shape = cube_shape
+        object_shapes = []
+        for part in geometry.parts:
+            object_shapes.append(
+                builder.add_shape_box(
+                    self.object_body,
+                    xform=wp.transform(wp.vec3(*part.center_m), wp.quat_identity()),
+                    hx=part.size_m[0] / 2.0,
+                    hy=part.size_m[1] / 2.0,
+                    hz=part.size_m[2] / 2.0,
+                    cfg=object_material,
+                    label=part.label,
+                )
+            )
+        self.object_geometry = geometry
+        self.object_shape_indices = frozenset(object_shapes)
+        # Compatibility aliases keep the existing cube-oriented controller and
+        # deterministic replay APIs stable while object-neutral ports migrate.
+        self.cube_body = self.object_body
+        self._cube_shape = object_shapes[0]
         if self.config.include_robot:
             end_effector_bodies = {
                 index
@@ -169,12 +201,13 @@ class NewtonWorld:
             }
             self._tool_shape_indices = frozenset(
                 index
-                for index in range(cube_shape)
+                for index in range(object_shapes[0])
                 if index == tool_tip_shape or int(builder.shape_body[index]) in end_effector_bodies
             )
-            for shape_index in range(cube_shape):
+            for shape_index in range(object_shapes[0]):
                 if shape_index not in self._tool_shape_indices:
-                    builder.add_shape_collision_filter_pair(shape_index, cube_shape)
+                    for object_shape in object_shapes:
+                        builder.add_shape_collision_filter_pair(shape_index, object_shape)
         builder.add_ground_plane(cfg=material)
         self.model = builder.finalize(device=self.config.device)
         self.state_0 = self.model.state()
@@ -206,7 +239,7 @@ class NewtonWorld:
             self.tool_contact_sensor = SensorContact(
                 self.model,
                 sensing_bodies=["fr3/fr3_hand", "fr3/fr3_leftfinger", "fr3/fr3_rightfinger"],
-                counterpart_bodies="unknown_cube",
+                counterpart_bodies=geometry.body_label,
                 request_contact_attributes=False,
             )
             self.contact_observables = self.solver.observables(
@@ -274,9 +307,10 @@ class NewtonWorld:
 
     def reset_cube(self, position_m: tuple[float, float, float] | None = None) -> None:
         position = position_m or self.config.initial_position_m
+        yaw = self.config.initial_yaw_rad
         for state in (self.state_0, self.state_1):
             q = state.body_q.numpy()
-            q[self.cube_body] = (*position, 0.0, 0.0, 0.0, 1.0)
+            q[self.cube_body] = (*position, 0.0, 0.0, math.sin(yaw / 2.0), math.cos(yaw / 2.0))
             state.body_q.assign(q)
             qd = state.body_qd.numpy()
             qd[self.cube_body] = 0.0
@@ -339,6 +373,36 @@ class NewtonWorld:
             orientation_xyzw=tuple(float(value) for value in transform[3:7]),
         )
 
+    def object_contact_surface(self, surface_id: str) -> ContactSurface:
+        """Resolve a public contact face from the task-bound object archetype."""
+
+        preset = get_task_preset(self.config.task_id)
+        archetype = get_object_archetype(
+            preset.object_archetype_id,
+            preset.object_archetype_version,
+        )
+        return archetype.contact_surface(surface_id)
+
+    def validate_contact_operating_point(
+        self,
+        *,
+        surface_id: str,
+        lateral_offset_m: float,
+        push_height_object_m: float,
+    ) -> ContactSurface:
+        """Fail closed before motion when a push point is outside public geometry."""
+
+        preset = get_task_preset(self.config.task_id)
+        archetype = get_object_archetype(
+            preset.object_archetype_id,
+            preset.object_archetype_version,
+        )
+        return archetype.validate_contact_operating_point(
+            surface_id=surface_id,
+            lateral_offset_m=lateral_offset_m,
+            push_height_object_m=push_height_object_m,
+        )
+
     def set_grasp_active(self, active: bool) -> None:
         """Set the compliant-grasp surrogate state through its controller API."""
         self._grasped = active
@@ -378,9 +442,10 @@ class NewtonWorld:
         self.state_0, self.state_1 = self.state_1, self.state_0
         self._update_tool_contact_sensor()
         self.sim_time_s += self.config.dt_s
-        pos, _, vel = self.cube_controller_state()
+        pos, orientation, vel = self.cube_controller_state()
         self.control_trace.append(tuple(float(v) for v in self.control.joint_target_q.numpy()))
         self.state_trace.append(tuple(float(v) for v in pos))
+        self.orientation_trace.append(tuple(float(v) for v in orientation))
         if self._recorder is not None and self._step_count % self._record_stride == 0:
             self._recorder.begin_frame(self.sim_time_s)
             self._recorder.log_state(self.state_0)
@@ -394,9 +459,14 @@ class NewtonWorld:
             timestamp_s=self.sim_time_s,
             position_m=tuple(float(v) for v in measured_position),
             velocity_m_s=tuple(float(v) for v in vel[:3]),
+            orientation_xyzw=tuple(float(v) for v in orientation),
+            angular_velocity_rad_s=tuple(float(v) for v in vel[3:6]),
             measured_force_n=tuple(float(v) for v in measured),
             contact_valid=self.last_tool_contact_active,
-            contact_pair=(self.last_tool_contact_shape_label, "unknown_cube_collision")
+            contact_pair=(
+                self.last_tool_contact_shape_label,
+                self.last_object_contact_shape_label or self.model.shape_label[self._cube_shape],
+            )
             if self.last_tool_contact_active
             else None,
             contact_position_m=tuple(float(v) for v in self.last_tool_contact_position_m)
@@ -419,6 +489,7 @@ class NewtonWorld:
         self.last_tool_contact_normal_world[:] = 0.0
         self.last_tool_contact_active = False
         self.last_tool_contact_shape_label = None
+        self.last_object_contact_shape_label = None
         if self.tool_contact_sensor is None:
             return
         self.tool_contact_sensor.update(
@@ -448,13 +519,16 @@ class NewtonWorld:
         oriented_normals: list[np.ndarray] = []
         normal_weights: list[float] = []
         contact_shape_labels: list[str] = []
+        object_shape_labels: list[str] = []
         for first, second, normal, contact_force in zip(
             shape_0, shape_1, normals, contact_forces, strict=True
         ):
-            if int(first) in self._tool_shape_indices and int(second) == self._cube_shape:
+            if int(first) in self._tool_shape_indices and int(second) in self.object_shape_indices:
                 oriented = np.asarray(normal, dtype=float)
-            elif int(first) == self._cube_shape and int(second) in self._tool_shape_indices:
+                object_shape = int(second)
+            elif int(first) in self.object_shape_indices and int(second) in self._tool_shape_indices:
                 oriented = -np.asarray(normal, dtype=float)
+                object_shape = int(first)
             else:
                 continue
             weight = float(np.linalg.norm(contact_force[:3]))
@@ -463,10 +537,12 @@ class NewtonWorld:
             oriented_normals.append(oriented)
             normal_weights.append(weight)
             contact_shape_labels.append(self._shape_contact_label(int(first), int(second)))
+            object_shape_labels.append(self.model.shape_label[object_shape])
 
         self.last_tool_contact_active = bool(oriented_normals) and float(np.linalg.norm(raw_force)) > 1e-6
         if self.last_tool_contact_active:
             self.last_tool_contact_shape_label = contact_shape_labels[int(np.argmax(normal_weights))]
+            self.last_object_contact_shape_label = object_shape_labels[int(np.argmax(normal_weights))]
             average_normal = np.average(oriented_normals, axis=0, weights=normal_weights)
             normal_magnitude = float(np.linalg.norm(average_normal))
             if normal_magnitude > 1e-9:
@@ -500,7 +576,10 @@ class NewtonWorld:
                     "normal_world": contact_normal,
                     "force_world_n": tuple(float(value) for value in raw_contact_force),
                     "shape_a_label": self.last_tool_contact_shape_label,
-                    "shape_b_label": "unknown_cube_collision",
+                    "shape_b_label": (
+                        self.last_object_contact_shape_label
+                        or self.model.shape_label[self._cube_shape]
+                    ),
                 },
             )
             if self.last_tool_contact_active
@@ -515,7 +594,7 @@ class NewtonWorld:
                     "vector": tuple(float(value) for value in measured_force),
                     "frame": "world",
                     "units": "N",
-                    "label": "10 Hz filtered SensorContact robot-on-cube force",
+                    "label": "10 Hz filtered SensorContact robot-on-object force",
                 },
             )
             if self.last_tool_contact_active
@@ -534,7 +613,26 @@ class NewtonWorld:
                     "scenario_id": self.scenario_id,
                     "action_id": self.scenario_id,
                     "belief_revision": self.belief_revision,
-                    "body_manifest_id": ("franka-cube-v1" if self.config.include_robot else "cube-only-v1"),
+                    "body_manifest_id": (
+                        f"franka-{self.object_geometry.kind.replace('_', '-')}-v1"
+                        if self.config.include_robot
+                        else f"{self.object_geometry.kind.replace('_', '-')}-only-v1"
+                    ),
+                    "object_geometry": {
+                        "archetype_id": self.object_geometry.archetype_id,
+                        "archetype_version": self.object_geometry.archetype_version,
+                        "geometry_hash": self.object_geometry.geometry_hash,
+                        "body_id": self.object_geometry.body_label,
+                        "parts": [
+                            {
+                                "part_id": part.part_id,
+                                "center_object_m": part.center_m,
+                                "half_extents_m": tuple(value / 2.0 for value in part.size_m),
+                                "orientation_object_xyzw": (0.0, 0.0, 0.0, 1.0),
+                            }
+                            for part in self.object_geometry.parts
+                        ],
+                    },
                     "tool_tip_radius_m": (
                         self.config.tool_tip_radius_m if self.config.include_robot else None
                     ),
@@ -546,6 +644,8 @@ class NewtonWorld:
                     "target_region": {
                         "center_m": self.config.target_position_m,
                         "radius_m": self.config.target_radius_m,
+                        "yaw_rad": self.config.target_yaw_rad,
+                        "yaw_tolerance_rad": self.config.target_yaw_tolerance_rad,
                         "label": "target",
                     },
                     "camera_hint": {"preset": "tabletop", "target_m": self.config.target_position_m},
@@ -576,6 +676,7 @@ class NewtonWorld:
     def clear_trace(self) -> None:
         self.control_trace.clear()
         self.state_trace.clear()
+        self.orientation_trace.clear()
 
     def settle(self, seconds: float = 0.25) -> None:
         for _ in range(max(1, round(seconds / self.config.dt_s))):
@@ -599,8 +700,8 @@ class NewtonWorld:
             torque_nm=tuple(float(v) for v in self.last_control_torque_nm),
             frame="world",
             producer=(
-                "Newton SensorContact: cube-on-hand/fingers/tool linear contact force, sign-flipped to "
-                f"robot-on-cube with {self.config.contact_sensor_cutoff_hz:g} Hz first-order sensor "
+                "Newton SensorContact: object-on-hand/fingers/tool linear contact force, sign-flipped to "
+                f"robot-on-object with {self.config.contact_sensor_cutoff_hz:g} Hz first-order sensor "
                 "filter; excludes internal transmission loads and contact torque"
             ),
             timestamp_s=self.sim_time_s,
@@ -719,6 +820,7 @@ def rollout_candidate(
         return PredictedOutcome(
             action_id=candidate.action_id,
             final_position_m=initial,
+            final_orientation_xyzw=(0.0, 0.0, 0.0, 1.0),
             target_error_m=error,
             success_probability=0.0,
             tipping_margin=0.0,
@@ -775,6 +877,8 @@ def rollout_candidate_in_world(
         dt_s=config.dt_s,
         speed_m_s=candidate.speed_m_s,
         push_height_m=candidate.push_height_m,
+        lateral_contact_offset_m=candidate.lateral_contact_offset_m,
+        contact_surface_id=candidate.contact_surface_id,
         safety_stop_fraction=1.0,
     )
     execution = world.execute_push(
@@ -785,19 +889,35 @@ def rollout_candidate_in_world(
     samples = execution.samples
     observation = world.observe_object_pose()
     final = np.asarray(observation.pose.position_m)
-    error = float(np.linalg.norm(final[:2] - np.asarray(candidate.target_m[:2])))
+    final_orientation = observation.pose.orientation_xyzw
+    task = get_task_preset(config.task_id)
+    goal_result = evaluate_planar_goal(
+        task.goal,
+        PlanarPose(
+            x_m=float(final[0]),
+            y_m=float(final[1]),
+            yaw_rad=yaw_from_quaternion_xyzw(final_orientation),
+        ),
+    )
+    error = goal_result.position_error_m
     peak = max((np.linalg.norm(s.measured_force_n) for s in samples), default=0.0)
     quat = observation.pose.orientation_xyzw
     upright_cos = 1.0 - 2.0 * (quat[0] ** 2 + quat[1] ** 2)
     tilt = math.acos(float(np.clip(upright_cos, -1.0, 1.0)))
     feasible = (
-        not execution.safety_tripped and peak <= candidate.max_force_n * 1.01 and tilt < math.radians(15)
+        goal_result.success
+        and not execution.safety_tripped
+        and peak <= candidate.max_force_n * 1.01
+        and tilt < math.radians(15)
     )
-    success_probability = float(np.clip(1.0 - error / 0.10 - tilt / math.pi, 0.0, 1.0))
+    yaw_penalty = (goal_result.yaw_error_rad or 0.0) / math.pi
+    success_probability = float(np.clip(1.0 - error / 0.10 - tilt / math.pi - yaw_penalty, 0.0, 1.0))
     return PredictedOutcome(
         action_id=candidate.action_id,
         final_position_m=tuple(float(v) for v in final),
+        final_orientation_xyzw=final_orientation,
         target_error_m=error,
+        target_yaw_error_rad=goal_result.yaw_error_rad,
         success_probability=success_probability,
         tipping_margin=math.radians(15) - tilt,
         peak_force_n=float(peak),

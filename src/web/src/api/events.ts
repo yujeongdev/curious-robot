@@ -1,6 +1,7 @@
 import { eventTypes, parseAgentEvent, type AgentEvent } from "../generated/agent-events";
 
 export interface CreateRunInput {
+  task_id: string;
   seed: number;
   device: string;
   include_robot: boolean;
@@ -10,6 +11,13 @@ export interface CreateRunInput {
 }
 
 export interface CreateRunResponse { run_id: string }
+export interface TaskSummary {
+  task_id: string;
+  objective: string;
+  object_label: string;
+  requires_yaw: boolean;
+  candidate_count: number;
+}
 
 function mutationHeaders(): HeadersInit {
   const token = document.querySelector<HTMLMetaElement>('meta[name="curious-robot-control-token"]')?.content
@@ -32,6 +40,10 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunRespons
     headers: mutationHeaders(),
     body: JSON.stringify(input),
   }));
+}
+
+export async function loadTasks(): Promise<TaskSummary[]> {
+  return responseJson(await fetch("/api/tasks"));
 }
 
 export async function commandRun(runId: string, command: "pause" | "resume" | "step" | "cancel") {

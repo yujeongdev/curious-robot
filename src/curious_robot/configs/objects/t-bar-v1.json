@@ -1,0 +1,36 @@
+{
+  "archetype_id": "t-bar",
+  "version": "1.0.0",
+  "label": "Known compound T-bar",
+  "reference_frame": "footprint_bounding_box_center",
+  "parts": [
+    {"part_id": "stem", "center_object_m": [-0.0125, 0.0, 0.0], "half_extents_m": [0.0375, 0.0125, 0.02]},
+    {"part_id": "crossbar", "center_object_m": [0.0375, 0.0, 0.0], "half_extents_m": [0.0125, 0.05, 0.02]}
+  ],
+  "support_polygon_xy_m": [
+    [-0.05, -0.0125], [0.025, -0.0125], [0.025, -0.05], [0.05, -0.05],
+    [0.05, 0.05], [0.025, 0.05], [0.025, 0.0125], [-0.05, 0.0125]
+  ],
+  "contact_surfaces": [
+    {
+      "surface_id": "stem_rear_x", "part_id": "stem", "center_object_m": [-0.05, 0.0, 0.0],
+      "outward_normal_object": [-1.0, 0.0, 0.0], "tangent_object": [0.0, 1.0, 0.0],
+      "half_size_m": [0.0125, 0.02]
+    },
+    {
+      "surface_id": "crossbar_front_x", "part_id": "crossbar", "center_object_m": [0.05, 0.0, 0.0],
+      "outward_normal_object": [1.0, 0.0, 0.0], "tangent_object": [0.0, 1.0, 0.0],
+      "half_size_m": [0.05, 0.02]
+    },
+    {
+      "surface_id": "crossbar_left_y", "part_id": "crossbar", "center_object_m": [0.0375, 0.05, 0.0],
+      "outward_normal_object": [0.0, 1.0, 0.0], "tangent_object": [1.0, 0.0, 0.0],
+      "half_size_m": [0.0125, 0.02]
+    },
+    {
+      "surface_id": "crossbar_right_y", "part_id": "crossbar", "center_object_m": [0.0375, -0.05, 0.0],
+      "outward_normal_object": [0.0, -1.0, 0.0], "tangent_object": [1.0, 0.0, 0.0],
+      "half_size_m": [0.0125, 0.02]
+    }
+  ]
+}

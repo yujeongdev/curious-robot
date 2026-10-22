@@ -71,6 +71,7 @@ class FrictionCapabilityPipeline:
         reality: RealityPort,
         twin: TwinPort,
         evaluator: EvaluatorPort,
+        task_id: str = "push-cube-v1",
     ) -> None:
         assert_independent_reality_and_twin(reality.identity, twin.identity)
         if evaluator.identity.authority is not PortAuthority.EVALUATOR:
@@ -81,6 +82,7 @@ class FrictionCapabilityPipeline:
         self.reality = reality
         self.twin = twin
         self.evaluator = evaluator
+        self.task_id = task_id
         self.pipeline = LaboratoryPipeline(stores)
         self.artifacts = FrictionArtifactBuilder(stores)
 
@@ -98,7 +100,7 @@ class FrictionCapabilityPipeline:
                 operation=lambda: self.reality.execute(
                     OperationRequest(
                         LabOperation.FRICTION_EXPERIMENT.value,
-                        {"provenance": [capability_gap.artifact_id]},
+                        {"provenance": [capability_gap.artifact_id], "task_id": self.task_id},
                         str(uuid4()),
                     )
                 ),
@@ -199,7 +201,11 @@ class FrictionCapabilityPipeline:
             sorted(self.reality.evidence_kinds | self.twin.evidence_kinds | self.evaluator.evidence_kinds)
         )
         requirement = CapabilityRequirement(
-            capability="friction-aware-push",
+            capability=(
+                "friction-aware-push"
+                if self.task_id == "push-cube-v1"
+                else f"friction-aware-push:{self.task_id}"
+            ),
             required_operations=self.REQUIRED_OPERATIONS,
             required_evidence_kinds=(
                 LabArtifactKind.TRAJECTORY_DATASET.value,
@@ -239,15 +245,39 @@ class FrictionCapabilityPipeline:
     ) -> None:
         dataset = TrajectoryDatasetPayload.model_validate(self.stores.agent.get(dataset_ref).payload)
         deployment = RealityDeploymentPayload.model_validate(self.stores.agent.get(deployment_ref).payload)
-        is_fresh = deployment.fresh_episode and deployment.world_instance_id != dataset.world_instance_id
+        identity_matches = (
+            deployment.task_id == dataset.task.task_id
+            and deployment.task_version == dataset.task.task_version
+            and deployment.object_id == dataset.task.object_id
+            and deployment.object_archetype_version == dataset.task.object_archetype_version
+            and deployment.target_position_m == dataset.task.target_position_m
+            and deployment.target_radius_m == dataset.task.target_radius_m
+            and deployment.target_yaw_rad == dataset.task.target_yaw_rad
+            and deployment.yaw_tolerance_rad == dataset.task.yaw_tolerance_rad
+            and (
+                deployment.geometry_hash == dataset.task.geometry_hash
+                or (
+                    dataset.task.task_id == "push-cube-v1"
+                    and deployment.geometry_hash is None
+                )
+            )
+        )
+        is_fresh = (
+            deployment.fresh_episode
+            and deployment.world_instance_id != dataset.world_instance_id
+            and identity_matches
+        )
         if is_fresh:
             return
         failure = self.stores.agent.record_validation_failure(
             attempted_kind=LabArtifactKind.REALITY_DEPLOYMENT.value,
             rejected_payload=deployment.model_dump(mode="json"),
-            errors=("policy deployment did not use a fresh Reality episode",),
+            errors=("policy deployment is stale or task/object geometry identity changed",),
             provenance=(policy_ref,),
-            validation_conditions=("deployment world identity differs from experiment world",),
+            validation_conditions=(
+                "deployment world identity differs from experiment world",
+                "deployment task and public geometry identity match the validated policy",
+            ),
         )
         self.pipeline.transition(PipelineState.FAILED, evidence=(failure,))
         raise CapabilityExecutionError("policy deployment did not use a fresh Reality episode")

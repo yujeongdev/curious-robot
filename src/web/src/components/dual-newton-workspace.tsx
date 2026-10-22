@@ -1,17 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import type { RunState, WorldScene } from "../state/run-reducer";
+import { AgentCausalBridge, TwinCandidateFleet } from "./agent-causal-bridge";
 import { NewtonViewport } from "./newton-viewport";
-
-type WorldFlow = "experiment" | "posterior" | "validate" | "deploy" | "complete";
-
-function FlowStep({ current, children }: { current: boolean; children: ReactNode }) {
-  return (
-    <span data-active={current} aria-current={current ? "step" : undefined}>
-      {children}
-      {current && <b className="flow-current" aria-hidden="true">CURRENT</b>}
-    </span>
-  );
-}
 
 export function isSceneAdvancing(run: RunState, scene: WorldScene): boolean {
   if (run.activeScene !== scene || !run.activeStageInstanceId) return false;
@@ -31,38 +21,19 @@ export function DualNewtonWorkspace({
   const reality = run.worldFrames.truth;
   const twin = run.worldFrames.belief;
   const terminal = ["completed", "failed", "cancelled", "abandoned"].includes(run.status);
-  const activeStage = run.stageInstances.find((item) => item.id === run.activeStageInstanceId)?.stage;
-  const activeFlow: WorldFlow | null = activeStage && ["act", "measure"].includes(activeStage)
-    ? "experiment"
-    : activeStage && ["system_identification", "update_simulation"].includes(activeStage)
-      ? "posterior"
-      : activeStage && ["predict", "select_action"].includes(activeStage)
-        ? "validate"
-        : activeStage && ["execute", "verify", "learn"].includes(activeStage)
-          ? "deploy"
-          : terminal
-            ? "complete"
-            : null;
   return (
     <section className="dual-newton-workspace" aria-label="Reality and learned Twin comparison">
-      <div className="world-flow" aria-label="Reality to Twin to Reality workflow">
-        <FlowStep current={activeFlow === "experiment"}>1 · Reality experiment</FlowStep>
-        <i aria-hidden="true">→</i>
-        <FlowStep current={activeFlow === "posterior"}>2 · Posterior & Twin rebuild</FlowStep>
-        <i aria-hidden="true">→</i>
-        <FlowStep current={activeFlow === "validate"}>3 · Twin validation</FlowStep>
-        <i aria-hidden="true">→</i>
-        <FlowStep current={activeFlow === "deploy" || activeFlow === "complete"}>4 · Fresh Reality deployment</FlowStep>
-      </div>
+      <AgentCausalBridge run={run} />
+      <TwinCandidateFleet run={run} />
       <div className="mobile-world-switch" role="group" aria-label="Displayed physics world">
-        <button type="button" aria-pressed={mobileWorld === "truth"} onClick={() => setMobileWorld("truth")}>Reality</button>
+        <button type="button" aria-pressed={mobileWorld === "truth"} onClick={() => setMobileWorld("truth")}>Reality stand-in</button>
         <button type="button" aria-pressed={mobileWorld === "belief"} onClick={() => setMobileWorld("belief")}>Learned Twin</button>
       </div>
       <div className="dual-world-panes">
         <div className="world-pane-slot" data-mobile-visible={mobileWorld === "truth"}>
           <NewtonViewport
             scene="truth"
-            title="Experiment & deployment"
+            title="Physical experiment & fresh deployment"
             frame={reality?.frame ?? null}
             frameSequence={reality?.sequence}
             active={isSceneAdvancing(run, "truth")}
@@ -73,7 +44,7 @@ export function DualNewtonWorkspace({
         <div className="world-pane-slot" data-mobile-visible={mobileWorld === "belief"}>
           <NewtonViewport
             scene="belief"
-            title="Calibration & prediction"
+            title="Estimated physics · calibration & prediction"
             frame={twin?.frame ?? null}
             frameSequence={twin?.sequence}
             active={isSceneAdvancing(run, "belief")}

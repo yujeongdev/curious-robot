@@ -9,9 +9,11 @@ import numpy as np
 from pydantic_core import to_jsonable_python
 
 from .belief import update_belief
-from .control import PushExecutionResult
+from .control import PushExecutionResult, plan_contact_start_xy
 from .environment import BeliefEnvironment, EventIntentSink, StepControl, WorldConfig, rollout_candidate
+from .objects import get_object_archetype
 from .planning import (
+    DEFAULT_EXPERIMENTS,
     candidate_actions,
     task_relevance_for_actions,
 )
@@ -55,6 +57,14 @@ from .schemas import (
     WrenchObservation,
 )
 from .sysid import estimate_dynamic_friction, estimate_mass, estimate_static_friction
+from .tasks import (
+    PlanarPose,
+    evaluate_planar_goal,
+    get_task_definition,
+    get_task_preset,
+    wrapped_yaw_error,
+    yaw_from_quaternion_xyzw,
+)
 from .trajectory import minimum_jerk_duration_s
 
 
@@ -83,6 +93,28 @@ class RobotTools:
                 "RobotTools requires a narrow RobotRealityPort adapter; "
                 f"privileged plant attributes exposed: {names}"
             )
+        task_preset = get_task_preset(self.config.task_id)
+        contact_surface_id = task_preset.experiment_contact_surface_id
+        overrides = task_preset.experiment_protocol_overrides
+        self.protocol = self.protocol.model_copy(
+            update={
+                "static_probe": self.protocol.static_probe.model_copy(
+                    update={
+                        "contact_surface_id": contact_surface_id,
+                        **overrides.static_probe.model_dump(exclude_none=True),
+                    }
+                ),
+                "dynamic_probe": self.protocol.dynamic_probe.model_copy(
+                    update={
+                        "contact_surface_id": contact_surface_id,
+                        **overrides.dynamic_probe.model_dump(exclude_none=True),
+                    }
+                ),
+                "final_push": self.protocol.final_push.model_copy(
+                    update={"contact_surface_id": contact_surface_id}
+                ),
+            }
+        )
 
     def _record(self, tool: str, arguments: dict, result: dict) -> None:
         self.records.append(
@@ -187,6 +219,8 @@ class RobotTools:
         *,
         speed_m_s: float | None = None,
         push_height_m: float | None = None,
+        lateral_contact_offset_m: float | None = None,
+        contact_surface_id: str | None = None,
     ) -> PushExecutionResult:
         if max_force_n > self.config.maximum_tool_force_n:
             raise ValueError("force exceeds safety limit")
@@ -195,7 +229,19 @@ class RobotTools:
             dt_s=self.config.dt_s,
             speed_m_s=speed_m_s or self.protocol.final_push.contact_speed_m_s,
             push_height_m=push_height_m,
+            lateral_contact_offset_m=lateral_contact_offset_m,
+            contact_surface_id=contact_surface_id,
             safety_stop_fraction=1.0,
+        )
+        preset = get_task_preset(self.config.task_id)
+        archetype = get_object_archetype(
+            preset.object_archetype_id,
+            preset.object_archetype_version,
+        )
+        archetype.validate_contact_operating_point(
+            surface_id=protocol.contact_surface_id,
+            lateral_offset_m=protocol.lateral_ik_compensation_m,
+            push_height_object_m=protocol.push_height_offset_m,
         )
         result = self.reality.execute_push(
             target_m,
@@ -208,6 +254,8 @@ class RobotTools:
                 "target_m": target_m,
                 "speed_m_s": protocol.contact_speed_m_s,
                 "push_height_m": protocol.push_height_offset_m,
+                "lateral_contact_offset_m": protocol.lateral_ik_compensation_m,
+                "contact_surface_id": protocol.contact_surface_id,
             },
             {
                 "sample_count": len(result.samples),
@@ -263,7 +311,23 @@ class RobotTools:
     def _prepare_physical_tool_tip(self, protocol: PushProtocol) -> tuple[float, float, float]:
         if not self.config.include_robot:
             raise RuntimeError("physical experiments require the Franka articulation")
-        cube = self.reality.observe_object_pose().pose.position_m
+        object_pose = self.reality.observe_object_pose().pose
+        preset = get_task_preset(self.config.task_id)
+        archetype = get_object_archetype(
+            preset.object_archetype_id,
+            preset.object_archetype_version,
+        )
+        surface = next(
+            item for item in archetype.contact_surfaces if item.surface_id == protocol.contact_surface_id
+        )
+        contact_start_xy = plan_contact_start_xy(
+            object_position_m=object_pose.position_m,
+            object_orientation_xyzw=object_pose.orientation_xyzw,
+            surface=surface,
+            push_direction_xy=np.asarray((1.0, 0.0)),
+            precontact_offset_m=protocol.precontact_offset_m,
+            lateral_offset_m=protocol.lateral_ik_compensation_m,
+        )
         tool = self.reality.observe_tool_pose().position_m
         self.release_force_control()
         self.close_gripper()
@@ -274,8 +338,8 @@ class RobotTools:
         self.move_cartesian(
             Pose(
                 position_m=(
-                    cube[0] - protocol.precontact_offset_m,
-                    cube[1] + protocol.lateral_ik_compensation_m,
+                    float(contact_start_xy[0]),
+                    float(contact_start_xy[1]),
                     protocol.safe_height_m,
                 )
             ),
@@ -284,14 +348,18 @@ class RobotTools:
         self.move_cartesian(
             Pose(
                 position_m=(
-                    cube[0] - protocol.precontact_offset_m,
-                    cube[1] + protocol.lateral_ik_compensation_m,
-                    cube[2] + protocol.push_height_offset_m,
+                    float(contact_start_xy[0]),
+                    float(contact_start_xy[1]),
+                    object_pose.position_m[2] + protocol.push_height_offset_m,
                 )
             ),
             speed_m_s=protocol.contact_speed_m_s,
         )
-        return cube
+        return (
+            float(contact_start_xy[0]),
+            float(contact_start_xy[1]),
+            object_pose.position_m[2] + protocol.push_height_offset_m,
+        )
 
     def _sample_contact_push(
         self,
@@ -353,12 +421,12 @@ class RobotTools:
     def probe_static_friction(self) -> ExperimentEvidence:
         protocol = self.protocol.static_probe
         evidence_id = f"static-{uuid.uuid4().hex[:8]}"
-        cube = self._prepare_physical_tool_tip(protocol)
+        contact_start = self._prepare_physical_tool_tip(protocol)
         samples = self._sample_contact_push(
-            start_x_m=cube[0] - protocol.precontact_offset_m,
-            end_x_m=cube[0] - protocol.precontact_offset_m + protocol.maximum_travel_m,
-            y_m=cube[1] + protocol.lateral_ik_compensation_m,
-            z_m=cube[2] + protocol.push_height_offset_m,
+            start_x_m=contact_start[0],
+            end_x_m=contact_start[0] + protocol.maximum_travel_m,
+            y_m=contact_start[1],
+            z_m=contact_start[2],
             increment_m=protocol.command_increment_m,
             substeps=protocol.physics_substeps_per_command,
             stop_after_breakaway=True,
@@ -374,12 +442,15 @@ class RobotTools:
         contact_count = sum(sample.contact_valid for sample in samples)
         contact_coverage = contact_count / max(len(samples), 1)
         quality_flags = []
+        yaw_excursion = _maximum_yaw_excursion(samples)
         if moved_frames < protocol.breakaway_consecutive_frames:
             quality_flags.append("right_censored_no_breakaway")
         if contact_count < protocol.minimum_valid_contact_samples:
             quality_flags.append("insufficient_native_contact_samples")
         if contact_coverage < protocol.minimum_contact_coverage_fraction:
             quality_flags.append("insufficient_contact_coverage")
+        if yaw_excursion > protocol.maximum_yaw_excursion_rad:
+            quality_flags.append("excessive_yaw_motion")
         evidence = ExperimentEvidence(
             evidence_id=evidence_id,
             experiment="static_friction",
@@ -388,7 +459,11 @@ class RobotTools:
                 "motion_threshold_m_s": protocol.breakaway_velocity_m_s,
                 "position_increment_m": protocol.command_increment_m,
                 "force_model_discrepancy_fraction": protocol.force_model_discrepancy_fraction,
-                "producer": "Newton SensorContact Franka end-effector ↔ cube",
+                "producer": (
+                    "Newton SensorContact Franka end-effector ↔ t-bar"
+                    if self.config.object_kind == "t_bar"
+                    else "Newton SensorContact Franka end-effector ↔ cube"
+                ),
                 "controller": "Franka IK minimum-jerk joint-target contact ramp",
                 "protocol_schema_version": self.protocol.schema_version,
                 "protocol_sha256": protocol_sha256(self.protocol),
@@ -399,6 +474,8 @@ class RobotTools:
                 "contact_coverage_fraction": contact_coverage,
                 "minimum_contact_coverage_fraction": protocol.minimum_contact_coverage_fraction,
                 "minimum_valid_contact_samples": protocol.minimum_valid_contact_samples,
+                "maximum_yaw_excursion_rad": protocol.maximum_yaw_excursion_rad,
+                "observed_yaw_excursion_rad": yaw_excursion,
             },
             quality_flags=tuple(quality_flags),
         )
@@ -409,12 +486,12 @@ class RobotTools:
     def probe_dynamic_friction(self) -> ExperimentEvidence:
         protocol = self.protocol.dynamic_probe
         evidence_id = f"dynamic-{uuid.uuid4().hex[:8]}"
-        cube = self._prepare_physical_tool_tip(protocol)
+        contact_start = self._prepare_physical_tool_tip(protocol)
         samples = self._sample_contact_push(
-            start_x_m=cube[0] - protocol.precontact_offset_m,
-            end_x_m=cube[0] - protocol.precontact_offset_m + protocol.maximum_travel_m,
-            y_m=cube[1] + protocol.lateral_ik_compensation_m,
-            z_m=cube[2] + protocol.push_height_offset_m,
+            start_x_m=contact_start[0],
+            end_x_m=contact_start[0] + protocol.maximum_travel_m,
+            y_m=contact_start[1],
+            z_m=contact_start[2],
             increment_m=protocol.command_increment_m,
             substeps=protocol.physics_substeps_per_command,
             stop_after_breakaway=False,
@@ -424,17 +501,24 @@ class RobotTools:
         contact_count = sum(sample.contact_valid for sample in samples)
         contact_coverage = contact_count / max(len(samples), 1)
         quality_flags = []
+        yaw_excursion = _maximum_yaw_excursion(samples)
         if contact_count < protocol.minimum_valid_contact_samples:
             quality_flags.append("insufficient_native_contact_samples")
         if contact_coverage < protocol.minimum_contact_coverage_fraction:
             quality_flags.append("insufficient_contact_coverage")
+        if yaw_excursion > protocol.maximum_yaw_excursion_rad:
+            quality_flags.append("excessive_yaw_motion")
         evidence = ExperimentEvidence(
             evidence_id=evidence_id,
             experiment="dynamic_friction",
             samples=tuple(samples),
             metadata={
                 "target_velocity_m_s": protocol.contact_speed_m_s,
-                "producer": "Newton SensorContact Franka end-effector ↔ cube",
+                "producer": (
+                    "Newton SensorContact Franka end-effector ↔ t-bar"
+                    if self.config.object_kind == "t_bar"
+                    else "Newton SensorContact Franka end-effector ↔ cube"
+                ),
                 "controller": "Franka IK minimum-jerk approach plus maintained-contact slide",
                 "protocol_schema_version": self.protocol.schema_version,
                 "protocol_sha256": protocol_sha256(self.protocol),
@@ -445,6 +529,8 @@ class RobotTools:
                 "contact_coverage_fraction": contact_coverage,
                 "minimum_contact_coverage_fraction": protocol.minimum_contact_coverage_fraction,
                 "minimum_valid_contact_samples": protocol.minimum_valid_contact_samples,
+                "maximum_yaw_excursion_rad": protocol.maximum_yaw_excursion_rad,
+                "observed_yaw_excursion_rad": yaw_excursion,
             },
             quality_flags=tuple(quality_flags),
         )
@@ -497,8 +583,11 @@ class RobotTools:
         return self.belief
 
     def simulate_candidate_action(self, candidate: ActionCandidate) -> PredictedOutcome:
-        observed_start = self.reality.observe_object_pose().pose.position_m
-        rollout_config = replace(self.config, initial_position_m=observed_start)
+        # Candidate worlds model a fresh deployment episode. Physical probes may
+        # have displaced the experiment object, so their terminal pose is not a
+        # valid deployment initial condition.
+        rollout_start = self.config.initial_position_m
+        rollout_config = replace(self.config, initial_position_m=rollout_start)
         outcome = rollout_candidate(
             self.belief,
             candidate,
@@ -511,7 +600,7 @@ class RobotTools:
             "simulate_candidate_action",
             {
                 **candidate.model_dump(mode="json"),
-                "rollout_initial_position_m": observed_start,
+                "rollout_initial_position_m": rollout_start,
                 "world_config_id": rollout_config.config_id,
                 "experiment_protocol_id": f"physical-experiment:{protocol_sha256(self.protocol)}",
                 "belief_revision": self.belief.revision,
@@ -543,11 +632,22 @@ class RobotTools:
         return result
 
     def propose_experiment(self, completed: set[str]) -> ExperimentPlan:
-        actions = candidate_actions(self.config.target_position_m)
+        actions = candidate_actions(self.config.target_position_m, task_id=self.config.task_id)
+        task = get_task_preset(self.config.task_id)
+        task_definition = get_task_definition(
+            task.task_definition_id,
+            task.task_definition_version,
+        )
+        admitted = tuple(
+            candidate
+            for candidate in DEFAULT_EXPERIMENTS
+            if candidate.candidate_id in task_definition.permitted_experiment_ids
+        )
         result = plan_experiment(
             self.belief,
             task_relevance_for_actions(actions, available_kinds=frozenset({"push"})),
             completed,
+            admitted,
         )
         self._record("propose_experiment", {"completed": sorted(completed)}, result.model_dump())
         return result
@@ -560,17 +660,25 @@ class RobotTools:
     def verify_task_success(self) -> bool:
         observation = self.reality.observe_object_pose()
         position = np.asarray(observation.pose.position_m)
-        target = np.asarray(self.config.target_position_m)
-        planar_error = float(np.linalg.norm(position[:2] - target[:2]))
+        goal = evaluate_planar_goal(
+            get_task_preset(self.config.task_id).goal,
+            PlanarPose(
+                x_m=float(position[0]),
+                y_m=float(position[1]),
+                yaw_rad=yaw_from_quaternion_xyzw(observation.pose.orientation_xyzw),
+            ),
+        )
         stable = np.linalg.norm(observation.linear_velocity_m_s) < 0.02
-        target_region = bool(planar_error <= self.config.target_radius_m and position[2] >= 0.015)
+        target_region = bool(goal.success and position[2] >= 0.015)
         success = bool(target_region and stable)
         self._record(
             "verify_task_success",
             {},
             {
                 "success": success,
-                "target_error_m": planar_error,
+                "target_error_m": goal.position_error_m,
+                "target_yaw_error_rad": goal.yaw_error_rad,
+                "goal_predicates": goal.predicates,
                 "target_region": target_region,
                 "stable": bool(stable),
             },
@@ -584,3 +692,13 @@ __all__ = [
     "estimate_mass",
     "estimate_static_friction",
 ]
+
+
+def _maximum_yaw_excursion(samples: list[MotionSample]) -> float:
+    if not samples:
+        return 0.0
+    initial_yaw = yaw_from_quaternion_xyzw(samples[0].orientation_xyzw)
+    return max(
+        wrapped_yaw_error(yaw_from_quaternion_xyzw(sample.orientation_xyzw), initial_yaw)
+        for sample in samples
+    )

@@ -11,13 +11,18 @@ React Three Fiber is a presentation mirror of committed Newton transforms. It
 must never integrate motion, infer contact, mutate a posterior, or fabricate a
 frame for either world.
 
-The left pane is **Simulated Reality**. It displays bounded robot experiments,
+The left pane is **Reality Stand-in · Hidden Physics**. It displays bounded robot experiments,
 measured outcomes, and fresh policy deployment. Hidden truth parameters are
 not displayed before evaluator reveal.
 
 The right pane is the **Learned Newton Twin**. It displays a world constructed
 from public geometry, numerical configuration, and evidence-backed posterior
 parameters. Calibration and candidate-action prediction belong here.
+
+Between them, the causal bridge names the only permitted transfer: robot
+observation → evidence-backed posterior patch. A three-slot candidate fleet may
+show multiple independent Twin worlds, but only when their prediction or visual
+events were actually recorded. Empty capacity remains explicitly `WAITING`.
 
 ## Synchronization
 
@@ -48,8 +53,9 @@ the append-only event order.
 - Missing frames, predictions, and measurements are explicit; they are never
   replaced with zero values or copied from the other world.
 - Task success and prediction agreement remain separate verdicts.
-- The six-phase discovery rail stays visible; the four-step world-flow rail
-  indicates where physical work is currently occurring.
+- The six-phase discovery rail stays visible; the five-step causal bridge
+  indicates where evidence crosses from Reality into the Twin and back into a
+  fresh Reality deployment.
 
 ## Capture acceptance
 

@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import json
 import threading
 import webbrowser
 
 
 def main(argv: list[str] | None = None) -> None:
+    from .tasks import list_task_presets
+
+    task_ids = tuple(preset.preset_id for preset in list_task_presets())
     parser = argparse.ArgumentParser(description="Discover Physics. Simulate. Act. Learn.")
     subparsers = parser.add_subparsers(dest="command", required=True)
     run = subparsers.add_parser("run", help="run one autonomous discovery episode")
+    run.add_argument("--task", choices=task_ids, default="push-cube-v1")
     run.add_argument("--seed", type=int, default=7)
     run.add_argument("--device", default="cuda:0")
     run.add_argument("--output", default="artifacts/demo")
@@ -20,6 +25,7 @@ def main(argv: list[str] | None = None) -> None:
         help="run the isolated Reality-to-Twin friction capability slice",
     )
     friction.add_argument("--seed", type=int, default=7)
+    friction.add_argument("--task", choices=task_ids, default="push-cube-v1")
     friction.add_argument("--device", default="cuda:0")
     friction.add_argument("--output", default="artifacts/lab-friction")
     distill = subparsers.add_parser(
@@ -39,6 +45,7 @@ def main(argv: list[str] | None = None) -> None:
     web.add_argument("--port", type=int, default=8765)
     web.add_argument("--open", action=argparse.BooleanOptionalAction, default=True)
     web.add_argument("--autorun", action="store_true", help="start the known-good demo from the browser")
+    web.add_argument("--task", choices=task_ids, default="push-cube-v1")
     web.add_argument("--seed", type=int, default=7)
     web.add_argument("--device", default="cuda:0")
     args = parser.parse_args(argv)
@@ -46,6 +53,7 @@ def main(argv: list[str] | None = None) -> None:
         from .runner import run_episode
 
         result = run_episode(
+            task_id=args.task,
             seed=args.seed,
             output_directory=args.output,
             device=args.device,
@@ -61,12 +69,16 @@ def main(argv: list[str] | None = None) -> None:
         from .lab.friction_runner import run_newton_friction_slice
 
         run_newton_friction_slice(
+            task_id=args.task,
             seed=args.seed,
             output_directory=args.output,
             device=args.device,
         )
         manifest = Path(args.output) / "friction_capability_manifest.json"
-        print(manifest.read_text(), end="")
+        manifest_document = json.loads(manifest.read_text())
+        print(json.dumps(manifest_document, indent=2, sort_keys=True))
+        if manifest_document.get("status") != "PASSED":
+            raise SystemExit(2)
         return
     if args.command == "lab-distill":
         from .lab.capability_artifact import distill_from_manifest
@@ -93,7 +105,7 @@ def main(argv: list[str] | None = None) -> None:
 
     url = f"http://{args.host}:{args.port}/"
     if args.autorun:
-        url += f"?autorun=1&seed={args.seed}&device={args.device}"
+        url += f"?autorun=1&task={args.task}&seed={args.seed}&device={args.device}"
     if args.open:
         threading.Timer(0.8, webbrowser.open, args=(url,)).start()
     uvicorn.run(create_app(), host=args.host, port=args.port, log_level="info")

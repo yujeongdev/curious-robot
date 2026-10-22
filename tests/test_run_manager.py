@@ -55,7 +55,15 @@ def test_spawn_worker_commits_ordered_terminal_trace(manager: RunManager) -> Non
     assert events[0]["type"] == "run.started"
     assert events[-1]["type"] == "run.completed"
     assert sum(event["type"] == "simulation.visual_frame" for event in events) == 3
+    assert events[0]["payload"]["task_id"] == "push-cube-v1"
     assert manager.ndjson(run_id).count(b"\n") == len(events)
+
+
+def test_run_configuration_carries_allowlisted_task_identity() -> None:
+    config = RunConfiguration.from_mapping({"task_id": "push-t-bar-v1", "seed": 9})
+    assert config.public_dict()["task_id"] == "push-t-bar-v1"
+    with pytest.raises(KeyError, match="unsupported task preset"):
+        RunConfiguration.from_mapping({"task_id": "arbitrary-python-plugin"})
 
 
 def test_one_active_run_and_future_cursor_are_rejected(manager: RunManager) -> None:

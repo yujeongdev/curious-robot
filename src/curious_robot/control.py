@@ -11,10 +11,12 @@ import newton
 import numpy as np
 import warp as wp
 
+from .objects import ContactSurface
 from .schemas import MotionSample
 from .trajectory import (
     CartesianMotionResult,
     CartesianTrackingError,
+    IKUnreachableError,
     minimum_jerk_blend,
     minimum_jerk_duration_s,
 )
@@ -39,6 +41,46 @@ class PushExecutionResult:
     @property
     def safety_tripped(self) -> bool:
         return self.outcome is PushExecutionOutcome.SAFETY_STOPPED
+
+
+def _rotate_vector(
+    quaternion_xyzw: tuple[float, float, float, float],
+    vector: tuple[float, float, float],
+) -> np.ndarray:
+    """Rotate an object-local vector into world coordinates."""
+
+    quaternion = np.asarray(quaternion_xyzw, dtype=float)
+    xyz = quaternion[:3]
+    w = quaternion[3]
+    value = np.asarray(vector, dtype=float)
+    return value + 2.0 * np.cross(xyz, np.cross(xyz, value) + w * value)
+
+
+def plan_contact_start_xy(
+    *,
+    object_position_m: tuple[float, float, float],
+    object_orientation_xyzw: tuple[float, float, float, float],
+    surface: ContactSurface,
+    push_direction_xy: np.ndarray,
+    precontact_offset_m: float,
+    lateral_offset_m: float,
+) -> np.ndarray:
+    """Resolve a bounded pre-contact point from a public object-local face."""
+
+    start = np.asarray(object_position_m, dtype=float)
+    surface_center_offset = _rotate_vector(object_orientation_xyzw, surface.center_object_m)
+    surface_center = start + surface_center_offset
+    outward_normal = _rotate_vector(object_orientation_xyzw, surface.outward_normal_object)[:2]
+    tangent_direction = _rotate_vector(object_orientation_xyzw, surface.tangent_object)[:2]
+    outward_normal /= max(float(np.linalg.norm(outward_normal)), 1.0e-12)
+    tangent_direction /= max(float(np.linalg.norm(tangent_direction)), 1.0e-12)
+    push_direction = np.asarray(push_direction_xy, dtype=float)
+    push_direction /= max(float(np.linalg.norm(push_direction)), 1.0e-12)
+    if float(np.dot(outward_normal, push_direction)) > -0.8:
+        raise ValueError("selected contact surface does not oppose the commanded push direction")
+    center_to_face_m = abs(float(np.dot(surface_center_offset[:2], outward_normal)))
+    clearance_m = max(0.0, precontact_offset_m - center_to_face_m)
+    return surface_center[:2] + outward_normal * clearance_m + tangent_direction * lateral_offset_m
 
 
 class NewtonFrankaController:
@@ -179,22 +221,30 @@ class NewtonFrankaController:
         self.release_compliance()
         self.set_gripper(0.0)
         for _attempt in range(protocol.maximum_attempts):
-            start = np.asarray(world.observe_object_pose().pose.position_m, dtype=float)
+            object_pose = world.observe_object_pose().pose
+            start = np.asarray(object_pose.position_m, dtype=float)
             planar_delta = np.asarray(target_m[:2], dtype=float) - start[:2]
             planar_distance = float(np.linalg.norm(planar_delta))
             if planar_distance <= world.config.target_radius_m:
                 outcome = PushExecutionOutcome.COMPLETED
                 break
             push_direction = planar_delta / planar_distance
-            lateral_direction = np.array((-push_direction[1], push_direction[0]))
+            surface = world.validate_contact_operating_point(
+                surface_id=protocol.contact_surface_id,
+                lateral_offset_m=protocol.lateral_ik_compensation_m,
+                push_height_object_m=protocol.push_height_offset_m,
+            )
             tool = world.observe_tool_pose().position_m
             self.command_cartesian_at_speed(
                 (tool[0], tool[1], protocol.safe_height_m), protocol.approach_speed_m_s
             )
-            contact_start_xy = (
-                start[:2]
-                - push_direction * protocol.precontact_offset_m
-                + lateral_direction * protocol.lateral_ik_compensation_m
+            contact_start_xy = plan_contact_start_xy(
+                object_position_m=object_pose.position_m,
+                object_orientation_xyzw=object_pose.orientation_xyzw,
+                surface=surface,
+                push_direction_xy=push_direction,
+                precontact_offset_m=protocol.precontact_offset_m,
+                lateral_offset_m=protocol.lateral_ik_compensation_m,
             )
             self.command_cartesian_at_speed(
                 (float(contact_start_xy[0]), float(contact_start_xy[1]), protocol.safe_height_m),
@@ -231,7 +281,6 @@ class NewtonFrankaController:
             outcome=outcome,
             peak_contact_force_n=peak_contact_force_n,
         )
-
     def hold_current_joint_positions(self, duration_s: float) -> None:
         world = self._world
         world.control.joint_target_q.assign(world.state_0.joint_q.numpy())
@@ -344,7 +393,7 @@ class NewtonFrankaController:
         achieved = world._ik_state.body_q.numpy()[world._ee_index, :3]
         residual = float(np.linalg.norm(achieved - target))
         if residual > world.config.ik_position_tolerance_m:
-            raise RuntimeError(
+            raise IKUnreachableError(
                 f"Franka IK residual {residual:.6f} m exceeds {world.config.ik_position_tolerance_m:.6f} m"
             )
         return solution.astype(float)

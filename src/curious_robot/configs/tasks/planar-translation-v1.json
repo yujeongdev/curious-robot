@@ -1,0 +1,8 @@
+{
+  "task_definition_id": "planar-translation",
+  "version": "1.0.0",
+  "objective": "Move the object reference point into the target region.",
+  "permitted_action_families": ["controlled_push", "pick_and_place"],
+  "permitted_experiment_ids": ["static_breakaway_ramp", "dynamic_controlled_slide"],
+  "maximum_experiments": 3
+}

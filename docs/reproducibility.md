@@ -18,19 +18,23 @@ frame stepping. This is playback, not a physics determinism claim.
 
 `reexecution.json` records the seed, package versions, device, solver and
 timestep settings, scene parameters, hidden evaluation parameters, initial
-cube state, exact final-action force sequence, reference state trajectory,
-sensor settings, agent tool calls, and belief history. Run:
+object and robot state, the exact final-action joint-target sequence, reference
+position and orientation trajectories, sensor settings, agent tool calls, and
+belief history. Run:
 
 ```bash
 uv run curious-robot-replay artifacts/demo/reexecution.json --verify
 ```
 
-The verifier rebuilds a fresh Newton truth world, reapplies every recorded
-low-level force command, and writes `reexecution_report.json`. Warp's
+The verifier rebuilds a fresh Newton Reality world, reapplies every recorded
+low-level joint target, compares both position and (when recorded) wrapped yaw,
+and writes `reexecution_report.json`. Warp's
 `RUN_TO_RUN` mode reduces nondeterminism on the same GPU, but bitwise identity
 across GPU architectures, drivers, or package versions is not promised. A
 fresh solver also cannot restore every private contact warm-start buffer from
 public Newton state. The explicit position tolerance is therefore part of the
 manifest and every report, and a failed report is retained as evidence rather
 than hidden. The reduced cube-only verifier uses 5 mm; the full articulated
-Franka/contact replay uses 15 mm.
+Franka/contact re-execution uses 15 mm plus the manifest's explicit yaw bound.
+A position-only pass is not reported as a deterministic re-execution pass when
+the yaw comparison fails.

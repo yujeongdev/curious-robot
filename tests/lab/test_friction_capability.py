@@ -19,6 +19,7 @@ from curious_robot.lab.friction_artifacts import (
     FrictionTaskSpec,
     RealityDeploymentPayload,
     TrajectoryDatasetPayload,
+    candidate_push_policies,
     default_world_spec_seed,
     select_push_policy,
 )
@@ -91,6 +92,27 @@ def _experiments() -> tuple[ExperimentEvidence, ExperimentEvidence]:
             },
         ),
     )
+
+
+def test_tbar_world_spec_has_public_geometry_and_three_distinct_candidates() -> None:
+    seed = default_world_spec_seed(
+        task_id="push-t-bar-v1",
+        initial_position_m=(-0.12, 0.0, 0.02),
+        target_position_m=(0.15, 0.0, 0.02),
+        target_radius_m=0.03,
+        world_config={"dt_s": 1 / 240},
+    )
+    dataset_task = FrictionTaskSpec.model_validate(seed["task"])
+    geometry = seed["public_geometry"]
+    candidates = candidate_push_policies(dataset_task)
+
+    assert dataset_task.task_id == "push-t-bar-v1"
+    assert dataset_task.object_id == "t-bar"
+    assert dataset_task.geometry_hash == geometry["geometry_hash"]
+    assert len(geometry["parts"]) == 2
+    assert len(candidates) == 3
+    assert len({candidate.action_id for candidate in candidates}) == 3
+    assert all(candidate.kind == "push" for candidate in candidates)
 
 
 @dataclass

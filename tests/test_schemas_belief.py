@@ -48,4 +48,5 @@ def test_action_candidate_rejects_unsafe_motion_values(
             speed_m_s=speed_m_s,
             max_force_n=max_force_n,
             push_height_m=push_height_m,
+            contact_surface_id="rear_x",
         )

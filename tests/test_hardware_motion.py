@@ -67,6 +67,7 @@ def _compile(**updates):  # noqa: ANN003, ANN202
             speed_m_s=0.04,
             max_force_n=12.0,
             push_height_m=0.015,
+            contact_surface_id="rear_x",
         ),
         "protocol": load_default_protocol().final_push,
         "capability_frame_id": "simulation_world",
@@ -140,6 +141,7 @@ def test_push_plan_rejects_widened_or_unbounded_motion() -> None:
         speed_m_s=0.04,
         max_force_n=12.0,
         push_height_m=0.015,
+        contact_surface_id="rear_x",
     )
 
     with pytest.raises(ValueError, match="speed bound widens"):
@@ -160,6 +162,7 @@ def test_push_plan_rejects_zero_distance_and_non_push_action() -> None:
                 speed_m_s=0.04,
                 max_force_n=12.0,
                 push_height_m=0.015,
+                contact_surface_id="rear_x",
             )
         )
     with pytest.raises(ValueError, match="only push"):
@@ -185,6 +188,7 @@ def test_push_plan_rejects_action_protocol_height_mismatch() -> None:
                 speed_m_s=0.04,
                 max_force_n=12.0,
                 push_height_m=0.01,
+                contact_surface_id="rear_x",
             )
         )
 
@@ -208,6 +212,7 @@ def test_push_plan_rejects_infeasible_travel_instead_of_truncating() -> None:
                 speed_m_s=0.04,
                 max_force_n=12.0,
                 push_height_m=0.015,
+                contact_surface_id="rear_x",
             )
         )
 

@@ -52,6 +52,20 @@ export function ContactOverlays({ frame }: { frame: VisualFramePayload }) {
             <torusGeometry args={[frame.target_region.radius_m * 0.78, 0.002, 8, 48]} />
             <meshBasicMaterial color="#67c98a" />
           </mesh>
+          {frame.target_region.yaw_tolerance_rad != null && (
+            <Line
+              points={[
+                [0, 0, 0.01],
+                [
+                  Math.cos(frame.target_region.yaw_rad) * frame.target_region.radius_m,
+                  Math.sin(frame.target_region.yaw_rad) * frame.target_region.radius_m,
+                  0.01,
+                ],
+              ]}
+              color="#67c98a"
+              lineWidth={3}
+            />
+          )}
         </group>
       )}
     </group>

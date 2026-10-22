@@ -3,23 +3,29 @@
 This directory holds lightweight, reviewable portfolio media. The authoritative
 scientific evidence remains the terminal run directory under `artifacts/`:
 `events.ndjson`, measurements, the Newton visual recording, environment
-fingerprints, and the deterministic re-execution report.
+fingerprints, and the physics re-execution report.
 
 ## Generate the canonical demo
 
 First create and finish a recorded run through Agent Lab. Then capture its
-deterministic replay:
+fixed-clock visual replay:
 
 ```bash
+STAGE_DIR="$(mktemp -d)"
 scripts/record_agent_lab_demo.sh \
   --run artifacts/<run_id> \
-  --output docs/media/curious-robot-demo.mp4
+  --output "$STAGE_DIR/curious-robot-demo.mp4" \
+  --expect-task push-t-bar-v1
 ```
+
+Inspect and checksum the staged MP4/GIF before moving them into `docs/media/`.
+Never capture directly over the published files: a failed gate must not leave an
+older asset looking like the result of the requested run.
 
 The wrapper calls the frontend's `record:demo` script, which owns browser
 replay and frame rendering. It then independently checks that the MP4:
 
-- contains no Franka visual-mesh penetration deeper than 1 mm in the recorded
+- contains no Franka visual-mesh penetration deeper than 1.1 mm in the recorded
   Newton frames;
 - contains a decodable video stream;
 - is exactly 1920×1080 at 30 fps by default;
@@ -27,18 +33,22 @@ replay and frame rendering. It then independently checks that the MP4:
 - is not a wholly blank capture;
 - receives a SHA-256 sidecar only after validation.
 
+The 1.1 mm bound covers the measured MuJoCo-Warp compliant-contact tolerance;
+the previously published 1.414 mm cube crossing still fails.
+
 The frontend additionally checks the R3F viewport crop. A bright interface
 around an empty WebGL canvas can pass a whole-frame luminance test, so viewport
 readiness and edge/luminance checks must remain part of `record:demo`.
 
-The canonical 45-second edit makes five evidence checkpoints legible without
+The canonical fixed-clock edit makes five evidence checkpoints legible without
 narration:
 
 1. the unknown surface and broad initial belief;
 2. selection of a friction probe from competing experiments;
 3. measured breakaway force synchronized with contact;
 4. posterior friction estimates and visibly reduced uncertainty;
-5. push/pick prediction, execution, residual, and verification or Learn loop.
+5. candidate prediction, fresh-Reality execution, residual, and verification
+   or Learn loop.
 
 Capture uses the dark Precision Lab Instrument theme, the canonical 65/35
 viewport/evidence split, a 220 px telemetry dock, local fonts/assets, and a

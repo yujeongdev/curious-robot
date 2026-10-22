@@ -42,6 +42,7 @@ export interface WorldFrameState {
 
 export interface RunState {
   runId: string | null;
+  taskId: string | null;
   status: RunStatus;
   lastSequence: number;
   lastSimTimeS: number;
@@ -52,6 +53,12 @@ export interface RunState {
   worldFrames: Readonly<Record<WorldScene, WorldFrameState | null>>;
   activeScene: WorldScene | null;
   measurements: readonly MeasurementPoint[];
+  predictionEvents: readonly AgentEvent[];
+  selectedActionId: string | null;
+  causalExperimentName: string | null;
+  causalEvidenceId: string | null;
+  causalPatchLabel: string | null;
+  causalDeploymentAction: string | null;
   beliefs: Readonly<Record<string, BeliefEstimate>>;
   gap: { expected: number; received: number } | null;
   fatalError: string | null;
@@ -60,6 +67,7 @@ export interface RunState {
 
 export const initialRunState: RunState = {
   runId: null,
+  taskId: null,
   status: "idle",
   lastSequence: 0,
   lastSimTimeS: 0,
@@ -70,6 +78,12 @@ export const initialRunState: RunState = {
   worldFrames: { truth: null, belief: null },
   activeScene: null,
   measurements: [],
+  predictionEvents: [],
+  selectedActionId: null,
+  causalExperimentName: null,
+  causalEvidenceId: null,
+  causalPatchLabel: null,
+  causalDeploymentAction: null,
   beliefs: {},
   gap: null,
   fatalError: null,
@@ -169,6 +183,13 @@ export function reduceRunEvent(state: RunState, event: AgentEvent): RunState {
     ...updateStage(state, event),
   };
 
+  if (event.type === "run.started") {
+    return {
+      ...base,
+      taskId: typeof event.payload.task_id === "string" ? event.payload.task_id : state.taskId,
+    };
+  }
+
   if (event.type === "simulation.visual_frame") {
     const frame = visualFramePayloadSchema.parse(event.payload);
     return {
@@ -177,6 +198,14 @@ export function reduceRunEvent(state: RunState, event: AgentEvent): RunState {
         ...state.worldFrames,
         [frame.scene]: { frame, sequence: event.sequence },
       },
+    };
+  }
+  if (event.type.startsWith("tool.")) {
+    return {
+      ...base,
+      causalExperimentName: typeof event.payload.tool_name === "string"
+        ? event.payload.tool_name
+        : state.causalExperimentName,
     };
   }
   if (event.type === "measurement.sampled") {
@@ -189,7 +218,48 @@ export function reduceRunEvent(state: RunState, event: AgentEvent): RunState {
       objectPositionM: number(values, "object_position_m"),
       objectVelocityMps: number(values, "object_velocity_mps"),
     };
-    return { ...base, measurements: [...state.measurements, point].slice(-2000) };
+    return {
+      ...base,
+      measurements: [...state.measurements, point].slice(-2000),
+      causalEvidenceId: typeof event.payload.evidence_id === "string"
+        ? event.payload.evidence_id
+        : state.causalEvidenceId,
+    };
+  }
+  if (event.type === "measurement.summary") {
+    return {
+      ...base,
+      causalEvidenceId: typeof event.payload.evidence_id === "string"
+        ? event.payload.evidence_id
+        : state.causalEvidenceId,
+    };
+  }
+  if (event.type === "simulation.belief_rebuilt") {
+    return {
+      ...base,
+      predictionEvents: [],
+      selectedActionId: null,
+      causalPatchLabel: `revision ${String(event.payload.belief_revision ?? "—")}`,
+    };
+  }
+  if (event.type === "prediction.completed") {
+    return { ...base, predictionEvents: [...state.predictionEvents, event].slice(-8) };
+  }
+  if (event.type === "action.selected") {
+    return {
+      ...base,
+      selectedActionId: typeof event.payload.selected_action_id === "string"
+        ? event.payload.selected_action_id
+        : null,
+    };
+  }
+  if (event.type === "action.executed") {
+    return {
+      ...base,
+      causalDeploymentAction: typeof event.payload.action_id === "string"
+        ? event.payload.action_id
+        : state.causalDeploymentAction,
+    };
   }
   if (event.type === "belief.updated") {
     const parameter = String(event.payload.parameter_name ?? "unknown");
@@ -212,6 +282,7 @@ export function reduceRunEvent(state: RunState, event: AgentEvent): RunState {
           unit: String(posterior.units ?? event.payload.unit ?? ""),
         },
       },
+      causalPatchLabel: `${parameter} · revision ${String(event.payload.revision ?? "—")}`,
     };
   }
   if (event.type === "verification.completed") {

@@ -185,6 +185,27 @@ def test_dynamic_friction_rejects_insufficient_contact_coverage() -> None:
     assert "maintained robot-cube contact coverage" in result.mismatch_notes[0]
 
 
+def test_friction_estimators_reject_rotating_object_evidence() -> None:
+    mass = estimate(ParameterName.MASS, 0.2, 0.02, (0.08, 0.45))
+    static = estimate(ParameterName.STATIC_FRICTION, 0.62, 0.01, (0.2, 0.9))
+    evidence = ExperimentEvidence(
+        evidence_id="rotating-tbar",
+        experiment="dynamic_friction",
+        samples=tuple(sample(i * 0.05, force_x=0.7, vx=0.04) for i in range(20)),
+        quality_flags=("excessive_yaw_motion",),
+    )
+
+    dynamic = estimate_dynamic_friction(evidence, mass, static)
+    static_result = estimate_static_friction(
+        evidence.model_copy(update={"experiment": "static_friction"}),
+        mass,
+    )
+
+    assert dynamic.status == "unidentifiable"
+    assert static_result.status == "unidentifiable"
+    assert "rotation exceeded" in dynamic.mismatch_notes[0]
+
+
 def pytest_approx(value: float, **kwargs: float):
     import pytest
 

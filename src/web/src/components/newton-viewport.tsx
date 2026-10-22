@@ -9,11 +9,11 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Tooltip } from "./ui/tooltip";
 import { ContactOverlays } from "./scene/contact-overlays";
-import { findCubeBody } from "./scene/body-mapping";
+import { findObjectBody, resolveObjectVisual } from "./scene/body-mapping";
 import { FrankaMirror } from "./scene/franka";
 
 function Scene({ frame, cameraMode }: { frame: VisualFramePayload; cameraMode: "guided" | "manual" }) {
-  const cube = findCubeBody(frame.bodies);
+  const object = resolveObjectVisual(frame);
   return (
     <>
       <color attach="background" args={["#0a0e13"]} />
@@ -29,11 +29,15 @@ function Scene({ frame, cameraMode }: { frame: VisualFramePayload; cameraMode: "
         <Suspense fallback={null}>
           <FrankaMirror bodies={frame.bodies} toolTipRadiusM={frame.tool_tip_radius_m ?? undefined} />
         </Suspense>
-        {cube && (
-          <mesh position={cube.position_m} quaternion={cube.orientation_xyzw} castShadow>
-            <boxGeometry args={[0.05, 0.05, 0.05]} />
-            <meshStandardMaterial color="#d7a65c" roughness={0.78} />
-          </mesh>
+        {object && (
+          <group position={object.body.position_m} quaternion={object.body.orientation_xyzw}>
+            {object.parts.map((part) => (
+              <mesh key={part.part_id} position={part.center_object_m} quaternion={part.orientation_object_xyzw} castShadow receiveShadow>
+                <boxGeometry args={part.half_extents_m.map((value) => value * 2) as [number, number, number]} />
+                <meshStandardMaterial color="#d7a65c" roughness={0.78} />
+              </mesh>
+            ))}
+          </group>
         )}
         <ContactOverlays frame={frame} />
       </group>
@@ -42,10 +46,11 @@ function Scene({ frame, cameraMode }: { frame: VisualFramePayload; cameraMode: "
 }
 
 function SceneSummary({ frame, scene }: { frame: VisualFramePayload | null; scene: WorldScene }) {
-  const cube = frame ? findCubeBody(frame.bodies) : undefined;
+  const object = frame ? findObjectBody(frame.bodies, frame.object_geometry?.body_id) : undefined;
+  const objectLabel = frame?.object_geometry?.archetype_id ?? "object";
   return (
     <div className="sr-only" data-testid={`scene-summary-${scene}`}>
-      {frame ? `${frame.scene} scene, frame ${frame.frame_id}. Cube at ${cube?.position_m.join(", ") ?? "unknown"} meters. ${frame.contacts.length} contacts. Target region ${frame.target_region ? "visible" : "absent"}.` : "No visual frame received."}
+      {frame ? `${frame.scene} scene, frame ${frame.frame_id}. ${objectLabel} at ${object?.position_m.join(", ") ?? "unknown"} meters. ${frame.contacts.length} contacts. Target region ${frame.target_region ? "visible" : "absent"}.` : "No visual frame received."}
     </div>
   );
 }
@@ -70,12 +75,12 @@ export function NewtonViewport({
   const cameraMode = useRunStore((state) => state.cameraModes[scene]);
   const setCameraMode = useRunStore((state) => state.setCameraMode);
   const headingId = `viewport-title-${scene}`;
-  const worldLabel = scene === "truth" ? "Simulated Reality" : "Learned Newton Twin";
+  const worldLabel = scene === "truth" ? "Reality Stand-in" : "Learned Newton Twin";
   return (
     <section className={`viewport viewport--${scene}`} aria-labelledby={headingId} data-active={active}>
       <header className="viewport-toolbar">
         <div>
-          <span className="eyebrow">{scene === "truth" ? "Observed physics authority" : "Posterior physics model"}</span>
+          <span className="eyebrow">{scene === "truth" ? "Hidden physics authority · simulated hardware" : "Evidence-estimated physics only"}</span>
           <h2 id={headingId}>{worldLabel}</h2>
           <span className="world-purpose">{title}</span>
         </div>
@@ -91,7 +96,7 @@ export function NewtonViewport({
       </header>
       <div className="world-provenance mono" aria-label={`${worldLabel} provenance`}>
         <span>{frame ? frame.world_instance_id.slice(0, 12) : "world pending"}</span>
-        <span>{frame?.scenario_id ?? (scene === "truth" ? "reality evidence" : "posterior rollout")}</span>
+        <span>{frame?.scenario_id ?? (scene === "truth" ? "observations only · truth sealed" : "posterior rollout")}</span>
         <span><Clock3 /> {frame ? `${frame.sim_time_s.toFixed(2)} s` : "—"}</span>
         {scene === "belief" && <span>REV {frame?.belief_revision ?? "—"}</span>}
         {frameSequence !== undefined && <span>SEQ {frameSequence}</span>}
@@ -104,8 +109,8 @@ export function NewtonViewport({
         ) : (
           <div className="viewport-empty">
             <Eye />
-            <strong>{scene === "truth" ? "Waiting for Reality observations" : "Waiting for a posterior Twin build"}</strong>
-            <span>{scene === "truth" ? "Robot experiments and deployment appear only in this world." : "Counterfactual experiments and policy rollouts appear after evidence updates the belief."}</span>
+            <strong>{scene === "truth" ? "Waiting for Reality stand-in observations" : "Waiting for a posterior Twin build"}</strong>
+            <span>{scene === "truth" ? "The robot may experiment here, but hidden parameters remain sealed." : "Counterfactual experiments and policy rollouts appear only after evidence updates the belief."}</span>
             <ul><li>Independent world</li><li>Newton frames</li><li>No browser physics</li></ul>
           </div>
         )}

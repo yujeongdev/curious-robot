@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from curious_robot.belief import initial_belief, update_belief
+from curious_robot.belief import initial_belief_for_object, update_belief
+from curious_robot.objects import get_object_archetype
 from curious_robot.planning import candidate_actions
 from curious_robot.protocol import (
     PhysicalExperimentProtocol,
@@ -15,6 +17,7 @@ from curious_robot.protocol import (
 )
 from curious_robot.schemas import ActionCandidate, ExperimentEvidence, ParameterName
 from curious_robot.sysid import estimate_dynamic_friction, estimate_static_friction
+from curious_robot.tasks import get_task_preset
 
 from .artifact_store import LaboratoryArtifactStores
 from .contracts import (
@@ -38,28 +41,82 @@ class _FrictionModel(BaseModel):
 class FrictionTaskSpec(_FrictionModel):
     kind: Literal["friction-aware-push"]
     frame_id: Literal["simulation_world"]
-    object_id: Literal["cube"]
+    task_id: str = Field(default="push-cube-v1", min_length=1)
+    task_version: str = "1.0.0"
+    object_id: str = Field(min_length=1)
+    object_archetype_version: str = "1.0.0"
+    geometry_hash: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     protocol: PhysicalExperimentProtocol
     protocol_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     target_position_m: tuple[float, float, float]
     target_radius_m: float = Field(gt=0.0)
+    target_yaw_rad: float = 0.0
+    yaw_tolerance_rad: float | None = Field(default=None, gt=0.0, le=math.pi)
 
     @model_validator(mode="after")
     def validate_protocol_identity(self) -> FrictionTaskSpec:
         if protocol_sha256(self.protocol) != self.protocol_sha256:
             raise ValueError("protocol_sha256 does not match the protocol snapshot")
+        preset = get_task_preset(self.task_id)
+        if self.object_id != preset.object_archetype_id:
+            raise ValueError("task object does not match its allowlisted public preset")
+        if preset.goal.requires_yaw and (self.yaw_tolerance_rad is None or self.geometry_hash is None):
+            raise ValueError("pose task requires public geometry identity and yaw tolerance")
+        if preset.goal.requires_yaw and (
+            self.task_version != preset.version
+            or self.object_archetype_version != preset.object_archetype_version
+            or self.target_position_m[:2] != (preset.goal.target.x_m, preset.goal.target.y_m)
+            or self.target_radius_m != preset.goal.position_tolerance_m
+            or self.target_yaw_rad != preset.goal.target.yaw_rad
+            or self.yaw_tolerance_rad != preset.goal.yaw_tolerance_rad
+        ):
+            raise ValueError("pose task does not match its allowlisted public preset")
         return self
 
 
+class PublicBoxPart(_FrictionModel):
+    part_id: str = Field(min_length=1)
+    center_object_m: tuple[float, float, float]
+    half_extents_m: tuple[float, float, float]
+
+
 class PublicGeometrySpec(_FrictionModel):
-    cube_edge_m: float = Field(gt=0.0)
+    object_archetype_id: str = Field(default="cube", min_length=1)
+    object_archetype_version: str = "1.0.0"
+    geometry_hash: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    parts: tuple[PublicBoxPart, ...] = ()
+    cube_edge_m: float | None = Field(default=0.05, gt=0.0)
     initial_position_m: tuple[float, float, float]
+
+    @model_validator(mode="after")
+    def validate_geometry_identity(self) -> PublicGeometrySpec:
+        archetype = get_object_archetype(
+            self.object_archetype_id,
+            self.object_archetype_version,
+        )
+        if self.object_archetype_id != "cube" and (
+            self.geometry_hash is None or len(self.parts) != len(archetype.parts)
+        ):
+            raise ValueError("compound public geometry requires a hash and every declared part")
+        if self.object_archetype_id != "cube":
+            expected_parts = tuple(
+                PublicBoxPart(
+                    part_id=part.part_id,
+                    center_object_m=part.center_object_m,
+                    half_extents_m=part.half_extents_m,
+                )
+                for part in archetype.parts
+            )
+            if self.geometry_hash != archetype.geometry_hash or self.parts != expected_parts:
+                raise ValueError("T-bar geometry does not match its allowlisted archetype")
+        return self
 
 
 class PublicNumericalConfig(_FrictionModel):
     dt_s: float = Field(default=1.0 / 240.0, gt=0.0)
     include_robot: bool = True
     initial_position_m: tuple[float, float, float]
+    initial_yaw_rad: float = 0.0
     maximum_cartesian_speed_m_s: float = Field(default=0.15, gt=0.0)
     maximum_tool_force_n: float = Field(default=15.0, gt=0.0)
     observation_noise_std: float = Field(default=0.0002, ge=0.0)
@@ -70,7 +127,10 @@ class PublicNumericalConfig(_FrictionModel):
 
 
 class _ExperimentMetadata(_FrictionModel):
-    producer: Literal["Newton SensorContact Franka end-effector ↔ cube"]
+    producer: Literal[
+        "Newton SensorContact Franka end-effector ↔ cube",
+        "Newton SensorContact Franka end-effector ↔ t-bar",
+    ]
     protocol_schema_version: str = Field(min_length=1)
     protocol_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     experiment_correlation_id: str = Field(min_length=1)
@@ -80,6 +140,8 @@ class _ExperimentMetadata(_FrictionModel):
     contact_coverage_fraction: float = Field(ge=0.0, le=1.0)
     minimum_contact_coverage_fraction: float = Field(ge=0.0, le=1.0)
     minimum_valid_contact_samples: int = Field(gt=0)
+    maximum_yaw_excursion_rad: float = Field(default=math.pi, ge=0.0, le=math.pi)
+    observed_yaw_excursion_rad: float = Field(default=0.0, ge=0.0, le=math.pi)
 
 
 class StaticFrictionMetadata(_ExperimentMetadata):
@@ -120,6 +182,7 @@ class TrajectoryDatasetPayload(_FrictionModel):
             ):
                 raise ValueError("experiment protocol identity must match the task WorldSpec")
             allowed_flags = {
+                "excessive_yaw_motion",
                 "insufficient_contact_coverage",
                 "insufficient_native_contact_samples",
             }
@@ -134,6 +197,7 @@ class TrajectoryDatasetPayload(_FrictionModel):
 class DeploymentAttempt(_FrictionModel):
     controller_outcome: Literal["completed", "safety_stopped", "travel_exhausted"]
     target_error_m: float = Field(ge=0.0)
+    yaw_error_rad: float | None = Field(default=None, ge=0.0, le=math.pi)
 
 
 class RealityDeploymentPayload(_FrictionModel):
@@ -147,6 +211,10 @@ class RealityDeploymentPayload(_FrictionModel):
     fresh_episode: bool
     frame_id: str = Field(default="simulation_world", min_length=1)
     object_id: str = Field(default="cube", min_length=1)
+    task_id: str = Field(default="push-cube-v1", min_length=1)
+    task_version: str = Field(default="1.0.0", min_length=1)
+    object_archetype_version: str = Field(default="1.0.0", min_length=1)
+    geometry_hash: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     motion_plan_id: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     calibration_id: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     maximum_measured_speed_m_s: float | None = Field(default=None, ge=0.0)
@@ -159,12 +227,15 @@ class RealityDeploymentPayload(_FrictionModel):
     maximum_measured_orientation_error_rad: float | None = Field(default=None, ge=0.0)
     motion_elapsed_s: float | None = Field(default=None, ge=0.0)
     observed_final_position_m: tuple[float, float, float]
+    observed_final_yaw_rad: float = 0.0
     peak_contact_force_n: float = Field(ge=0.0)
     prediction_target_error_m: float = Field(ge=0.0)
     runtime_process_id: int = Field(gt=0)
     safety_tripped: bool
     target_position_m: tuple[float, float, float]
     target_radius_m: float = Field(gt=0.0)
+    target_yaw_rad: float = 0.0
+    yaw_tolerance_rad: float | None = Field(default=None, gt=0.0, le=math.pi)
     terminal: Literal[True]
     world_instance_id: str = Field(min_length=1)
 
@@ -188,6 +259,10 @@ class RealityDeploymentPayload(_FrictionModel):
             raise ValueError("attempt_count must equal the number of attempt records")
         if self.controller_outcome != self.attempts[-1].controller_outcome:
             raise ValueError("controller_outcome must match the final attempt")
+        if self.object_id == "t-bar" and (
+            self.task_id != "push-t-bar-v1" or self.geometry_hash is None or self.yaw_tolerance_rad is None
+        ):
+            raise ValueError("T-bar deployment requires task, geometry, and yaw identities")
         return self
 
 
@@ -201,7 +276,7 @@ class FrictionArtifactBuilder:
         dataset = self.stores.agent.get(dataset_ref)
         payload = TrajectoryDatasetPayload.model_validate(dataset.payload)
         static, dynamic = payload.experiments
-        belief = initial_belief()
+        belief = _initial_belief_for_task(payload.task)
         static_estimate = estimate_static_friction(
             static,
             belief.parameters[ParameterName.MASS],
@@ -239,7 +314,7 @@ class FrictionArtifactBuilder:
             self.stores.agent.get(posterior_ref).payload,
             LabArtifactKind.PARAMETER_POSTERIOR.value,
         )
-        initial = initial_belief()
+        initial = _initial_belief_for_task(dataset.task)
         base = WorldSpec.create(
             operation_schema="friction-aware-push-v1",
             document={
@@ -299,8 +374,17 @@ class FrictionArtifactBuilder:
                 kind=LabArtifactKind.POLICY_ARTIFACT.value,
                 payload={
                     "action": action.model_dump(mode="json"),
+                    "task_id": validation.get("task_id", "push-cube-v1"),
+                    "task_version": validation.get("task_version", "1.0.0"),
+                    "object_id": validation.get("object_id", "cube"),
+                    "object_archetype_version": validation.get(
+                        "object_archetype_version", "1.0.0"
+                    ),
+                    "geometry_hash": validation.get("geometry_hash"),
                     "goal_target_m": validation["goal_target_m"],
                     "goal_target_radius_m": validation["goal_target_radius_m"],
+                    "goal_target_yaw_rad": validation.get("goal_target_yaw_rad", 0.0),
+                    "goal_yaw_tolerance_rad": validation.get("goal_yaw_tolerance_rad"),
                     "max_attempts": max_attempts,
                     "protocol": protocol.model_dump(mode="json"),
                     "protocol_sha256": protocol_id,
@@ -321,20 +405,50 @@ def default_world_spec_seed(
     target_radius_m: float,
     world_config: dict[str, Any],
     protocol: PhysicalExperimentProtocol | None = None,
+    task_id: str = "push-cube-v1",
 ) -> dict[str, Any]:
     """Build the public, task-oriented WorldSpec sections emitted by Reality."""
 
     protocol = protocol or load_default_protocol()
+    preset = get_task_preset(task_id)
+    archetype = get_object_archetype(
+        preset.object_archetype_id,
+        preset.object_archetype_version,
+    )
     task = FrictionTaskSpec(
         kind="friction-aware-push",
         frame_id="simulation_world",
-        object_id="cube",
+        task_id=preset.preset_id,
+        task_version=preset.version,
+        object_id=preset.object_archetype_id,
+        object_archetype_version=preset.object_archetype_version,
+        geometry_hash=archetype.geometry_hash,
         protocol=protocol,
         protocol_sha256=protocol_sha256(protocol),
         target_position_m=target_position_m,
         target_radius_m=target_radius_m,
+        target_yaw_rad=preset.goal.target.yaw_rad,
+        yaw_tolerance_rad=preset.goal.yaw_tolerance_rad,
     )
-    geometry = PublicGeometrySpec(cube_edge_m=0.05, initial_position_m=initial_position_m)
+    geometry = PublicGeometrySpec(
+        object_archetype_id=archetype.archetype_id,
+        object_archetype_version=archetype.version,
+        geometry_hash=archetype.geometry_hash,
+        parts=tuple(
+            PublicBoxPart(
+                part_id=part.part_id,
+                center_object_m=part.center_object_m,
+                half_extents_m=part.half_extents_m,
+            )
+            for part in archetype.parts
+        ),
+        cube_edge_m=(
+            archetype.parts[0].half_extents_m[0] * 2.0
+            if archetype.archetype_id == "cube"
+            else None
+        ),
+        initial_position_m=initial_position_m,
+    )
     numerical = PublicNumericalConfig.model_validate(
         {
             **world_config,
@@ -354,6 +468,23 @@ def select_push_policy(target_m: tuple[float, float, float]) -> ActionCandidate:
     """Return the only currently validated manipulation family for this slice."""
 
     return next(action for action in candidate_actions(target_m) if action.kind == "push")
+
+
+def _initial_belief_for_task(task: FrictionTaskSpec):
+    return initial_belief_for_object(
+        task.object_id,
+        task.object_archetype_version,
+    )
+
+
+def candidate_push_policies(task: FrictionTaskSpec) -> tuple[ActionCandidate, ...]:
+    """Return independent Newton rollout candidates admitted by the task."""
+
+    return tuple(
+        action
+        for action in candidate_actions(task.target_position_m, task_id=task.task_id)
+        if action.kind == "push"
+    )
 
 
 def _object_payload(payload: Any, kind: str) -> dict[str, Any]:

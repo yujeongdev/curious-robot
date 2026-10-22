@@ -20,13 +20,15 @@ The project keeps three authorities separate:
 - **Evaluator** can inspect terminal truth but cannot provide inputs to the
   agent or Twin.
 
-The current validated capability is friction-aware pushing of an unknown cube.
-Pick-and-place, weighing, and hardware execution remain fail-closed until their
-physical acceptance gates pass.
+The validated simulation tasks are friction-aware pushing of an unknown cube
+and pose-constrained pushing of a known-geometry T-bar with unknown effective
+mass and friction. Pick-and-place, weighing, T-bar capability distillation, and
+hardware execution remain fail-closed until their physical acceptance gates
+pass.
 
 ![Agent Lab replay showing the Franka experiment, discovery stage, evidence, and telemetry](docs/media/curious-robot-demo.gif)
 
-[Watch the H.264 demo and inspect its checksum](https://github.com/yujeongdev/curious-robot/releases/tag/v0.1.1).
+[Watch the H.264 demo and inspect its checksum](https://github.com/yujeongdev/curious-robot/releases/tag/v0.2.0).
 
 ## What this repository demonstrates
 
@@ -37,6 +39,8 @@ physical acceptance gates pass.
 - independent Reality, learned Twin, and Evaluator worker processes
 - content-addressed evidence and policy lineage
 - task-level experiment selection using information gain, cost, and risk
+- versioned cube/T-bar task and public-geometry catalogs
+- three independent T-bar Twin candidates followed by fresh-Reality deployment
 - live and replayable dual-world Agent Lab that separates Reality experiments
   and deployment from learned-Twin calibration and prediction
 - visual playback and numerical physics re-execution as separate modes
@@ -94,7 +98,8 @@ network.
 Run the scripted local demonstration:
 
 ```bash
-uv run curious-robot web --open --autorun --seed 7 --device cuda:0
+uv run curious-robot web --open --autorun \
+  --task push-t-bar-v1 --seed 7 --device cuda:0
 ```
 
 ## Headless workflows
@@ -103,7 +108,8 @@ uv run curious-robot web --open --autorun --seed 7 --device cuda:0
 
 ```bash
 uv run curious-robot run \
-  --seed 7 --device cuda:0 --output artifacts/demo
+  --task push-t-bar-v1 \
+  --seed 7 --device cuda:0 --output artifacts/tbar-demo
 ```
 
 ### Isolated Reality → Twin → Reality capability
@@ -111,21 +117,28 @@ uv run curious-robot run \
 ```bash
 CURIOUS_ROBOT_EVALUATOR_SCENARIO_SEED=7 \
 uv run curious-robot lab-friction \
-  --seed 7 --device cuda:0 --output artifacts/lab-friction
+  --task push-t-bar-v1 \
+  --seed 7 --device cuda:0 --output artifacts/lab-tbar
 ```
 
 The evaluator seed override is only for reproducible local evaluation. The
 launcher delivers it to Reality, scrubs it from child environments, and does
 not serialize it into agent-visible artifacts.
 
-Distill and execute the validated capability:
+Distill and execute the validated **cube** capability. T-bar distillation is
+intentionally rejected until its geometry-aware hardware envelope is validated:
 
 ```bash
-uv run curious-robot lab-distill --run artifacts/lab-friction
+CURIOUS_ROBOT_EVALUATOR_SCENARIO_SEED=7 \
+uv run curious-robot lab-friction \
+  --task push-cube-v1 \
+  --seed 7 --device cuda:0 --output artifacts/lab-cube
+
+uv run curious-robot lab-distill --run artifacts/lab-cube
 
 CURIOUS_ROBOT_EVALUATOR_SCENARIO_SEED=7 \
 uv run curious-robot lab-execute-skill \
-  --run artifacts/lab-friction --seed 7 --device cuda:0
+  --run artifacts/lab-cube --seed 7 --device cuda:0
 ```
 
 ## Replay
@@ -149,11 +162,15 @@ See [Reproducibility](docs/reproducibility.md) for the determinism boundary.
 
 A run records the experiment protocol, raw measurements, belief history,
 resolved world configuration, controller trace, predictions, and verification
-result. Hidden values are stored only under evaluator authority.
+result. In the process-isolated laboratory path, hidden values remain under
+Reality/Evaluator authority. The legacy integrated Agent Lab runner writes
+them only to a post-run trusted re-execution manifest; agent tools, events,
+Twin inputs, and the browser never receive that manifest.
 
 The repository includes a compact reference set:
 
 - [isolated friction capability report](docs/evidence/friction-capability-report.md)
+- [T-bar Twin-fleet acceptance report](docs/evidence/tbar-capability-report.md)
 
 The executable protocol is versioned in
 [`physical_experiments.json`](src/curious_robot/configs/physical_experiments.json).
@@ -186,7 +203,7 @@ uv run pytest -m gpu
 - This repository reports simulated-real experiments, not physical-robot trials.
 - The validated public sensor provides linear contact force, not a complete
   strain-gauge wrist wrench.
-- Static and dynamic estimates are effective cube–surface interaction values;
+- Static and dynamic estimates are effective object–surface interaction values;
   one contact pair cannot identify intrinsic material coefficients separately.
 - Mass remains a prior when the grasp/lift experiment is unavailable.
 - MuJoCo Warp contact calibration uses black-box optimization; no end-to-end
@@ -195,7 +212,7 @@ uv run pytest -m gpu
   a completed hardware deployment.
 
 See [Validation](docs/validation.md) for executed evidence and known gaps, and
-[Roadmap](docs/roadmap.md) for the planned task/object extension.
+[Roadmap](docs/roadmap.md) for the off-center-mass and hardware extensions.
 
 ## Contributing and security
 

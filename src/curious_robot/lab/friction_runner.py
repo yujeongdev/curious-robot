@@ -19,6 +19,7 @@ def run_newton_friction_slice(
     output_directory: str | Path,
     device: str = "cuda:0",
     seed: int = 7,
+    task_id: str = "push-cube-v1",
     timeout_s: float = 900.0,
 ) -> FrictionCapabilityResult:
     """Run the one-capability pipeline across three spawned authority processes."""
@@ -36,6 +37,7 @@ def run_newton_friction_slice(
             output,
             device=device,
             seed=seed,
+            task_id=task_id,
             timeout_s=timeout_s,
         )
         twin = NewtonLearnedTwin(output, device=device, timeout_s=timeout_s)
@@ -45,6 +47,7 @@ def run_newton_friction_slice(
             reality=reality,
             twin=twin,
             evaluator=evaluator,
+            task_id=task_id,
         )
         result = capability_pipeline.run()
         runtime_identities = {
@@ -101,6 +104,7 @@ def run_newton_friction_slice(
     if runtime_identities is None:
         raise RuntimeError("capability completed without runtime identities")
     manifest = _build_terminal_manifest(stores, result, runtime_identities)
+    manifest["task_id"] = task_id
     (output / "friction_capability_manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     )
@@ -128,9 +132,18 @@ def _build_terminal_manifest(
     dataset = stores.agent.get(result.trajectory_dataset).payload
     posterior = stores.agent.get(result.parameter_posterior).payload
     twin_build = stores.agent.get(result.twin_build).payload
+    twin_validation = stores.agent.get(result.twin_validation_report).payload
     policy = stores.agent.get(result.policy_artifact).payload
     deployment = stores.agent.get(result.reality_deployment).payload
-    payloads = (dataset, posterior, twin_build, policy, deployment, evaluation.payload)
+    payloads = (
+        dataset,
+        posterior,
+        twin_build,
+        twin_validation,
+        policy,
+        deployment,
+        evaluation.payload,
+    )
     if not all(isinstance(payload, dict) for payload in payloads):
         raise TypeError("friction capability artifacts must contain object payloads")
     return {
@@ -140,12 +153,17 @@ def _build_terminal_manifest(
         "evaluation": evaluation.payload,
         "policy": policy,
         "posterior": posterior,
+        "twin_validation": twin_validation,
         "runtime_identities": runtime_identities,
         "schema_version": "1.0.0",
+        "status": "PASSED" if evaluation.payload.get("success") is True else "FAILED",
         "world_instances": {
             "reality_deployment": deployment["world_instance_id"],
             "reality_experiment": dataset["world_instance_id"],
             "twin_validation": twin_build["world_instance_id"],
+            "twin_candidates": [
+                outcome["world_instance_id"] for outcome in twin_validation.get("outcomes", [])
+            ],
         },
     }
 
@@ -177,6 +195,7 @@ def _write_friction_report(output: Path, manifest: dict[str, Any]) -> None:
         f"- Evaluator PID: `{runtimes['evaluator']['process_id']}`",
         f"- Experiment Reality world: `{worlds['reality_experiment']}`",
         f"- Twin validation world: `{worlds['twin_validation']}`",
+        f"- Independent Twin candidate worlds: `{', '.join(worlds['twin_candidates'])}`",
         f"- Fresh deployment Reality world: `{worlds['reality_deployment']}`",
         "",
         "## Content-addressed lineage",

@@ -13,14 +13,26 @@ This page distinguishes executed evidence from planned capability.
 - Posterior parameters reach the Twin through an immutable `WorldSpec` patch.
 - A Twin-validated push policy is deployed into a newly allocated Reality
   world and terminally evaluated.
+- The T-bar task builds one rigid body from two non-overlapping public box
+  parts, records contact against both constituent shapes, evaluates three
+  independent Twin candidate worlds, and deploys the selected typed contact
+  plan into a fresh Reality world.
+- The executed T-bar acceptance run passed both its 30 mm planar-position and
+  9° wrapped-yaw predicates for the first friction-only MVP. Its experiment,
+  candidate, and deployment worlds had distinct identities.
 - Public artifacts exclude sampled mass, friction, restitution, and private
   scenario seed values.
-- Visual replay and numerical re-execution are independently tested.
+- Visual replay and numerical re-execution are independently tested. For the
+  retained integrated T-bar run, re-execution passed the 15 mm position bound
+  (`10.62 mm` maximum error) but failed the 0.010 rad yaw determinism bound
+  (`0.161 rad` maximum error); the generated report remains `passed: false`.
 
-The latest isolated run is summarized in the
-[friction capability report](evidence/friction-capability-report.md). Additional
+The latest cube run is summarized in the
+[friction capability report](evidence/friction-capability-report.md). Executed
+T-bar evidence is in the
+[T-bar acceptance report](evidence/tbar-capability-report.md). Additional
 reference evidence is under [evidence/](evidence/). Demo media is generated
-from a committed event recording and published with the v0.1.0 release.
+from a committed event recording and published with a versioned release.
 
 ## Current scientific limits
 
@@ -35,6 +47,11 @@ from a committed event recording and published with the v0.1.0 release.
   and model agreement are reported separately.
 - Hardware interfaces and preflight checks are implemented, but no physical
   robot trial is claimed.
+- The first T-bar slice fixes COM to the public uniform-density geometry
+  centroid; it is an assumption, not an inferred episode parameter. Yaw inertia
+  is likewise not independently identified by the current friction probes.
+- Deterministic capability distillation and hardware deployment reject T-bar
+  policies until geometry-aware applicability has its own acceptance evidence.
 
 ## Release gates
 

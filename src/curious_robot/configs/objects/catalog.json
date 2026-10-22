@@ -1,0 +1,4 @@
+{
+  "schema_version": "1.0.0",
+  "objects": ["cube-v1.json", "t-bar-v1.json"]
+}

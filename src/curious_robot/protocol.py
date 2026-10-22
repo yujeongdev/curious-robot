@@ -32,6 +32,8 @@ class PushProtocol(BaseModel):
     breakaway_consecutive_frames: int = Field(gt=0)
     minimum_contact_coverage_fraction: float = Field(ge=0.0, le=1.0)
     minimum_valid_contact_samples: int = Field(gt=0)
+    maximum_yaw_excursion_rad: float = Field(ge=0.0, le=3.141592653589793)
+    contact_surface_id: str = Field(min_length=1)
 
 
 class PhysicalExperimentProtocol(BaseModel):
@@ -60,6 +62,8 @@ def configure_push_protocol(
     dt_s: float,
     speed_m_s: float,
     push_height_m: float | None = None,
+    lateral_contact_offset_m: float | None = None,
+    contact_surface_id: str | None = None,
     safety_stop_fraction: float | None = None,
 ) -> PushProtocol:
     """Return a fully validated protocol at the requested operating point."""
@@ -73,6 +77,10 @@ def configure_push_protocol(
     )
     if push_height_m is not None:
         payload["push_height_offset_m"] = push_height_m
+    if lateral_contact_offset_m is not None:
+        payload["lateral_ik_compensation_m"] = lateral_contact_offset_m
+    if contact_surface_id is not None:
+        payload["contact_surface_id"] = contact_surface_id
     if safety_stop_fraction is not None:
         payload["safety_stop_fraction"] = safety_stop_fraction
     return PushProtocol.model_validate(payload)

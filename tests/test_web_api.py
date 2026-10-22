@@ -39,6 +39,19 @@ def create_run(client: TestClient, **material_bounds) -> str:
     return response.json()["run_id"]
 
 
+def test_task_catalog_api_lists_allowlisted_presets(api) -> None:
+    client, _ = api
+
+    response = client.get("/api/tasks")
+
+    assert response.status_code == 200
+    tasks = {item["task_id"]: item for item in response.json()}
+    assert set(tasks) == {"push-cube-v1", "push-t-bar-v1"}
+    assert tasks["push-cube-v1"]["requires_yaw"] is False
+    assert tasks["push-t-bar-v1"]["requires_yaw"] is True
+    assert all(item["candidate_count"] >= 1 for item in tasks.values())
+
+
 def test_mutations_require_token_json_and_same_origin(api) -> None:
     client, _ = api
     assert client.post("/api/runs", json={}).status_code == 403
@@ -65,6 +78,12 @@ def test_mutations_require_token_json_and_same_origin(api) -> None:
         json={"material_bounds": {"hidden_mass": [0.1, 0.4]}},
     )
     assert forbidden.status_code == 422
+    unsupported_task = client.post(
+        "/api/runs",
+        headers={CONTROL_TOKEN_HEADER: TOKEN},
+        json={"task_id": "unregistered-task"},
+    )
+    assert unsupported_task.status_code == 422
 
 
 def test_only_one_active_run_and_terminal_snapshot(api) -> None:
