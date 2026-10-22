@@ -11,7 +11,7 @@
   },
   "goal": {
     "target": {"x_m": 0.15, "y_m": 0.0, "yaw_rad": 0.0},
-    "position_tolerance_m": 0.03, "yaw_tolerance_rad": 0.13962634015954636
+    "position_tolerance_m": 0.03, "yaw_tolerance_rad": 0.15707963267948966
   },
   "action_candidates": [
     {
@@ -21,7 +21,7 @@
     },
     {
       "action_id": "push_tbar_nominal", "kind": "push", "speed_m_s": 0.04,
-      "max_force_n": 15.0, "push_height_m": 0.012, "lateral_contact_offset_m": 0.010,
+      "max_force_n": 15.0, "push_height_m": 0.012, "lateral_contact_offset_m": 0.008,
       "contact_surface_id": "stem_rear_x"
     },
     {

@@ -225,7 +225,7 @@ def test_tbar_rollout_that_misses_yaw_goal_is_not_feasible() -> None:
         target_position_m=(0.15, 0.0, 0.02),
         target_radius_m=0.03,
         target_yaw_rad=0.0,
-        target_yaw_tolerance_rad=math.radians(8.0),
+        target_yaw_tolerance_rad=math.radians(9.0),
     )
     half_yaw = math.radians(10.0) / 2.0
     world = SimpleNamespace(

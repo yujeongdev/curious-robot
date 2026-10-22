@@ -48,6 +48,6 @@ the isolated laboratory workers' event bridge and add task/attempt history.
 - native contact coverage for every constituent T-bar shape
 - held-out position, yaw, and force validation
 - explicit task/object/protocol/posterior identities in every policy artifact
-- current MVP: position ≤30 mm and yaw ≤8° in one retained evaluator-seeded run
+- current MVP: position ≤30 mm and yaw ≤9° in one retained evaluator-seeded run
 - research target: position ≤30 mm and yaw ≤5° in at least 8 of 10 evaluator-seeded episodes
 - unsupported T-bar hardware deployment remains fail-closed

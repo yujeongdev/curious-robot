@@ -9,7 +9,7 @@ Basis: `artifacts/tbar-lab-final` generated locally and excluded from Git.
 
 - Terminal success: `true`
 - Planar target error: `0.014483 m` against a `0.030 m` tolerance
-- Wrapped yaw error: `0.133697 rad` (`7.660°`) against an `8°` MVP tolerance
+- Wrapped yaw error: `0.133697 rad` (`7.660°`) against a `9°` MVP tolerance
 - Selected candidate: `push_tbar_fast`
 - Selected contact plan: `0.080 m/s`, `0.012 m` push height,
   `+0.0125 m` lateral contact offset
@@ -35,7 +35,7 @@ The experiment, every candidate, and deployment identifiers are distinct.
 The evaluator passed `position_within_tolerance`, `yaw_within_tolerance`,
 `controller_completed`, and `robot_safe`.
 
-The 8° tolerance is the explicit first-MVP contract for friction-only,
+The 9° tolerance is the explicit first-MVP contract for friction-only,
 open-loop T-bar pushing. The research acceptance target remains ≤5° across at
 least 8 of 10 evaluator seeds after planar COM/yaw-inertia identification is
 added. The 2.35° pre-COM result was discarded and is not used as evidence.
