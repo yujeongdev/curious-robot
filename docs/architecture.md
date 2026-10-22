@@ -184,6 +184,12 @@ dataset, WorldSpec, policy, deployment, and evaluator. Three independent Twin
 worlds evaluate typed lateral contact plans before one is admitted to fresh
 Reality. T-bar capability distillation remains fail-closed.
 
+The T-bar goal is not a circular region. Its public object geometry is copied
+into a target manifest and projected onto the tabletop at the configured goal
+pose. Event validation requires the target archetype, version, geometry hash,
+and every compound part to exactly match the manipulated object. Goal success
+then evaluates the object's planar position and wrapped yaw against that pose.
+
 Successful terminal runs can be distilled into an agent-visible
 `CapabilityArtifact`. The trusted coordinator declassifies only the evaluator's
 success decision into a public `CapabilityAttestation`; the evaluator payload

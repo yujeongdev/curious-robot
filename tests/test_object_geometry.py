@@ -61,6 +61,13 @@ def test_public_geometry_changes_world_identity_without_hidden_parameters() -> N
 
 @pytest.mark.gpu
 def test_newton_t_bar_uses_one_body_two_shapes_and_explicit_hidden_inertia() -> None:
+    class EventSink:
+        def __init__(self) -> None:
+            self.events: list[dict] = []
+
+        def emit(self, intent: dict) -> None:
+            self.events.append(intent)
+
     parameters = PhysicalParameters(0.25, 0.55, 0.32, com_m=(0.003, -0.002, 0.0))
     config = WorldConfig(
         device="cuda:0",
@@ -71,7 +78,8 @@ def test_newton_t_bar_uses_one_body_two_shapes_and_explicit_hidden_inertia() -> 
         target_position_m=(0.15, 0.0, 0.02),
         observation_noise_std=0.0,
     )
-    world = TruthEnvironment(parameters, config)
+    sink = EventSink()
+    world = TruthEnvironment(parameters, config, event_sink=sink)
     try:
         assert world.model.body_label == ["unknown_t_bar"]
         assert world.object_shape_indices == frozenset({0, 1})
@@ -85,6 +93,17 @@ def test_newton_t_bar_uses_one_body_two_shapes_and_explicit_hidden_inertia() -> 
         np.testing.assert_allclose(world.model.body_inertia.numpy()[0], expected, rtol=1.0e-5)
         world.settle(0.02)
         assert world.observe_object_pose().pose.position_m[2] == pytest.approx(0.02, abs=0.002)
+        world._emit_visual_frame(np.asarray(world.observe_object_pose().pose.position_m))
+        target = sink.events[-1]["payload"]["target_region"]
+        assert target["center_m"] == (0.15, 0.0, 0.001)
+        assert target["geometry"]["geometry_hash"] == world.object_geometry.geometry_hash
+        assert [part["part_id"] for part in target["geometry"]["parts"]] == [
+            "stem",
+            "crossbar",
+        ]
+        assert target["geometry"]["parts"] == sink.events[-1]["payload"]["object_geometry"][
+            "parts"
+        ]
     finally:
         world.close()
 

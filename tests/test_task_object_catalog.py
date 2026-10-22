@@ -6,7 +6,14 @@ from pydantic import ValidationError
 from curious_robot.belief import initial_belief_for_object
 from curious_robot.objects import CUBE_V1, T_BAR_V1, get_object_archetype
 from curious_robot.schemas import ParameterName
-from curious_robot.tasks import PUSH_CUBE_V1, PUSH_T_BAR_V1, PlanarPose, evaluate_planar_goal, get_task_preset
+from curious_robot.tasks import (
+    PUSH_CUBE_V1,
+    PUSH_T_BAR_V1,
+    PlanarPose,
+    evaluate_planar_goal,
+    get_task_definition,
+    get_task_preset,
+)
 
 
 def test_catalog_preserves_cube_and_adds_non_overlapping_compound_t_bar() -> None:
@@ -87,6 +94,11 @@ def test_task_preset_rejects_nonfinite_randomization_bounds() -> None:
 
 
 def test_t_bar_pose_goal_rejects_correct_position_with_wrong_yaw() -> None:
+    definition = get_task_definition(
+        PUSH_T_BAR_V1.task_definition_id,
+        PUSH_T_BAR_V1.task_definition_version,
+    )
+    assert "same-shape target silhouette" in definition.objective
     target = PUSH_T_BAR_V1.goal.target
     wrong_yaw = PlanarPose(x_m=target.x_m, y_m=target.y_m, yaw_rad=target.yaw_rad + math.radians(12.0))
     result = evaluate_planar_goal(PUSH_T_BAR_V1.goal, wrong_yaw)

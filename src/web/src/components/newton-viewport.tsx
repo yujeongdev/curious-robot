@@ -50,7 +50,7 @@ function SceneSummary({ frame, scene }: { frame: VisualFramePayload | null; scen
   const objectLabel = frame?.object_geometry?.archetype_id ?? "object";
   return (
     <div className="sr-only" data-testid={`scene-summary-${scene}`}>
-      {frame ? `${frame.scene} scene, frame ${frame.frame_id}. ${objectLabel} at ${object?.position_m.join(", ") ?? "unknown"} meters. ${frame.contacts.length} contacts. Target region ${frame.target_region ? "visible" : "absent"}.` : "No visual frame received."}
+      {frame ? `${frame.scene} scene, frame ${frame.frame_id}. ${objectLabel} at ${object?.position_m.join(", ") ?? "unknown"} meters. ${frame.contacts.length} contacts. ${frame.target_region?.geometry ? `${frame.target_region.geometry.archetype_id} shaped target` : "Target region"} ${frame.target_region ? "visible" : "absent"}.` : "No visual frame received."}
     </div>
   );
 }
@@ -128,7 +128,7 @@ export function NewtonViewport({
         )}
         <div className="viewport-legend" aria-hidden="true">
           <span><i className="legend-force" /> measured force</span>
-          <span><i className="legend-target" /> target region</span>
+          <span><i className="legend-target" /> goal pose</span>
           <span><i className="legend-contact" /> contact</span>
         </div>
       </div>

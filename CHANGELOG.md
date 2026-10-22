@@ -2,6 +2,13 @@
 
 All notable changes to Curious Robot are documented here.
 
+## [0.2.1] - 2026-10-22
+
+### Fixed
+
+- Render the `push-t-bar-v1` goal as the exact public T-bar footprint on the tabletop instead of a circular target, and require its geometry identity and compound parts to match the manipulated object.
+- Regenerate the Agent Lab replay and release media from a completed run that visibly aligns the physical T-bar with the T-shaped goal pose.
+
 ## [0.2.0] - 2026-10-22
 
 ### Added
