@@ -905,7 +905,10 @@ def rollout_candidate_in_world(
     upright_cos = 1.0 - 2.0 * (quat[0] ** 2 + quat[1] ** 2)
     tilt = math.acos(float(np.clip(upright_cos, -1.0, 1.0)))
     feasible = (
-        not execution.safety_tripped and peak <= candidate.max_force_n * 1.01 and tilt < math.radians(15)
+        goal_result.success
+        and not execution.safety_tripped
+        and peak <= candidate.max_force_n * 1.01
+        and tilt < math.radians(15)
     )
     yaw_penalty = (goal_result.yaw_error_rad or 0.0) / math.pi
     success_probability = float(np.clip(1.0 - error / 0.10 - tilt / math.pi - yaw_penalty, 0.0, 1.0))

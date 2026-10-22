@@ -21,7 +21,7 @@
     },
     {
       "action_id": "push_tbar_nominal", "kind": "push", "speed_m_s": 0.04,
-      "max_force_n": 15.0, "push_height_m": 0.012, "lateral_contact_offset_m": 0.008,
+      "max_force_n": 15.0, "push_height_m": 0.012, "lateral_contact_offset_m": 0.010,
       "contact_surface_id": "stem_rear_x"
     },
     {
