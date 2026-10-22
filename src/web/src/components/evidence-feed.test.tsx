@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { demoEvents } from "../fixtures/demo-run";
 import { reduceRunEvents } from "../state/run-reducer";
@@ -30,5 +30,23 @@ describe("EvidenceFeed", () => {
       ...toolEvent,
       payload: { ...toolEvent.payload, tool_name: "unknown_future_tool" },
     })).toBe("SYSTEM");
+  });
+
+  it("does not fabricate zero shape error for historical null metrics", () => {
+    cleanup();
+    const historicalEvents = demoEvents.map((event) => event.type === "verification.completed"
+      ? {
+          ...event,
+          payload: {
+            ...event.payload,
+            maximum_registered_corner_error_m: null,
+            rms_registered_corner_error_m: null,
+          },
+        }
+      : event);
+
+    render(<EvidenceFeed run={reduceRunEvents(historicalEvents)} />);
+
+    expect(screen.queryByText(/Shape max/i)).not.toBeInTheDocument();
   });
 });

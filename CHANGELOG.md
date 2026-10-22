@@ -6,7 +6,7 @@ All notable changes to Curious Robot are documented here.
 
 ### Added
 
-- Measure exact T-shape overlap with maximum and RMS registered-corner error derived from public compound geometry.
+- Measure public-geometry T-shape registration with maximum and RMS corresponding-corner error.
 - Show shape-registration precision in the CLI capability report and Agent Lab verification evidence.
 
 ### Changed
