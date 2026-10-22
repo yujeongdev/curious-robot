@@ -49,6 +49,9 @@ def test_catalog_preserves_cube_and_adds_non_overlapping_compound_t_bar() -> Non
     assert PUSH_T_BAR_V1.goal.yaw_tolerance_rad == pytest.approx(math.radians(5.0))
     assert PUSH_T_BAR_V1.yaw_alignment.stop_tolerance_fraction == pytest.approx(0.6)
     assert PUSH_T_BAR_V1.yaw_alignment.position_stop_tolerance_fraction == pytest.approx(0.66)
+    assert PUSH_T_BAR_V1.yaw_alignment.fine_maximum_attempts == 1
+    assert PUSH_T_BAR_V1.yaw_alignment.fine_correction_travel_m == pytest.approx(0.006)
+    assert PUSH_T_BAR_V1.yaw_alignment.fine_speed_m_s == pytest.approx(0.015)
 
 
 def test_public_archetypes_reject_hidden_physical_parameters() -> None:
