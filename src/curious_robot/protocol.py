@@ -58,7 +58,10 @@ def load_default_protocol() -> PhysicalExperimentProtocol:
 
 def protocol_sha256(protocol: PhysicalExperimentProtocol) -> str:
     """Return the canonical run-protocol fingerprint used by evidence records."""
-    payload = protocol.model_dump_json(exclude_none=False)
+    # ``exclude_unset`` preserves the canonical bytes of migrated schema 1.1
+    # artifacts whose new controller fields were absent. Canonical configs set
+    # every field explicitly, so new-run identities remain fully specified.
+    payload = protocol.model_dump_json(exclude_none=False, exclude_unset=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

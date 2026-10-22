@@ -9,7 +9,7 @@ remain local and excluded from Git.
 ## Result
 
 - Terminal success: `true`
-- Planar target error: `0.011934 m` against a `0.030 m` tolerance
+- Planar target error: `0.011387 m` against a `0.030 m` tolerance
 - Wrapped yaw error: `0.154066 rad` (`8.827°`) against a `9°` MVP tolerance
 - Selected candidate: `push_tbar_nominal`
 - Selected contact plan: `0.040 m/s`, `0.012 m` push height,
@@ -24,12 +24,12 @@ hash, but different bounded contact plans.
 
 ## Authority and identity evidence
 
-- Reality experiment world: `abd1c8ea-24fe-44a3-835b-a9aea8681f84`
+- Reality experiment world: `12ce3edd-427e-43ee-a818-6c3fe8bcdb21`
 - Twin candidate worlds:
-  - `ac3a0681-5187-496a-9053-355e97099b12` (controller-rejected)
-  - `a6383126-2765-4d8b-afdc-537289ea52ad` (selected)
-  - `d4680cdd-62e4-4449-8b92-8460ca70afd9`
-- Fresh Reality deployment world: `6c630751-9898-4ee0-bb96-cf397eb3d35b`
+  - `6e8db37e-9e64-4e5b-86d9-296455c1a270` (controller-rejected)
+  - `4a993732-d70d-4416-8d36-2b7418666ff5` (selected)
+  - `fce54e26-2251-4664-92c8-3c39439610c7`
+- Fresh Reality deployment world: `e13d932b-5f56-412f-a049-16bb70cd5a4a`
 - Public geometry: one T-bar rigid body, two non-overlapping box parts
 - Floor goal: the same two-part T-bar geometry projected at the target pose
 - Geometry hash: `sha256:a3e9d55450c4813a039f75718cea15322400df1b6d86d3f857ee9345cf953682`

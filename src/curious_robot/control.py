@@ -341,6 +341,7 @@ class NewtonFrankaController:
             )
             if outcome is PushExecutionOutcome.SAFETY_STOPPED:
                 break
+            self._retreat_after_contact(translation_protocol, push_direction)
             for _ in range(max(1, round(protocol.post_attempt_settle_s / world.config.dt_s))):
                 samples.append(world.step())
             settled_pose = world.observe_object_pose().pose
@@ -491,15 +492,14 @@ class NewtonFrankaController:
                 contact_start_xy=contact_start_xy,
                 push_direction=push_direction,
                 push_z=push_z,
-                target_xy=np.asarray(world.config.target_position_m[:2], dtype=float),
+                target_xy=np.asarray((goal.target.x_m, goal.target.y_m), dtype=float),
                 max_force_n=max_force_n,
                 peak_contact_force_n=peak_contact_force_n,
                 protocol=correction_protocol,
             )
             if outcome is PushExecutionOutcome.SAFETY_STOPPED:
                 return True, peak_contact_force_n
-            if outcome is PushExecutionOutcome.TRAVEL_EXHAUSTED:
-                self._retreat_after_contact(correction_protocol, push_direction)
+            self._retreat_after_contact(correction_protocol, push_direction)
         return False, peak_contact_force_n
 
     def _approach_contact(
