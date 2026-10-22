@@ -19,8 +19,7 @@ This page distinguishes executed evidence from planned capability.
   plan into a fresh Reality world.
 - The executed T-bar acceptance run passed both its 30 mm planar-position and
   8° wrapped-yaw predicates for the first friction-only MVP. Its experiment,
-  candidate, and deployment worlds
-  had distinct identities.
+  candidate, and deployment worlds had distinct identities.
 - Public artifacts exclude sampled mass, friction, restitution, and private
   scenario seed values.
 - Visual replay and numerical re-execution are independently tested. For the

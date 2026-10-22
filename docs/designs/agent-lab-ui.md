@@ -53,8 +53,9 @@ the append-only event order.
 - Missing frames, predictions, and measurements are explicit; they are never
   replaced with zero values or copied from the other world.
 - Task success and prediction agreement remain separate verdicts.
-- The six-phase discovery rail stays visible; the four-step world-flow rail
-  indicates where physical work is currently occurring.
+- The six-phase discovery rail stays visible; the five-step causal bridge
+  indicates where evidence crosses from Reality into the Twin and back into a
+  fresh Reality deployment.
 
 ## Capture acceptance
 

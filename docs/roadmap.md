@@ -7,8 +7,8 @@ The cube and T-bar tasks now share three independent, versioned contracts:
 - `TaskDefinition`: goal, predicates, action set, budgets, and requirements
 - `ObjectArchetype`: public geometry, reference frames, support polygon, and
   contact regions
-- `ExperimentDefinition`: applicability, protocol, evidence schema, quality
-  gates, and estimator binding
+- `PhysicalExperimentProtocol`: versioned probe settings and evidence quality
+  gates, with validated task-specific overrides
 
 JSON stores values and immutable IDs. An allowlisted Python registry binds
 validated builders, controllers, estimators, and goal metrics. Episode-specific

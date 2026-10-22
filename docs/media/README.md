@@ -3,7 +3,7 @@
 This directory holds lightweight, reviewable portfolio media. The authoritative
 scientific evidence remains the terminal run directory under `artifacts/`:
 `events.ndjson`, measurements, the Newton visual recording, environment
-fingerprints, and the deterministic re-execution report.
+fingerprints, and the physics re-execution report.
 
 ## Generate the canonical demo
 
@@ -47,7 +47,8 @@ narration:
 2. selection of a friction probe from competing experiments;
 3. measured breakaway force synchronized with contact;
 4. posterior friction estimates and visibly reduced uncertainty;
-5. push/pick prediction, execution, residual, and verification or Learn loop.
+5. candidate prediction, fresh-Reality execution, residual, and verification
+   or Learn loop.
 
 Capture uses the dark Precision Lab Instrument theme, the canonical 65/35
 viewport/evidence split, a 220 px telemetry dock, local fonts/assets, and a
