@@ -349,6 +349,10 @@ class VerificationPayload(PublicModel):
     success: bool
     goal_predicates: dict[str, bool]
     prediction_residual_m: float = Field(ge=0.0)
+    observed_position_error_m: float | None = Field(default=None, ge=0.0)
+    observed_yaw_error_rad: float | None = Field(default=None, ge=0.0, le=math.pi)
+    maximum_registered_corner_error_m: float | None = Field(default=None, ge=0.0)
+    rms_registered_corner_error_m: float | None = Field(default=None, ge=0.0)
     tolerance_m: float = Field(gt=0.0)
 
 

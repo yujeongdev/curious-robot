@@ -12,6 +12,7 @@ describe("EvidenceFeed", () => {
     expect(screen.getAllByText(/belief updated/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/censored breakaway interval/i)).toBeInTheDocument();
     expect(screen.getByText(/task verified/i)).toBeInTheDocument();
+    expect(screen.getByText(/Shape max/i)).toHaveTextContent("12.0 mm");
     expect(screen.getAllByText("REALITY").length).toBeGreaterThan(0);
     expect(screen.getAllByText("TWIN").length).toBeGreaterThan(0);
     expect(screen.getAllByText("INFERENCE").length).toBeGreaterThan(0);

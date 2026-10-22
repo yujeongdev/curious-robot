@@ -127,7 +127,14 @@ function EventSummary({ event }: { event: AgentEvent }) {
     return <p>Target error <strong className="mono">{formatValue(payload.target_error_m, 3)} m</strong> · success <strong className="mono">{Math.round(Number(payload.success_probability) * 100)}%</strong></p>;
   }
   if (event.type === "verification.completed") {
-    return <p>{payload.success ? "All goal predicates passed." : "Goal predicate failed."} Residual <strong className="mono">{formatValue(payload.prediction_residual_m, 3)} m</strong>.</p>;
+    const maximumCornerError = Number(payload.maximum_registered_corner_error_m);
+    const rmsCornerError = Number(payload.rms_registered_corner_error_m);
+    return <p>
+      {payload.success ? "All goal predicates passed." : "Goal predicate failed."} Residual <strong className="mono">{formatValue(payload.prediction_residual_m, 3)} m</strong>.
+      {Number.isFinite(maximumCornerError) && Number.isFinite(rmsCornerError) ? <>
+        {" "}Shape max <strong className="mono">{formatValue(maximumCornerError * 1000, 1)} mm</strong> · RMS <strong className="mono">{formatValue(rmsCornerError * 1000, 1)} mm</strong>.
+      </> : null}
+    </p>;
   }
   if (event.type === "tool.started") return <p>Validated bounded arguments. The controller owns every physics step.</p>;
   if (event.type === "run.started") return <p>{payload.data_provenance === "synthetic_illustration" ? String(payload.reason) : "Preparing GPU, Newton world, assets, and public event stream."}</p>;

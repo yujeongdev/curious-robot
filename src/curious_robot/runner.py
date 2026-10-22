@@ -26,7 +26,7 @@ from matplotlib import pyplot as plt  # noqa: E402
 from .belief import initial_belief_for_object
 from .environment import PhysicalParameters, StepControl, TruthEnvironment, WorldConfig
 from .events import DiscoveryStage
-from .objects import get_object_archetype
+from .objects import get_object_archetype, registered_planar_corner_error
 from .planner_adapters import DeterministicPlannerAdapter, PlannerAdapter
 from .planning import action_utility, candidate_actions
 from .ports import RobotRealityAdapter
@@ -607,6 +607,15 @@ def run_episode(
         predicted_yaw = yaw_from_quaternion_xyzw(selected_outcome.final_orientation_xyzw)
         observed_yaw = yaw_from_quaternion_xyzw(observed_pose.orientation_xyzw)
         prediction_yaw_error = wrapped_yaw_error(observed_yaw, predicted_yaw)
+        shape_error = registered_planar_corner_error(
+            archetype,
+            observed_xy_yaw=(observed[0], observed[1], observed_yaw),
+            target_xy_yaw=(
+                task.goal.target.x_m,
+                task.goal.target.y_m,
+                task.goal.target.yaw_rad,
+            ),
+        )
         episode_events.enter(DiscoveryStage.VERIFY)
         success = deployment_tools.verify_task_success() and controller_result == "completed"
         verification = deployment_tools.records[-1].result_summary
@@ -620,6 +629,10 @@ def run_episode(
                     "stable": bool(verification["stable"]),
                 },
                 "prediction_residual_m": prediction_error,
+                "observed_position_error_m": observed_goal.position_error_m,
+                "observed_yaw_error_rad": observed_goal.yaw_error_rad,
+                "maximum_registered_corner_error_m": shape_error.maximum_corner_error_m,
+                "rms_registered_corner_error_m": shape_error.rms_corner_error_m,
                 "prediction_yaw_residual_rad": prediction_yaw_error,
                 "tolerance_m": config.target_radius_m,
                 "yaw_tolerance_rad": task.goal.yaw_tolerance_rad,
