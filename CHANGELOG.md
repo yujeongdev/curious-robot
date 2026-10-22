@@ -2,6 +2,18 @@
 
 All notable changes to Curious Robot are documented here.
 
+## [0.2.2] - 2026-10-22
+
+### Added
+
+- Randomize the T-bar's initial position and yaw within the validated `[-8°, -5°]` Franka reachability envelope.
+- Correct yaw with bounded crossbar pushes, then re-observe settled pose and recover translation from the best opposing public contact face.
+
+### Changed
+
+- Record the actual sequence of contact surfaces used by the controller so randomized-start decisions remain inspectable.
+- Refresh Agent Lab media from a successful randomized-start Reality → Twin → Reality run.
+
 ## [0.2.1] - 2026-10-22
 
 ### Fixed

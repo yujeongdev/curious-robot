@@ -22,13 +22,14 @@ The project keeps three authorities separate:
 
 The validated simulation tasks are friction-aware pushing of an unknown cube
 and pose-constrained pushing of a known-geometry T-bar onto the same T-shaped
-floor silhouette, with unknown effective mass and friction. Pick-and-place,
+floor silhouette from a bounded randomized start pose, with unknown effective
+mass and friction. Pick-and-place,
 weighing, T-bar capability distillation, and hardware execution remain
 fail-closed until their physical acceptance gates pass.
 
 ![Agent Lab replay showing the Franka experiment, discovery stage, evidence, and telemetry](docs/media/curious-robot-demo.gif)
 
-[Watch the H.264 demo and inspect its checksum](https://github.com/yujeongdev/curious-robot/releases/tag/v0.2.1).
+[Watch the H.264 demo and inspect its checksum](https://github.com/yujeongdev/curious-robot/releases/tag/v0.2.2).
 
 ## What this repository demonstrates
 
@@ -41,6 +42,7 @@ fail-closed until their physical acceptance gates pass.
 - task-level experiment selection using information gain, cost, and risk
 - versioned cube/T-bar task and public-geometry catalogs
 - three independent T-bar Twin candidates followed by fresh-Reality deployment
+- observed-yaw correction and adaptive public-face recovery pushes for randomized T-bar starts
 - live and replayable dual-world Agent Lab that separates Reality experiments
   and deployment from learned-Twin calibration and prediction
 - visual playback and numerical physics re-execution as separate modes
