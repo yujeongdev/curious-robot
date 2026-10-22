@@ -15,8 +15,10 @@ import warp as wp
 from .objects import ContactSurface, get_object_archetype
 from .schemas import MotionSample, Pose
 from .tasks import (
+    GoalEvaluation,
     PlanarGoal,
     PlanarPose,
+    YawAlignmentPolicy,
     evaluate_planar_goal,
     get_task_preset,
     signed_yaw_error,
@@ -40,6 +42,12 @@ class PushExecutionOutcome(StrEnum):
     COMPLETED = "completed"
     SAFETY_STOPPED = "safety_stopped"
     TRAVEL_EXHAUSTED = "travel_exhausted"
+
+
+class RefinementAction(StrEnum):
+    COMPLETE = "complete"
+    YAW_ONLY = "yaw_only"
+    TRANSLATE = "translate"
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +115,16 @@ def terminal_push_outcome(
     return PushExecutionOutcome.COMPLETED if goal_success else PushExecutionOutcome.TRAVEL_EXHAUSTED
 
 
+def select_refinement_action(goal_result: GoalEvaluation) -> RefinementAction:
+    """Select the next bounded correction from the observed planar predicates."""
+
+    if goal_result.success:
+        return RefinementAction.COMPLETE
+    if goal_result.predicates["position_within_tolerance"]:
+        return RefinementAction.YAW_ONLY
+    return RefinementAction.TRANSLATE
+
+
 def requested_planar_goal(
     target_m: tuple[float, float, float],
     *,
@@ -120,6 +138,28 @@ def requested_planar_goal(
         target=PlanarPose(x_m=target_m[0], y_m=target_m[1], yaw_rad=target_yaw_rad),
         position_tolerance_m=position_tolerance_m,
         yaw_tolerance_rad=yaw_tolerance_rad,
+    )
+
+
+def refinement_goal(
+    goal: PlanarGoal,
+    policy: YawAlignmentPolicy,
+) -> PlanarGoal:
+    """Derive the stricter observable precision gate used by the controller."""
+
+    if not policy.enabled:
+        return goal
+    yaw_tolerance = (
+        None
+        if goal.yaw_tolerance_rad is None
+        else goal.yaw_tolerance_rad * policy.stop_tolerance_fraction
+    )
+    return PlanarGoal(
+        target=goal.target,
+        position_tolerance_m=(
+            goal.position_tolerance_m * policy.position_stop_tolerance_fraction
+        ),
+        yaw_tolerance_rad=yaw_tolerance,
     )
 
 
@@ -265,9 +305,11 @@ class NewtonFrankaController:
             target_yaw_rad=world.config.target_yaw_rad,
             yaw_tolerance_rad=world.config.target_yaw_tolerance_rad,
         )
+        alignment_policy = get_task_preset(world.config.task_id).yaw_alignment
+        controller_goal = refinement_goal(requested_goal, alignment_policy)
         initial_pose = world.observe_object_pose().pose
         initial_goal = evaluate_planar_goal(
-            requested_goal,
+            controller_goal,
             PlanarPose(
                 x_m=initial_pose.position_m[0],
                 y_m=initial_pose.position_m[1],
@@ -282,39 +324,43 @@ class NewtonFrankaController:
             )
         self.release_compliance()
         self.set_gripper(0.0)
-        yaw_safety_stop, peak_contact_force_n = self._align_task_yaw(
-            samples,
-            max_force_n=max_force_n,
-            peak_contact_force_n=peak_contact_force_n,
-            base_protocol=protocol,
-            contact_surface_ids=contact_surface_ids,
-            goal=requested_goal,
-        )
-        if yaw_safety_stop:
-            return PushExecutionResult(
-                samples=tuple(samples),
-                outcome=PushExecutionOutcome.SAFETY_STOPPED,
-                peak_contact_force_n=peak_contact_force_n,
-                contact_surface_ids=tuple(contact_surface_ids),
-            )
         for _attempt in range(protocol.maximum_attempts):
+            yaw_safety_stop, peak_contact_force_n = self._align_task_yaw(
+                samples,
+                max_force_n=max_force_n,
+                peak_contact_force_n=peak_contact_force_n,
+                base_protocol=protocol,
+                contact_surface_ids=contact_surface_ids,
+                goal=requested_goal,
+            )
+            if yaw_safety_stop:
+                return PushExecutionResult(
+                    samples=tuple(samples),
+                    outcome=PushExecutionOutcome.SAFETY_STOPPED,
+                    peak_contact_force_n=peak_contact_force_n,
+                    contact_surface_ids=tuple(contact_surface_ids),
+                )
             object_pose = world.observe_object_pose().pose
             start = np.asarray(object_pose.position_m, dtype=float)
             planar_delta = np.asarray(target_m[:2], dtype=float) - start[:2]
             planar_distance = float(np.linalg.norm(planar_delta))
             current_goal = evaluate_planar_goal(
-                requested_goal,
+                controller_goal,
                 PlanarPose(
                     x_m=object_pose.position_m[0],
                     y_m=object_pose.position_m[1],
                     yaw_rad=yaw_from_quaternion_xyzw(object_pose.orientation_xyzw),
                 ),
             )
-            if current_goal.success:
+            refinement_action = select_refinement_action(current_goal)
+            if refinement_action is RefinementAction.COMPLETE:
                 outcome = PushExecutionOutcome.COMPLETED
                 break
+            if refinement_action is RefinementAction.YAW_ONLY:
+                outcome = PushExecutionOutcome.TRAVEL_EXHAUSTED
+                continue
             if planar_distance <= protocol.minimum_planar_command_m:
-                break
+                continue
             push_direction = planar_delta / planar_distance
             surface = self._translation_contact_surface(
                 object_pose,
@@ -322,7 +368,6 @@ class NewtonFrankaController:
                 protocol=protocol,
             )
             contact_surface_ids.append(surface.surface_id)
-            alignment_policy = get_task_preset(world.config.task_id).yaw_alignment
             translation_protocol = (
                 protocol.model_copy(
                     update={
@@ -354,6 +399,13 @@ class NewtonFrankaController:
                 max_force_n=max_force_n,
                 peak_contact_force_n=peak_contact_force_n,
                 protocol=translation_protocol,
+                completion_test=lambda sample: float(
+                    np.linalg.norm(
+                        np.asarray(sample.position_m[:2], dtype=float)
+                        - np.asarray(target_m[:2], dtype=float)
+                    )
+                )
+                <= controller_goal.position_tolerance_m,
             )
             if outcome is PushExecutionOutcome.SAFETY_STOPPED:
                 break
@@ -362,7 +414,7 @@ class NewtonFrankaController:
                 samples.append(world.step())
             settled_pose = world.observe_object_pose().pose
             settled_result = evaluate_planar_goal(
-                requested_goal,
+                controller_goal,
                 PlanarPose(
                     x_m=settled_pose.position_m[0],
                     y_m=settled_pose.position_m[1],
@@ -377,7 +429,7 @@ class NewtonFrankaController:
             samples.append(world.step())
         final_pose = world.observe_object_pose().pose
         final_goal = evaluate_planar_goal(
-            requested_goal,
+            controller_goal,
             PlanarPose(
                 x_m=final_pose.position_m[0],
                 y_m=final_pose.position_m[1],
@@ -523,6 +575,8 @@ class NewtonFrankaController:
             if outcome is PushExecutionOutcome.SAFETY_STOPPED:
                 return True, peak_contact_force_n
             self._retreat_after_contact(correction_protocol, push_direction)
+            for _ in range(max(1, round(base_protocol.post_attempt_settle_s / world.config.dt_s))):
+                samples.append(world.step())
         return False, peak_contact_force_n
 
     def _approach_contact(
