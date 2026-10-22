@@ -182,6 +182,9 @@ def _write_friction_report(output: Path, manifest: dict[str, Any]) -> None:
         "",
         f"- Success: `{evaluation['success']}`",
         f"- Terminal target error: `{evaluation['target_error_m']:.6f} m`",
+        f"- Maximum registered corner error: "
+        f"`{evaluation['maximum_registered_corner_error_m']:.6f} m`",
+        f"- RMS registered corner error: `{evaluation['rms_registered_corner_error_m']:.6f} m`",
         f"- Selected policy: `{action['action_id']}` at `{action['speed_m_s']:.3f} m/s`",
         f"- Deterministic recovery bound: `{manifest['policy']['max_attempts']}` attempt(s)",
         f"- Reality attempts used: `{manifest['deployment']['attempt_count']}`",
