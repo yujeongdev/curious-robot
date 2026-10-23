@@ -21,7 +21,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .events import validate_public_data
-from .objects import get_object_archetype
 from .run_manager import (
     ActiveRunError,
     CursorError,
@@ -30,7 +29,7 @@ from .run_manager import (
     RunManager,
     RunNotFoundError,
 )
-from .tasks import get_task_definition, get_task_preset, list_task_presets
+from .tasks import get_task_preset, list_task_presets, resolve_task
 
 CONTROL_TOKEN_HEADER = "X-Curious-Robot-Control-Token"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -127,26 +126,7 @@ def create_app(
 
     @app.get("/api/tasks")
     async def list_tasks() -> list[dict[str, Any]]:
-        result = []
-        for preset in list_task_presets():
-            definition = get_task_definition(
-                preset.task_definition_id,
-                preset.task_definition_version,
-            )
-            archetype = get_object_archetype(
-                preset.object_archetype_id,
-                preset.object_archetype_version,
-            )
-            result.append(
-                {
-                    "task_id": preset.preset_id,
-                    "objective": definition.objective,
-                    "object_label": archetype.label,
-                    "requires_yaw": preset.goal.requires_yaw,
-                    "candidate_count": len(preset.action_candidates),
-                }
-            )
-        return result
+        return [resolve_task(preset.preset_id).summary() for preset in list_task_presets()]
 
     @app.get("/api/runs")
     async def list_runs(run_status: str | None = Query(default=None, alias="status")) -> list[dict[str, Any]]:

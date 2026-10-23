@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "curious-robot"
-version = "0.3.0"
+version = "0.4.0"
 description = "Discover Physics. Simulate. Act. Learn."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -22,6 +22,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
+  "click>=8.2,<9",
   "matplotlib>=3.10",
   "newton[examples]==1.7.0",
   "numpy>=2.2",
@@ -38,6 +39,7 @@ Documentation = "https://github.com/yujeongdev/curious-robot/tree/main/docs"
 [project.optional-dependencies]
 dev = [
   "httpx>=0.28",
+  "mypy>=2.4,<3",
   "pycollada>=0.9",
   "pytest>=8.3",
   "pytest-cov>=6",
@@ -48,6 +50,7 @@ llm = ["openai>=2.0"]
 web = ["fastapi>=0.135,<1", "uvicorn[standard]>=0.41,<1"]
 
 [project.scripts]
+curo = "curious_robot.curo_cli:main"
 curious-robot = "curious_robot.cli:main"
 curious-robot-replay = "curious_robot.replay:main"
 
@@ -65,4 +68,12 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+files = ["src/curious_robot/curo_cli", "src/curious_robot/sim_setup.py", "src/curious_robot/tasks/description.py"]
+strict = true
+follow_imports = "silent"
+ignore_missing_imports = true
+# Warp's runtime array methods are untyped; project callbacks remain strict.
+untyped_calls_exclude = ["warp"]
 
