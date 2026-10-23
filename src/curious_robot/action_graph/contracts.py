@@ -154,8 +154,17 @@ class ActionGraph(_GraphModel):
                 continue
             if not outgoing[node.node_id]:
                 raise ValueError("every nonterminal node requires an outgoing edge")
+            guards = {edge.guard for edge in outgoing[node.node_id]}
+            if EdgeGuard.ON_FAILURE not in guards:
+                raise ValueError("every operational node requires a failure edge")
+            failure_target = next(
+                edge.target_node_id
+                for edge in outgoing[node.node_id]
+                if edge.guard is EdgeGuard.ON_FAILURE
+            )
+            if nodes_by_id[failure_target].kind is not ActionNodeKind.SAFE_STOP:
+                raise ValueError("operational failure edges must reach safe-stop")
             if node.kind is ActionNodeKind.MOTION:
-                guards = {edge.guard for edge in outgoing[node.node_id]}
                 if not {EdgeGuard.ON_FAILURE, EdgeGuard.ON_SAFETY_TRIP}.issubset(guards):
                     raise ValueError("every motion node requires failure and safety-stop edges")
                 unsafe_targets = [

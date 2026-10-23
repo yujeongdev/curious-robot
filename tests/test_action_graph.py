@@ -132,14 +132,19 @@ def test_graph_rejects_unbounded_cycles() -> None:
         edge
         for edge in graph.edges
         if not (
-            edge.source_node_id == "observe_terminal_object_pose"
-            and edge.guard is EdgeGuard.ON_FAILURE
+            edge.source_node_id == "verify_goal"
+            and edge.guard is EdgeGuard.ON_GOAL_MISS
         )
     ) + (
         ActionGraphEdge(
-            source_node_id="observe_terminal_object_pose",
+            source_node_id="verify_goal",
             target_node_id="observe_initial_object_pose",
-            guard=EdgeGuard.ON_FAILURE,
+            guard=EdgeGuard.ON_GOAL_MISS,
+        ),
+        ActionGraphEdge(
+            source_node_id="observe_initial_object_pose",
+            target_node_id="terminal_return_to_agent",
+            guard=EdgeGuard.ON_SAFETY_TRIP,
         ),
     )
 
@@ -157,6 +162,25 @@ def test_graph_rejects_motion_failure_that_bypasses_safe_stop() -> None:
     ) + (
         ActionGraphEdge(
             source_node_id=motion.node_id,
+            target_node_id="terminal_completed",
+            guard=EdgeGuard.ON_FAILURE,
+        ),
+    )
+
+    with pytest.raises(ValidationError, match="must reach safe-stop"):
+        ActionGraph.model_validate({**graph.model_dump(), "edges": edges})
+
+
+def test_graph_rejects_observation_failure_that_bypasses_safe_stop() -> None:
+    graph = _compiled_graph()
+    node_id = "observe_initial_object_pose"
+    edges = tuple(
+        edge
+        for edge in graph.edges
+        if not (edge.source_node_id == node_id and edge.guard is EdgeGuard.ON_FAILURE)
+    ) + (
+        ActionGraphEdge(
+            source_node_id=node_id,
             target_node_id="terminal_completed",
             guard=EdgeGuard.ON_FAILURE,
         ),
