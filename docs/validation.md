@@ -59,8 +59,9 @@ from a committed event recording and published with a versioned release.
 - Hardware plans now embed a typed ActionGraph and require graph-ID attestation
   from preflight and transport results. No concrete pylibfranka/ROS 2 transport
   or native 1 kHz executor is implemented, so hardware execution remains unavailable.
-- Wrist RGB-D contracts validate intrinsics, hand-eye calibration, timestamp
-  provenance, image/depth artifacts, and pose covariance. A simulated frame
+- Wrist RGB-D contracts validate intrinsics, hand-eye calibration, corrected
+  camera/robot timestamp agreement, image/depth encoding and artifacts, and
+  positive-semidefinite pose covariance. A simulated frame
   producer and real camera adapter remain planned rather than claimed.
 - The first T-bar slice fixes COM to the public uniform-density geometry
   centroid; it is an assumption, not an inferred episode parameter. Yaw inertia

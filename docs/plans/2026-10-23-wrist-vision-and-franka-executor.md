@@ -8,8 +8,8 @@
 ## 1. PR sequence
 
 1. Camera contracts
-   - intrinsics, frame artifact, `EE_T_camera`, timestamp skew, calibration hash
-   - RGB/depth bytes는 artifact store, event에는 ID와 metadata만 저장
+   - intrinsics, RGB/depth encoding, frame artifact, `EE_T_camera`, paired robot-state timestamp, calibration hash
+   - RGB/depth bytes는 artifact store, 전체 frame metadata는 content-addressed observation ID로 저장
 2. Simulated wrist sensor
    - private Newton state → offscreen RGB/depth producer → estimator
    - estimator가 body pose 배열을 직접 받지 못하도록 boundary test

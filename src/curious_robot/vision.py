@@ -7,6 +7,7 @@ import math
 from datetime import datetime
 from typing import Literal, Protocol
 
+import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Vec3 = tuple[float, float, float]
@@ -83,11 +84,17 @@ class CameraFrameObservation(_VisionModel):
     camera_id: str = Field(min_length=1)
     optical_frame_id: str = Field(min_length=1)
     captured_monotonic_s: float = Field(ge=0.0)
+    robot_state_monotonic_s: float = Field(ge=0.0)
     captured_wall_time: datetime
     rgb_artifact_id: str = Field(pattern=SHA256_ID)
     depth_artifact_id: str = Field(pattern=SHA256_ID)
     intrinsics_id: str = Field(pattern=SHA256_ID)
     calibration_id: str = Field(pattern=SHA256_ID)
+    rgb_encoding: Literal["rgb8", "bgr8", "mono8"]
+    depth_encoding: Literal["z16", "float32_m"]
+    rgb_compression: Literal["none", "png", "jpeg"]
+    depth_compression: Literal["none", "png", "zstd"]
+    depth_registered_to_rgb: bool
     exposure_us: float | None = Field(default=None, gt=0.0)
     quality_flags: tuple[str, ...] = ()
 
@@ -101,6 +108,10 @@ class CameraFrameObservation(_VisionModel):
             raise ValueError("camera quality flags must be unique")
         return self
 
+    @property
+    def observation_id(self) -> str:
+        return _content_id(self.model_dump_json(exclude_none=False))
+
 
 class VisionPoseEstimate(_VisionModel):
     schema_version: Literal["vision-pose-v1"] = "vision-pose-v1"
@@ -110,6 +121,13 @@ class VisionPoseEstimate(_VisionModel):
     frame_id: str = Field(min_length=1)
     position_m: Vec3
     orientation_xyzw: Quat
+    covariance_convention: Literal["base_xyz_rotvec"] = Field(
+        default="base_xyz_rotvec",
+        description=(
+            "Row-major covariance of base-frame [x,y,z,rx,ry,rz] perturbations; "
+            "translation is metres and rotation-vector components are radians"
+        ),
+    )
     covariance_6x6: tuple[float, ...] = Field(min_length=36, max_length=36)
     contributing_frame_ids: tuple[str, ...] = Field(min_length=1)
     estimator_id: str = Field(min_length=1)
@@ -126,6 +144,8 @@ class VisionPoseEstimate(_VisionModel):
         _require_unit_quaternion(self.orientation_xyzw)
         if len(set(self.contributing_frame_ids)) != len(self.contributing_frame_ids):
             raise ValueError("vision estimate frame IDs must be unique")
+        if any(not _is_sha256_id(value) for value in self.contributing_frame_ids):
+            raise ValueError("vision estimate frame IDs must be SHA-256 observation IDs")
         for row in range(6):
             if self.covariance_6x6[row * 6 + row] < 0.0:
                 raise ValueError("vision covariance diagonal must be non-negative")
@@ -136,6 +156,9 @@ class VisionPoseEstimate(_VisionModel):
                     abs_tol=1.0e-12,
                 ):
                     raise ValueError("vision covariance must be symmetric")
+        covariance = np.asarray(self.covariance_6x6, dtype=float).reshape((6, 6))
+        if float(np.linalg.eigvalsh(covariance).min()) < -1.0e-12:
+            raise ValueError("vision covariance must be positive semidefinite")
         if self.rms_corner_residual_m > self.maximum_corner_residual_m:
             raise ValueError("RMS corner residual cannot exceed the maximum residual")
         return self
@@ -152,8 +175,38 @@ class WristVisionPerception(Protocol):
     ) -> VisionPoseEstimate: ...
 
 
+def validate_camera_frame_binding(
+    frame: CameraFrameObservation,
+    intrinsics: CameraIntrinsics,
+    calibration: WristCameraCalibration,
+) -> None:
+    """Validate identities and corrected camera/robot capture-time agreement."""
+
+    if (
+        frame.camera_id != intrinsics.camera_id
+        or frame.camera_id != calibration.camera_id
+        or frame.optical_frame_id != calibration.optical_frame_id
+        or frame.intrinsics_id != intrinsics.intrinsics_id
+        or frame.intrinsics_id != calibration.intrinsics_id
+        or frame.calibration_id != calibration.calibration_id
+    ):
+        raise ValueError("camera frame identity does not match calibration")
+    corrected_camera_time_s = frame.captured_monotonic_s + calibration.camera_time_offset_s
+    if (
+        abs(corrected_camera_time_s - frame.robot_state_monotonic_s)
+        > calibration.maximum_sync_error_s
+    ):
+        raise ValueError("camera frame and robot state exceed the synchronization bound")
+
+
 def _content_id(document: str) -> str:
     return f"sha256:{hashlib.sha256(document.encode()).hexdigest()}"
+
+
+def _is_sha256_id(value: str) -> bool:
+    return len(value) == 71 and value.startswith("sha256:") and all(
+        character in "0123456789abcdef" for character in value[7:]
+    )
 
 
 def _require_unit_quaternion(value: Quat) -> None:

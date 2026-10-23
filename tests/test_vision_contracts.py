@@ -8,6 +8,7 @@ from curious_robot.vision import (
     CameraIntrinsics,
     VisionPoseEstimate,
     WristCameraCalibration,
+    validate_camera_frame_binding,
 )
 
 HASH_A = "sha256:" + "a" * 64
@@ -60,6 +61,21 @@ def test_wrist_calibration_and_intrinsics_are_content_addressed() -> None:
 
 def test_camera_frame_contains_artifact_provenance_but_no_hidden_pose() -> None:
     fields = set(CameraFrameObservation.model_fields)
+    intrinsics = _intrinsics()
+    calibration = WristCameraCalibration(
+        robot_serial="FR3-001",
+        tool_serial="PUSHER-001",
+        camera_serial="D405-001",
+        camera_id=intrinsics.camera_id,
+        intrinsics_id=intrinsics.intrinsics_id,
+        end_effector_frame_id="fr3_hand",
+        optical_frame_id="wrist_camera_optical",
+        ee_to_camera_translation_m=(0.04, 0.0, 0.02),
+        ee_to_camera_orientation_xyzw=(0.0, 0.0, 0.0, 1.0),
+        camera_time_offset_s=0.001,
+        maximum_sync_error_s=0.005,
+        approval_revision="hand-eye-board-v1",
+    )
     frame = CameraFrameObservation(
         episode_id="episode-1",
         stream_id="wrist-rgbd",
@@ -67,14 +83,24 @@ def test_camera_frame_contains_artifact_provenance_but_no_hidden_pose() -> None:
         camera_id="wrist-d405",
         optical_frame_id="wrist_camera_optical",
         captured_monotonic_s=10.0,
+        robot_state_monotonic_s=10.001,
         captured_wall_time=datetime.now(UTC),
         rgb_artifact_id=HASH_A,
         depth_artifact_id=HASH_B,
-        intrinsics_id=HASH_A,
-        calibration_id=HASH_B,
+        intrinsics_id=intrinsics.intrinsics_id,
+        calibration_id=calibration.calibration_id,
+        rgb_encoding="rgb8",
+        depth_encoding="z16",
+        rgb_compression="png",
+        depth_compression="zstd",
+        depth_registered_to_rgb=True,
     )
 
     assert frame.sequence == 1
+    assert frame.observation_id == CameraFrameObservation.model_validate_json(
+        frame.model_dump_json()
+    ).observation_id
+    validate_camera_frame_binding(frame, intrinsics, calibration)
     assert not {"mass_kg", "friction", "ground_truth_pose", "position_m"} & fields
     with pytest.raises(ValidationError, match="Extra inputs"):
         CameraFrameObservation.model_validate(
@@ -83,6 +109,12 @@ def test_camera_frame_contains_artifact_provenance_but_no_hidden_pose() -> None:
     with pytest.raises(ValidationError, match="timezone"):
         CameraFrameObservation.model_validate(
             {**frame.model_dump(), "captured_wall_time": datetime.now()}
+        )
+    with pytest.raises(ValueError, match="synchronization"):
+        validate_camera_frame_binding(
+            frame.model_copy(update={"robot_state_monotonic_s": 10.1}),
+            intrinsics,
+            calibration,
         )
 
 
@@ -115,3 +147,10 @@ def test_vision_pose_rejects_non_symmetric_covariance_and_bad_residual_order() -
         VisionPoseEstimate(**{**values, "covariance_6x6": tuple(asymmetric)})
     with pytest.raises(ValidationError, match="RMS"):
         VisionPoseEstimate(**{**values, "rms_corner_residual_m": 0.02})
+    with pytest.raises(ValidationError, match="SHA-256 observation IDs"):
+        VisionPoseEstimate(**{**values, "contributing_frame_ids": ("frame-1",)})
+    indefinite = covariance.copy()
+    indefinite[0] = indefinite[7] = 1.0
+    indefinite[1] = indefinite[6] = 2.0
+    with pytest.raises(ValidationError, match="positive semidefinite"):
+        VisionPoseEstimate(**{**values, "covariance_6x6": tuple(indefinite)})
