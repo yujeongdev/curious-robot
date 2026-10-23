@@ -26,7 +26,11 @@ from curious_robot.lab.ports import PortAuthority, RuntimeIdentity
 from curious_robot.objects import get_object_archetype
 from curious_robot.tasks import get_task_preset
 
-from .action_graph import RuntimeCapabilityManifest, admit_deployment_bundle
+from .action_graph import (
+    DeploymentBundle,
+    RuntimeCapabilityManifest,
+    admit_deployment_bundle,
+)
 from .hardware_backends import (
     CANONICAL_BACKEND_CONTRACTS,
     HardwareBackendContract,
@@ -284,6 +288,8 @@ class FrankaHardwareReality:
                     "hardware runtime rejected deployment bundle: "
                     + ", ".join(admission.blockers)
                 )
+            expected_bundle_id = admission.bundle_id
+            canonical_bundle = deployment_bundle.model_dump_json(exclude_none=False)
             expected_plan_id = motion_plan.plan_id
             expected_graph_id = motion_plan.action_graph.graph_id
             canonical_plan = motion_plan.model_dump_json(exclude_none=False)
@@ -297,10 +303,12 @@ class FrankaHardwareReality:
                 expected_graph_id,
             )
             motion_plan = FrankaPushMotionPlan.model_validate_json(canonical_plan)
+            deployment_bundle = DeploymentBundle.model_validate_json(canonical_bundle)
             if (
                 motion_plan.plan_id != expected_plan_id
                 or motion_plan.action_graph.graph_id != expected_graph_id
                 or deployment_bundle.motion_plan_id != expected_plan_id
+                or deployment_bundle.bundle_id != expected_bundle_id
             ):
                 raise ValueError("hardware preflight mutated the admitted deployment plan")
             remaining_graph_time_s = _remaining_graph_time_s(
@@ -316,7 +324,7 @@ class FrankaHardwareReality:
                 raise ValueError("hardware transport did not arm an independent watchdog")
             result = self.transport.execute_bounded_push(
                 motion_plan=motion_plan,
-                deployment_bundle_id=deployment_bundle.bundle_id,
+                deployment_bundle_id=expected_bundle_id,
                 maximum_force_n=motion_plan.maximum_force_n,
                 maximum_speed_m_s=skill.payload.safety.maximum_speed_m_s,
                 command_timeout_s=transport_timeout_s,
@@ -336,7 +344,7 @@ class FrankaHardwareReality:
                 watchdog_token=watchdog_token,
                 motion_plan_id=expected_plan_id,
                 action_graph_id=expected_graph_id,
-                deployment_bundle_id=deployment_bundle.bundle_id,
+                deployment_bundle_id=expected_bundle_id,
                 calibration_id=motion_plan.calibration_id,
                 maximum_acceleration_m_s2=motion_plan.maximum_linear_acceleration_m_s2,
                 maximum_angular_speed_rad_s=motion_plan.maximum_angular_speed_rad_s,
@@ -399,7 +407,7 @@ class FrankaHardwareReality:
                 object_id=self.push_calibration.object_id,
                 motion_plan_id=motion_plan.plan_id,
                 action_graph_id=motion_plan.action_graph.graph_id,
-                deployment_bundle_id=deployment_bundle.bundle_id,
+                deployment_bundle_id=expected_bundle_id,
                 calibration_id=motion_plan.calibration_id,
                 maximum_measured_speed_m_s=result.maximum_measured_speed_m_s,
                 maximum_measured_acceleration_m_s2=(result.maximum_measured_acceleration_m_s2),
