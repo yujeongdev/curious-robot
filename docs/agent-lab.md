@@ -59,6 +59,19 @@ The stage rail groups the execution into six phases:
 Repeated experiments retain their iteration identity rather than overwriting
 earlier evidence.
 
+## ActionGraph inspection
+
+After a controller publishes an admitted ActionGraph, the execution inspector
+shows the recorded current node, its neighboring success-path nodes, the graph
+deadline, and the shared safe-stop exit. The complete topology and contract IDs
+remain behind `Inspect full graph` so the Newton view stays visually primary.
+
+The browser never derives a graph from an action name and never advances a node.
+It reduces only `action.graph_compiled` and `action.node_transitioned` events from
+the append-only run log. A backend that has not emitted those records is shown as
+`NOT ADMITTED`; the UI does not fabricate an execution trace. Live and replay
+therefore render the same graph state at the same event cursor.
+
 ## Event and replay rules
 
 Every event carries a run ID, event ID, sequence, wall time, discovery stage,
