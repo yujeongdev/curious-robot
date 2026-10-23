@@ -18,6 +18,7 @@ jobs:
           enable-cache: true
       - run: uv sync --extra dev --extra web --locked
       - run: uv run ruff check src tests
+      - run: uv run mypy
       - run: uv run pytest -m "not gpu"
 
   frontend:

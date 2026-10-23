@@ -1,0 +1,4 @@
+interface:
+  display_name: "Curo task operations"
+  short_description: "Select tasks, set up simulations, and run Curo"
+  default_prompt: "Use $curo to select a Curious Robot task, set up its simulation, and run the requested experiment."

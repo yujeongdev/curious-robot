@@ -4,7 +4,10 @@
 !.env.example
 .claude/
 .gstack/
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/curo/
 .DS_Store
 .idea/
 .vscode/
@@ -12,6 +15,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .coverage
 .graft/
 dist/

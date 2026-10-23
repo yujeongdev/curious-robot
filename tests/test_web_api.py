@@ -40,6 +40,8 @@ def create_run(client: TestClient, **material_bounds) -> str:
 
 
 def test_task_catalog_api_lists_allowlisted_presets(api) -> None:
+    from curious_robot.tasks import get_task_preset
+
     client, _ = api
 
     response = client.get("/api/tasks")
@@ -50,6 +52,10 @@ def test_task_catalog_api_lists_allowlisted_presets(api) -> None:
     assert tasks["push-cube-v1"]["requires_yaw"] is False
     assert tasks["push-t-bar-v1"]["requires_yaw"] is True
     assert all(item["candidate_count"] >= 1 for item in tasks.values())
+    for task_id, summary in tasks.items():
+        assert summary["default_material_bounds"] == {
+            "mass_kg": list(get_task_preset(task_id).default_mass_range_kg)
+        }
 
 
 def test_mutations_require_token_json_and_same_origin(api) -> None:

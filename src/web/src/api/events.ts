@@ -17,6 +17,7 @@ export interface TaskSummary {
   object_label: string;
   requires_yaw: boolean;
   candidate_count: number;
+  default_material_bounds?: Record<string, unknown>;
 }
 
 function mutationHeaders(): HeadersInit {

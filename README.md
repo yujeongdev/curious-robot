@@ -93,7 +93,7 @@ CPU execution is supported for the deterministic unit and API test suites.
 uv sync --extra dev --extra web
 corepack pnpm --dir src/web install --frozen-lockfile
 corepack pnpm --dir src/web build
-uv run curious-robot web --open
+uv run curo web --task push-t-bar-v1 --open
 ```
 
 The server binds to `127.0.0.1` by default. Agent Lab is a local research tool,
@@ -108,6 +108,26 @@ uv run curious-robot web --open --autorun \
 ```
 
 ## Headless workflows
+
+### Task-oriented Curo CLI
+
+Cube and T-bar are selectable catalog tasks. Inspect the command's actual
+implementation status before automating a pipeline stage:
+
+```bash
+uv run curo capabilities --json
+uv run curo tasks list --json
+uv run curo tasks show push-t-bar-v1 --json
+uv run curo sim setup --task push-t-bar-v1 --device cuda:0 --json
+uv run curo run --task push-t-bar-v1 --pipeline isolated --device cuda:0 --json
+```
+
+`sim setup` builds and steps a public-prior world; it does not calibrate physics
+or authorize deployment. Pending standalone operations print “아직 구현되지
+않았습니다”, return `not_implemented`, and exit with code 3. Existing
+`curious-robot` commands remain available with their original pipeline semantics.
+See the [agent workflow guide](docs/guides/curo-agent-workflow.md) and
+[Curo skill](.agents/skills/curo/SKILL.md).
 
 ### Autonomous discovery episode
 

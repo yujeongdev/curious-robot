@@ -1,15 +1,43 @@
 import { expect, test } from "@playwright/test";
 
+const taskCatalog = [
+  {
+    task_id: "push-cube-v1",
+    objective: "Move an object into the target region",
+    object_label: "Known 50 mm cube",
+    requires_yaw: false,
+    candidate_count: 2,
+    default_material_bounds: { mass_kg: [0.08, 0.45] },
+  },
+  {
+    task_id: "push-t-bar-v1",
+    objective: "Match the target planar pose",
+    object_label: "Known compound T-bar",
+    requires_yaw: true,
+    candidate_count: 3,
+    default_material_bounds: { mass_kg: [0.08, 0.45] },
+  },
+];
+
 test("synthetic preview identifies its illustrative provenance", async ({ page }, testInfo) => {
-  await page.goto("/runs/new");
+  let startedRuns = 0;
+  await page.route("**/api/tasks", (route) => route.fulfill({ json: taskCatalog }));
+  await page.route("**/api/runs", (route) => {
+    if (route.request().method() === "POST") startedRuns += 1;
+    return route.fulfill({ status: 409, json: { detail: "Task loading must not start a run" } });
+  });
+  await page.goto("/runs/new?task=push-t-bar-v1");
   await expect(page.getByRole("heading", { name: /turn contact into physical knowledge/i })).toBeVisible();
-  await expect(page.getByLabel(/preview of franka robot and unknown t-bar/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run discovery demo" })).toBeEnabled();
+  await expect(page.getByLabel("Schematic preview for Known compound T-bar")).toBeVisible();
+  expect(startedRuns).toBe(0);
   await page.getByText("Configure run").click();
   const task = page.getByLabel("Task");
   await expect(task).toHaveValue("push-t-bar-v1");
   await task.selectOption("push-cube-v1");
-  await expect(page.getByLabel(/preview of franka robot and unknown cube/i)).toBeVisible();
+  await expect(page.getByLabel("Schematic preview for Known 50 mm cube")).toBeVisible();
   await task.selectOption("push-t-bar-v1");
+  expect(startedRuns).toBe(0);
   await page.getByRole("button", { name: /preview synthetic example/i }).click();
   await expect(page.getByRole("note", { name: "Preview provenance" })).toHaveText(/Synthetic preview.*No Newton episode was executed/i);
   await expect(page.getByRole("tab", { name: "Preview", exact: true })).toHaveAttribute("aria-selected", "true");
@@ -28,6 +56,8 @@ test("synthetic preview identifies its illustrative provenance", async ({ page }
   await expect(page.locator("body")).not.toContainText(/hidden_mass|ground_truth|truth_mu_static/i);
   await page.getByRole("tab", { name: "Replay", exact: true }).click();
   await expect(page.getByRole("note", { name: "Preview provenance" })).toBeVisible();
+  expect(startedRuns).toBe(0);
+
   await page.getByLabel("Replay sequence").fill("67");
   await expect(page.locator('.action-graph-window [aria-current="step"]')).toContainText("contact push");
   await page.getByRole("tab", { name: "Preview", exact: true }).click();

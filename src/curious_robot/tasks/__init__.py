@@ -13,6 +13,7 @@ from .contracts import (
     wrapped_yaw_error,
     yaw_from_quaternion_xyzw,
 )
+from .description import ResolvedTask, resolve_task
 from .registry import (
     PLANAR_POSE_MATCH_V1,
     PLANAR_TRANSLATION_V1,
@@ -42,4 +43,6 @@ __all__ = [
     "get_task_definition",
     "get_task_preset",
     "list_task_presets",
+    "ResolvedTask",
+    "resolve_task",
 ]

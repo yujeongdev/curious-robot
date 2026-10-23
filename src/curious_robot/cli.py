@@ -7,6 +7,7 @@ import json
 import threading
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlencode
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -145,9 +146,10 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("Install web dependencies with: uv sync --extra web") from exc
     from .web_api import create_app
 
-    url = f"http://{args.host}:{args.port}/"
+    query = {"task": args.task, "seed": args.seed, "device": args.device}
     if args.autorun:
-        url += f"?autorun=1&task={args.task}&seed={args.seed}&device={args.device}"
+        query["autorun"] = "1"
+    url = f"http://{args.host}:{args.port}/?{urlencode(query)}"
     if args.open:
         threading.Timer(0.8, webbrowser.open, args=(url,)).start()
     uvicorn.run(create_app(), host=args.host, port=args.port, log_level="info")
