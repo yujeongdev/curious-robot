@@ -7,9 +7,14 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from curious_robot.action_graph import NodeOutcome, compile_motion_action_graph
 from curious_robot.events import (
     EVENT_ADAPTER,
     STAGE_TO_MACRO,
+    ActionGraphCompiledEvent,
+    ActionGraphCompiledPayload,
+    ActionNodeTransitionedEvent,
+    ActionNodeTransitionedPayload,
     BodyTransform,
     DiscoveryStage,
     EventContractError,
@@ -27,15 +32,35 @@ from curious_robot.events import (
 )
 
 
-def common(sequence: int = 1) -> dict[str, object]:
+def common(
+    sequence: int = 1,
+    stage: DiscoveryStage = DiscoveryStage.OBSERVE,
+) -> dict[str, object]:
     return {
         "run_id": uuid4(),
         "sequence": sequence,
         "wall_time": datetime.now(UTC),
-        "stage": DiscoveryStage.OBSERVE,
+        "stage": stage,
         "iteration_id": 0,
         "stage_instance_id": uuid4(),
     }
+
+
+def action_graph():
+    return compile_motion_action_graph(
+        task_id="push-t-bar-v1",
+        task_version="1.0.0",
+        object_id="unknown-t-bar",
+        object_archetype_version="1.0.0",
+        geometry_hash="sha256:" + "a" * 64,
+        calibration_id="sha256:" + "b" * 64,
+        protocol_binding_id="sha256:" + "c" * 64,
+        phases=("contact_approach", "contact_push", "retreat"),
+        phase_durations_s=(0.5, 1.0, 0.5),
+        contact_expectations=("acquire_at_end", "maintain", "release"),
+        observation_timeout_s=1.0,
+        wall_clock_deadline_s=10.0,
+    )
 
 
 def test_event_union_round_trips_and_retains_same_major_optional_fields() -> None:
@@ -65,6 +90,94 @@ def test_newer_schema_major_and_unknown_event_type_stop_replay() -> None:
     with pytest.raises(ValidationError, match="union_tag_invalid"):
         EVENT_ADAPTER.validate_python(document)
 
+
+def test_action_graph_commitment_round_trips_with_content_identity() -> None:
+    graph = action_graph()
+    event = ActionGraphCompiledEvent(
+        **common(stage=DiscoveryStage.SELECT_ACTION),
+        payload=ActionGraphCompiledPayload(
+            graph_id=graph.graph_id,
+            graph=graph,
+            motion_plan_id="sha256:" + "d" * 64,
+            deployment_bundle_id="sha256:" + "e" * 64,
+        ),
+    )
+
+    validate_public_event(event)
+    decoded = parse_event(serialize_event(event))
+
+    assert decoded.type == "action.graph_compiled"
+    assert decoded.payload.graph_id == graph.graph_id
+    assert decoded.payload.graph.graph_id == graph.graph_id
+    assert serialize_event(decoded) == serialize_event(event)
+
+
+def test_action_graph_commitment_rejects_mismatched_identity_and_truth_fields() -> None:
+    graph = action_graph()
+    with pytest.raises(ValidationError, match="does not match"):
+        ActionGraphCompiledPayload(graph_id="sha256:" + "f" * 64, graph=graph)
+    with pytest.raises(ValidationError, match="requires a motion plan"):
+        ActionGraphCompiledPayload(
+            graph_id=graph.graph_id,
+            graph=graph,
+            deployment_bundle_id="sha256:" + "e" * 64,
+        )
+
+    graph_document = graph.model_dump(mode="python")
+    graph_document["nodes"][0]["parameters"]["hidden_mass_kg"] = 0.42
+    leaked_graph = type(graph).model_validate(graph_document)
+    event = ActionGraphCompiledEvent(
+        **common(stage=DiscoveryStage.SELECT_ACTION),
+        payload=ActionGraphCompiledPayload(
+            graph_id=leaked_graph.graph_id,
+            graph=leaked_graph,
+        ),
+    )
+    with pytest.raises(EventContractError, match="hidden_mass_kg"):
+        validate_public_event(event)
+
+
+def test_action_node_transition_is_observation_not_an_advance_command() -> None:
+    graph = action_graph()
+    entered = ActionNodeTransitionedEvent(
+        **common(stage=DiscoveryStage.EXECUTE),
+        payload=ActionNodeTransitionedPayload(
+            graph_id=graph.graph_id,
+            node_id=graph.entry_node_id,
+            state="entered",
+        ),
+    )
+    completed = ActionNodeTransitionedEvent(
+        **common(sequence=2, stage=DiscoveryStage.EXECUTE),
+        payload=ActionNodeTransitionedPayload(
+            graph_id=graph.graph_id,
+            node_id=graph.entry_node_id,
+            state="completed",
+            outcome=NodeOutcome.SUCCESS,
+            elapsed_s=0.25,
+            evidence_ids=("sha256:" + "9" * 64,),
+        ),
+    )
+
+    validate_public_event(entered)
+    validate_public_event(completed)
+    assert completed.payload.outcome is NodeOutcome.SUCCESS
+    assert parse_event(serialize_event(completed)).payload.node_id == graph.entry_node_id
+
+    with pytest.raises(ValidationError, match="cannot declare"):
+        ActionNodeTransitionedPayload(
+            graph_id=graph.graph_id,
+            node_id=graph.entry_node_id,
+            state="entered",
+            outcome=NodeOutcome.SUCCESS,
+        )
+    with pytest.raises(ValidationError, match="do not match"):
+        ActionNodeTransitionedPayload(
+            graph_id=graph.graph_id,
+            node_id=graph.entry_node_id,
+            state="safety_trip",
+            outcome=NodeOutcome.FAILURE,
+        )
 
 def test_public_validation_blocks_truth_fields_sentinels_and_nonfinite_values() -> None:
     with pytest.raises(EventContractError, match="hidden_mass_kg"):

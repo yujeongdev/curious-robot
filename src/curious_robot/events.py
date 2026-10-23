@@ -16,6 +16,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
+from .action_graph import ActionGraph, NodeOutcome
+
 Vec3 = tuple[float, float, float]
 Quat = tuple[float, float, float, float]
 
@@ -345,6 +347,51 @@ class ActionExecutedPayload(PublicModel):
     safety_event_ids: tuple[UUID, ...] = ()
 
 
+class ActionGraphCompiledPayload(PublicModel):
+    """Public commitment to the exact graph admitted for deterministic execution."""
+
+    graph_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    graph: ActionGraph
+    motion_plan_id: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    deployment_bundle_id: str | None = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+
+    @model_validator(mode="after")
+    def graph_identity_matches_snapshot(self) -> ActionGraphCompiledPayload:
+        if self.graph_id != self.graph.graph_id:
+            raise ValueError("action graph event ID does not match its graph snapshot")
+        if self.deployment_bundle_id is not None and self.motion_plan_id is None:
+            raise ValueError("deployment bundle ID requires a motion plan ID")
+        return self
+
+
+class ActionNodeTransitionedPayload(PublicModel):
+    """Recorded supervisor transition; never an instruction to advance the graph."""
+
+    graph_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    node_id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    state: Literal["entered", "completed", "failed", "safety_trip", "goal_miss"]
+    outcome: NodeOutcome | None = None
+    elapsed_s: float | None = Field(default=None, ge=0.0)
+    evidence_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def outcome_matches_transition(self) -> ActionNodeTransitionedPayload:
+        expected = {
+            "completed": NodeOutcome.SUCCESS,
+            "failed": NodeOutcome.FAILURE,
+            "safety_trip": NodeOutcome.SAFETY_TRIP,
+            "goal_miss": NodeOutcome.GOAL_MISS,
+        }
+        if self.state == "entered" and self.outcome is not None:
+            raise ValueError("entered action node cannot declare a terminal outcome")
+        if self.state != "entered" and self.outcome is not expected[self.state]:
+            raise ValueError("action node transition state and outcome do not match")
+        return self
+
+
 class VerificationPayload(PublicModel):
     success: bool
     goal_predicates: dict[str, bool]
@@ -471,6 +518,14 @@ SimulationVisualFrameEvent = _event_model(
 )
 PredictionCompletedEvent = _event_model("PredictionCompletedEvent", "prediction.completed", PredictionPayload)
 ActionSelectedEvent = _event_model("ActionSelectedEvent", "action.selected", ActionSelectedPayload)
+ActionGraphCompiledEvent = _event_model(
+    "ActionGraphCompiledEvent", "action.graph_compiled", ActionGraphCompiledPayload
+)
+ActionNodeTransitionedEvent = _event_model(
+    "ActionNodeTransitionedEvent",
+    "action.node_transitioned",
+    ActionNodeTransitionedPayload,
+)
 ActionExecutedEvent = _event_model("ActionExecutedEvent", "action.executed", ActionExecutedPayload)
 VerificationCompletedEvent = _event_model(
     "VerificationCompletedEvent", "verification.completed", VerificationPayload
@@ -504,6 +559,8 @@ type AgentEvent = Annotated[
     | SimulationVisualFrameEvent
     | PredictionCompletedEvent
     | ActionSelectedEvent
+    | ActionGraphCompiledEvent
+    | ActionNodeTransitionedEvent
     | ActionExecutedEvent
     | VerificationCompletedEvent
     | LearningCompletedEvent
@@ -597,6 +654,10 @@ def serialize_event(event: AgentEvent) -> bytes:
 
 __all__ = [
     "AgentEvent",
+    "ActionGraphCompiledEvent",
+    "ActionGraphCompiledPayload",
+    "ActionNodeTransitionedEvent",
+    "ActionNodeTransitionedPayload",
     "ArtifactCreatedEvent",
     "BodyTransform",
     "DiscoveryStage",

@@ -21,8 +21,73 @@ export const eventTypes = [
   "stage.entered", "stage.completed", "rationale.published", "tool.started", "tool.completed", "tool.failed",
   "measurement.sampled", "measurement.summary", "belief.updated", "simulation.belief_rebuilt", "simulation.visual_frame",
   "prediction.completed", "action.selected", "action.executed", "verification.completed", "learning.completed",
+  "action.graph_compiled", "action.node_transitioned",
   "safety.triggered", "evaluation.revealed", "reexecution.completed", "artifact.created",
 ] as const;
+
+const sha256IdSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
+
+export const actionGraphNodeSchema = z.object({
+  node_id: z.string().regex(/^[a-z][a-z0-9_]*$/),
+  kind: z.enum(["observe", "guard", "motion", "verify", "safe_stop", "terminal"]),
+  authority: z.enum(["hardware", "reality", "supervisor"]),
+  executor: z.enum(["deterministic_transport", "perception", "supervisor"]),
+  control_mode: z.enum(["joint_position", "cartesian_pose", "cartesian_velocity", "cartesian_impedance", "joint_torque"]).nullable().optional(),
+  required_capabilities: z.array(z.string()).default([]),
+  timeout_s: z.number().positive(),
+  checkpoint_safe: z.boolean().default(false),
+  parameters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+});
+
+export const actionGraphEdgeSchema = z.object({
+  source_node_id: z.string(),
+  target_node_id: z.string(),
+  guard: z.enum(["on_success", "on_failure", "on_safety_trip", "on_goal_miss"]),
+});
+
+export const actionGraphSchema = z.object({
+  graph_schema_version: z.literal("action-graph-v1"),
+  compiler_version: z.literal("motion-plan-compiler-v1"),
+  graph_name: z.string(),
+  task_id: z.string(),
+  task_version: z.string(),
+  object_id: z.string(),
+  object_archetype_version: z.string(),
+  geometry_hash: sha256IdSchema,
+  calibration_id: sha256IdSchema,
+  protocol_binding_id: sha256IdSchema,
+  entry_node_id: z.string(),
+  terminal_node_ids: z.array(z.string()).min(1),
+  wall_clock_deadline_s: z.number().positive(),
+  nodes: z.array(actionGraphNodeSchema).min(1),
+  edges: z.array(actionGraphEdgeSchema),
+}).superRefine((graph, context) => {
+  const nodeIds = new Set(graph.nodes.map((node) => node.node_id));
+  if (!nodeIds.has(graph.entry_node_id)) context.addIssue({ code: "custom", message: "entry node must exist", path: ["entry_node_id"] });
+  for (const nodeId of graph.terminal_node_ids) {
+    if (!nodeIds.has(nodeId)) context.addIssue({ code: "custom", message: "terminal node must exist", path: ["terminal_node_ids"] });
+  }
+  for (const [index, edge] of graph.edges.entries()) {
+    if (!nodeIds.has(edge.source_node_id) || !nodeIds.has(edge.target_node_id)) {
+      context.addIssue({ code: "custom", message: "edge nodes must exist", path: ["edges", index] });
+    }
+  }
+});
+
+export const actionGraphCompiledPayloadSchema = z.object({
+  graph_id: sha256IdSchema,
+  motion_plan_id: sha256IdSchema.nullable().optional(),
+  deployment_bundle_id: sha256IdSchema.nullable().optional(),
+  graph: actionGraphSchema,
+});
+
+export const actionNodeTransitionPayloadSchema = z.object({
+  graph_id: sha256IdSchema,
+  node_id: z.string(),
+  state: z.enum(["entered", "completed", "failed", "safety_trip", "goal_miss"]),
+  outcome: z.enum(["success", "failure", "safety_trip", "goal_miss"]).nullable().optional(),
+  evidence_ids: z.array(z.string()).default([]),
+});
 
 export const vector3Schema = z.tuple([z.number(), z.number(), z.number()]);
 export const quaternionSchema = z.tuple([z.number(), z.number(), z.number(), z.number()]);
@@ -136,9 +201,14 @@ export type AgentEventType = (typeof eventTypes)[number];
 export type AgentEvent = z.infer<typeof agentEventSchema>;
 export type VisualFramePayload = z.infer<typeof visualFramePayloadSchema>;
 export type BodyTransform = z.infer<typeof bodyTransformSchema>;
+export type ActionGraphSnapshot = z.infer<typeof actionGraphSchema>;
+export type ActionGraphNode = z.infer<typeof actionGraphNodeSchema>;
+export type ActionGraphNodeTransition = z.infer<typeof actionNodeTransitionPayloadSchema>;
 
 export function parseAgentEvent(input: unknown): AgentEvent {
   const event = agentEventSchema.parse(input);
   if (event.type === "simulation.visual_frame") visualFramePayloadSchema.parse(event.payload);
+  if (event.type === "action.graph_compiled") actionGraphCompiledPayloadSchema.parse(event.payload);
+  if (event.type === "action.node_transitioned") actionNodeTransitionPayloadSchema.parse(event.payload);
   return event;
 }

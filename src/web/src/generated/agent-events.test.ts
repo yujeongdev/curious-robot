@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { demoEvents } from "../fixtures/demo-run";
-import { parseAgentEvent, visualFramePayloadSchema } from "./agent-events";
+import { actionGraphCompiledPayloadSchema, actionNodeTransitionPayloadSchema, parseAgentEvent, visualFramePayloadSchema } from "./agent-events";
 
 describe("agent event boundary", () => {
   it("accepts all fixture events", () => {
@@ -14,6 +14,15 @@ describe("agent event boundary", () => {
   it("rejects malformed authoritative visual frames", () => {
     const visual = demoEvents.find((event) => event.type === "simulation.visual_frame")!;
     expect(() => parseAgentEvent({ ...visual, payload: { ...visual.payload, bodies: [{ body_id: "cube" }] } })).toThrow();
+  });
+
+  it("validates graph commitments and node transitions", () => {
+    const compiled = demoEvents.find((event) => event.type === "action.graph_compiled")!;
+    const transition = demoEvents.find((event) => event.type === "action.node_transitioned")!;
+    expect(actionGraphCompiledPayloadSchema.parse(compiled.payload).graph.nodes.length).toBeGreaterThan(1);
+    expect(actionNodeTransitionPayloadSchema.parse(transition.payload).node_id).toBe("observe_initial_object_pose");
+    expect(() => actionGraphCompiledPayloadSchema.parse({ ...compiled.payload, graph_id: "not-a-hash" })).toThrow();
+    expect(() => actionNodeTransitionPayloadSchema.parse({ ...transition.payload, state: "teleported" })).toThrow();
   });
 
   it("accepts versioned public compound geometry without physical parameters", () => {

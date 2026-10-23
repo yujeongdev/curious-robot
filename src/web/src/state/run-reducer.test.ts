@@ -40,6 +40,35 @@ describe("run reducer", () => {
     expect(state.status).toBe("running");
   });
 
+  it("replays the admitted graph and its recorded node progress", () => {
+    const compiled = demoEvents.find((event) => event.type === "action.graph_compiled")!;
+    const pushEntered = demoEvents.find(
+      (event) => event.type === "action.node_transitioned" && event.payload.node_id === "motion_01_contact_push" && event.payload.state === "entered",
+    )!;
+    const beforeGraph = seekRun(demoEvents, compiled.sequence - 1);
+    const duringPush = seekRun(demoEvents, pushEntered.sequence);
+    expect(beforeGraph.actionGraph).toBeNull();
+    expect(duringPush.actionGraphId).toBe(compiled.payload.graph_id);
+    expect(duringPush.activeActionNodeId).toBe("motion_01_contact_push");
+    expect(duringPush.actionNodeStates.motion_00_contact_approach).toBe("completed");
+    expect(reduceRunEvents(demoEvents).actionNodeStates.terminal_completed).toBe("completed");
+  });
+
+  it("flags transitions outside the admitted graph without changing node progress", () => {
+    const compiledIndex = demoEvents.findIndex((event) => event.type === "action.graph_compiled");
+    const admitted = reduceRunEvents(demoEvents.slice(0, compiledIndex + 1));
+    const transition = demoEvents.find((event) => event.type === "action.node_transitioned")!;
+    const invalid = {
+      ...transition,
+      event_id: "wrong-graph-transition",
+      sequence: admitted.lastSequence + 1,
+      payload: { ...transition.payload, graph_id: `sha256:${"9".repeat(64)}` },
+    };
+    const rejected = reduceRunEvent(admitted, invalid);
+    expect(rejected.actionGraphContractError).toMatch(/does not match/i);
+    expect(rejected.activeActionNodeId).toBeNull();
+  });
+
   it("retains independent Reality and Twin frames across interleaved events and seek", () => {
     const beliefEvent = demoEvents.find(
       (event) => event.type === "simulation.visual_frame" && event.payload.scene === "belief",
