@@ -2,6 +2,25 @@
 
 All notable changes to Curious Robot are documented here.
 
+## [0.3.1] - 2026-10-24
+
+### Added
+
+- Stream content-addressed ActionGraph commitments and recorded node transitions through the same append-only event log used by live view and replay.
+- Show the current execution node, neighboring success-path nodes, deadline, and explicit safe-stop/return-to-agent branches in Agent Lab.
+- Compile each live Newton deployment into an honest single-skill execution graph and record observation, motion, verification, and terminal transitions.
+
+### Changed
+
+- Remove the permanent causal-bridge and empty candidate-fleet strips so the Reality and learned-Twin views remain the primary visual anchor.
+- Use progressive disclosure for the complete graph contract and start telemetry collapsed.
+- Switch tablet layouts to one selected physics world instead of two unreadably narrow panes.
+
+### Boundaries
+
+- Backends that do not emit a compiled graph remain visibly `NOT ADMITTED`; the browser never fabricates graph nodes from an action name.
+- The monolithic Newton controller is represented as one atomic motion node; internal servo phases are not fabricated. The synthetic preview is explicitly labeled illustrative.
+
 ## [0.3.0] - 2026-10-23
 
 ### Added

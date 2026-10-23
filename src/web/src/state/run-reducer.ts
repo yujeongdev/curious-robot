@@ -1,8 +1,9 @@
-import type { AgentEvent, DetailedStage, VisualFramePayload } from "../generated/agent-events";
-import { visualFramePayloadSchema } from "../generated/agent-events";
+import type { ActionGraphSnapshot, AgentEvent, DetailedStage, VisualFramePayload } from "../generated/agent-events";
+import { actionGraphCompiledPayloadSchema, actionNodeTransitionPayloadSchema, visualFramePayloadSchema } from "../generated/agent-events";
 
 export type RunStatus = "idle" | "preparing" | "running" | "pause_pending" | "paused" | "completed" | "failed" | "cancelled" | "abandoned";
 export type StageStatus = "pending" | "active" | "completed" | "failed" | "skipped";
+export type ActionNodeState = "pending" | "entered" | "completed" | "failed" | "safety_trip" | "goal_miss";
 
 export interface StageInstance {
   id: string;
@@ -55,6 +56,13 @@ export interface RunState {
   measurements: readonly MeasurementPoint[];
   predictionEvents: readonly AgentEvent[];
   selectedActionId: string | null;
+  actionGraph: ActionGraphSnapshot | null;
+  actionGraphId: string | null;
+  actionGraphSequence: number | null;
+  actionNodeStates: Readonly<Record<string, ActionNodeState>>;
+  activeActionNodeId: string | null;
+  lastActionNodeId: string | null;
+  actionGraphContractError: string | null;
   causalExperimentName: string | null;
   causalEvidenceId: string | null;
   causalPatchLabel: string | null;
@@ -80,6 +88,13 @@ export const initialRunState: RunState = {
   measurements: [],
   predictionEvents: [],
   selectedActionId: null,
+  actionGraph: null,
+  actionGraphId: null,
+  actionGraphSequence: null,
+  actionNodeStates: {},
+  activeActionNodeId: null,
+  lastActionNodeId: null,
+  actionGraphContractError: null,
   causalExperimentName: null,
   causalEvidenceId: null,
   causalPatchLabel: null,
@@ -198,6 +213,35 @@ export function reduceRunEvent(state: RunState, event: AgentEvent): RunState {
         ...state.worldFrames,
         [frame.scene]: { frame, sequence: event.sequence },
       },
+    };
+  }
+  if (event.type === "action.graph_compiled") {
+    const payload = actionGraphCompiledPayloadSchema.parse(event.payload);
+    return {
+      ...base,
+      actionGraph: payload.graph,
+      actionGraphId: payload.graph_id,
+      actionGraphSequence: event.sequence,
+      actionNodeStates: Object.fromEntries(payload.graph.nodes.map((node) => [node.node_id, "pending" as const])),
+      activeActionNodeId: null,
+      lastActionNodeId: null,
+      actionGraphContractError: null,
+    };
+  }
+  if (event.type === "action.node_transitioned") {
+    const transition = actionNodeTransitionPayloadSchema.parse(event.payload);
+    if (!state.actionGraph || transition.graph_id !== state.actionGraphId) {
+      return { ...base, actionGraphContractError: "Node transition does not match the admitted action graph." };
+    }
+    if (!state.actionGraph.nodes.some((node) => node.node_id === transition.node_id)) {
+      return { ...base, actionGraphContractError: `Unknown action graph node: ${transition.node_id}` };
+    }
+    return {
+      ...base,
+      actionNodeStates: { ...state.actionNodeStates, [transition.node_id]: transition.state },
+      activeActionNodeId: transition.state === "entered" ? transition.node_id : state.activeActionNodeId === transition.node_id ? null : state.activeActionNodeId,
+      lastActionNodeId: transition.node_id,
+      actionGraphContractError: state.actionGraphContractError,
     };
   }
   if (event.type.startsWith("tool.")) {
