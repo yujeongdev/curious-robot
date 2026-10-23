@@ -165,6 +165,8 @@ class ActionGraph(_GraphModel):
             if not outgoing[node.node_id]:
                 raise ValueError("every nonterminal node requires an outgoing edge")
             guards = {edge.guard for edge in outgoing[node.node_id]}
+            if EdgeGuard.ON_SUCCESS not in guards:
+                raise ValueError("every operational node requires a success edge")
             if EdgeGuard.ON_FAILURE not in guards:
                 raise ValueError("every operational node requires a failure edge")
             failure_target = next(

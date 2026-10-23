@@ -200,3 +200,22 @@ def test_graph_rejects_safe_stop_omitted_from_terminal_declarations() -> None:
         ActionGraph.model_validate(
             {**graph.model_dump(), "terminal_node_ids": terminals}
         )
+
+
+def test_graph_rejects_operational_node_without_success_transition() -> None:
+    graph = _compiled_graph()
+    node_id = "observe_initial_object_pose"
+    edges = tuple(
+        edge
+        for edge in graph.edges
+        if not (edge.source_node_id == node_id and edge.guard is EdgeGuard.ON_SUCCESS)
+    ) + (
+        ActionGraphEdge(
+            source_node_id=node_id,
+            target_node_id="validate_initial_observation",
+            guard=EdgeGuard.ON_GOAL_MISS,
+        ),
+    )
+
+    with pytest.raises(ValidationError, match="requires a success edge"):
+        ActionGraph.model_validate({**graph.model_dump(), "edges": edges})
