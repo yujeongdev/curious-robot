@@ -70,7 +70,7 @@ function NodeRow({ node, state, compact = false }: { node: ActionGraphNode; stat
   );
 }
 
-export function ActionGraphPanel({ run, compact = false }: { run: RunState; compact?: boolean }) {
+export function ActionGraphPanel({ run }: { run: RunState }) {
   const [open, setOpen] = useState(false);
   const titleId = useId();
   const path = useMemo(() => successPath(run), [run]);
@@ -116,8 +116,7 @@ export function ActionGraphPanel({ run, compact = false }: { run: RunState; comp
         {visible.map((node) => <NodeRow key={node.node_id} node={node} state={run.actionNodeStates[node.node_id] ?? "pending"} compact />)}
       </ol>
       <div className="action-graph-safety"><ShieldAlert aria-hidden="true" /><span>Any failure or safety trip</span><strong>Safe stop</strong></div>
-      {!compact && (
-        <CollapsiblePrimitive.Root open={open} onOpenChange={setOpen}>
+      <CollapsiblePrimitive.Root open={open} onOpenChange={setOpen}>
           <CollapsiblePrimitive.Trigger className="action-graph-trigger">
             <GitBranch aria-hidden="true" /> {open ? "Hide full graph" : "Inspect full graph"} <ChevronDown aria-hidden="true" />
           </CollapsiblePrimitive.Trigger>
@@ -135,8 +134,7 @@ export function ActionGraphPanel({ run, compact = false }: { run: RunState; comp
               <div><dt>Compiler</dt><dd className="mono">{run.actionGraph.compiler_version}</dd></div>
             </dl>
           </CollapsiblePrimitive.Content>
-        </CollapsiblePrimitive.Root>
-      )}
+      </CollapsiblePrimitive.Root>
     </section>
   );
 }
