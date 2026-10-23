@@ -295,6 +295,18 @@ def test_push_plan_rejects_graph_control_mode_tampering() -> None:
         type(plan).model_validate(document)
 
 
+def test_push_plan_rejects_motion_authority_tampering() -> None:
+    plan = _compile()
+    document = plan.model_dump()
+    motion_node = next(
+        node for node in document["action_graph"]["nodes"] if node["kind"] == "motion"
+    )
+    motion_node["authority"] = "supervisor"
+
+    with pytest.raises(ValueError, match="hardware authority"):
+        type(plan).model_validate(document)
+
+
 def test_push_plan_rejects_reordered_graph_motion_success_path() -> None:
     plan = _compile()
     document = plan.model_dump()
