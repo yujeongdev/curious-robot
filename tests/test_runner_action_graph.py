@@ -1,8 +1,13 @@
 from curious_robot.action_graph import NodeOutcome
 from curious_robot.planning import candidate_actions
 from curious_robot.protocol import load_default_protocol
-from curious_robot.runner import _EpisodeEvents, _skill_timeout_bound_s
+from curious_robot.runner import (
+    MAX_FRANKA_JOINT_DELTA_RAD,
+    _EpisodeEvents,
+    _skill_timeout_bound_s,
+)
 from curious_robot.tasks import get_task_preset
+from curious_robot.trajectory import minimum_jerk_duration_s
 from curious_robot.world_config import WorldConfig
 
 
@@ -72,5 +77,18 @@ def test_skill_timeout_bounds_all_tbar_translation_and_yaw_attempts() -> None:
         * task.yaw_alignment.correction_travel_m
         / task.yaw_alignment.speed_m_s
     )
+    cartesian_correction_bound_s = (
+        (
+            protocol.final_push.maximum_attempts
+            + task.yaw_alignment.maximum_attempts
+        )
+        * 4
+        * (config.maximum_cartesian_corrections + 1)
+        * minimum_jerk_duration_s(
+            MAX_FRANKA_JOINT_DELTA_RAD,
+            config.maximum_joint_target_speed_rad_s,
+        )
+    )
 
     assert timeout_s > translation_lower_bound_s + yaw_lower_bound_s
+    assert timeout_s > cartesian_correction_bound_s

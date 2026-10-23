@@ -6,6 +6,7 @@ import csv
 import hashlib
 import importlib.metadata
 import json
+import math
 import os
 import platform
 import secrets
@@ -50,7 +51,10 @@ from .tasks import (
     yaw_from_quaternion_xyzw,
 )
 from .tools import RobotTools
+from .trajectory import minimum_jerk_duration_s, physics_substeps_for_target_speed
 from .world_config import object_kind_from_archetype_id
+
+MAX_FRANKA_JOINT_DELTA_RAD = 2.0 * math.pi
 
 
 class EventSink(Protocol):
@@ -203,33 +207,46 @@ def _skill_timeout_bound_s(
 ) -> float:
     final_push = protocol.final_push
     translation_attempts = final_push.maximum_attempts
-    translation_path_m = (
-        final_push.maximum_travel_m
-        + 2.0 * final_push.safe_height_m
-        + 2.0 * final_push.precontact_offset_m
-    )
-    translation_time_s = (
-        translation_attempts
-        * translation_path_m
-        / min(action.speed_m_s, final_push.approach_speed_m_s)
-    )
     yaw_attempts = task.yaw_alignment.maximum_attempts if task.yaw_alignment.enabled else 0
-    yaw_path_m = (
-        task.yaw_alignment.correction_travel_m
-        + 2.0 * final_push.safe_height_m
-        + 2.0 * final_push.precontact_offset_m
+    correction_passes = config.maximum_cartesian_corrections + 1
+    joint_motion_bound_s = minimum_jerk_duration_s(
+        MAX_FRANKA_JOINT_DELTA_RAD,
+        config.maximum_joint_target_speed_rad_s,
     )
-    yaw_time_s = (
-        yaw_attempts
-        * yaw_path_m
-        / min(task.yaw_alignment.speed_m_s, final_push.approach_speed_m_s)
+    cartesian_command_bound_s = correction_passes * (
+        joint_motion_bound_s + config.maximum_cartesian_settle_s
     )
-    settle_time_s = (translation_attempts + yaw_attempts) * (
-        final_push.post_attempt_settle_s
-        + final_push.terminal_settle_s
-        + 2.0 * config.maximum_cartesian_settle_s
+    cartesian_commands_per_attempt = 4
+
+    def contact_ramp_bound_s(travel_m: float, speed_m_s: float) -> float:
+        command_count = math.ceil(travel_m / final_push.command_increment_m)
+        substeps = physics_substeps_for_target_speed(
+            increment_m=final_push.command_increment_m,
+            speed_m_s=speed_m_s,
+            dt_s=config.dt_s,
+        )
+        return command_count * substeps * config.dt_s
+
+    translation_attempt_bound_s = (
+        cartesian_commands_per_attempt * cartesian_command_bound_s
+        + contact_ramp_bound_s(final_push.maximum_travel_m, action.speed_m_s)
+        + 0.05
+        + final_push.post_attempt_settle_s
     )
-    return max(1.0, translation_time_s + yaw_time_s + settle_time_s)
+    yaw_attempt_bound_s = (
+        cartesian_commands_per_attempt * cartesian_command_bound_s
+        + contact_ramp_bound_s(
+            task.yaw_alignment.correction_travel_m,
+            task.yaw_alignment.speed_m_s,
+        )
+        + 0.05
+    )
+    return max(
+        1.0,
+        translation_attempts * translation_attempt_bound_s
+        + yaw_attempts * yaw_attempt_bound_s
+        + final_push.terminal_settle_s,
+    )
 
 
 def run_episode(

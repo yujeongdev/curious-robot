@@ -7,7 +7,7 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 
 export function TelemetryDock({ run }: { run: RunState }) {
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
   const latest = run.measurements.at(-1);
   const beliefRows = Object.values(run.beliefs);
   return (
