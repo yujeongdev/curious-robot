@@ -215,6 +215,24 @@ class ActionGraph(_GraphModel):
             visited.add(node_id)
 
         visit(self.entry_node_id)
+        longest_timeout_by_node: dict[str, float] = {}
+
+        def longest_timeout_s(node_id: str) -> float:
+            cached = longest_timeout_by_node.get(node_id)
+            if cached is not None:
+                return cached
+            node_timeout_s = nodes_by_id[node_id].timeout_s
+            if node_id in self.terminal_node_ids:
+                longest_timeout_by_node[node_id] = node_timeout_s
+                return node_timeout_s
+            total = node_timeout_s + max(
+                longest_timeout_s(edge.target_node_id) for edge in outgoing[node_id]
+            )
+            longest_timeout_by_node[node_id] = total
+            return total
+
+        if self.wall_clock_deadline_s + 1.0e-12 < longest_timeout_s(self.entry_node_id):
+            raise ValueError("action graph deadline is shorter than its longest path")
         return self
 
     @property

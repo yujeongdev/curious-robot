@@ -14,6 +14,7 @@ from curious_robot.action_graph import (
     ActionNodeKind,
     DeploymentBundle,
     DeploymentSafetyEnvelope,
+    MotionControlMode,
     compile_motion_action_graph,
     push_protocol_binding_id,
 )
@@ -198,6 +199,9 @@ class FrankaPushMotionPlan(_MotionModel):
         ):
             if (
                 node.parameters.get("segment_index") != index
+                or node.control_mode is not MotionControlMode.CARTESIAN_POSE
+                or set(node.required_capabilities)
+                != {"cartesian_pose", "force_guard", "contact_monitor"}
                 or node.parameters.get("phase") != segment.phase.value
                 or node.parameters.get("contact_expectation")
                 != segment.contact_expectation.value

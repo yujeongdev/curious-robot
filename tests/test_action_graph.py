@@ -99,6 +99,15 @@ def test_compiler_rejects_deadline_shorter_than_success_path() -> None:
         )
 
 
+def test_deserialized_graph_revalidates_longest_path_deadline() -> None:
+    graph = _compiled_graph()
+
+    with pytest.raises(ValidationError, match="shorter than its longest path"):
+        ActionGraph.model_validate(
+            {**graph.model_dump(), "wall_clock_deadline_s": 1.0}
+        )
+
+
 def test_graph_rejects_unreachable_nodes_and_ambiguous_edges() -> None:
     graph = _compiled_graph()
     unreachable = ActionGraphNode(

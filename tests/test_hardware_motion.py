@@ -283,6 +283,18 @@ def test_push_plan_rejects_wrong_tool_frame_orientation_and_nonfinite_pose() -> 
         )
 
 
+def test_push_plan_rejects_graph_control_mode_tampering() -> None:
+    plan = _compile()
+    document = plan.model_dump()
+    motion_node = next(
+        node for node in document["action_graph"]["nodes"] if node["kind"] == "motion"
+    )
+    motion_node["control_mode"] = "joint_torque"
+
+    with pytest.raises(ValueError, match="does not match its segment"):
+        type(plan).model_validate(document)
+
+
 def test_plan_deadline_uses_quantized_schedule_duration() -> None:
     plan = _compile()
     assert plan.planned_duration_s == pytest.approx(plan.waypoint_count * plan.control_period_s)
