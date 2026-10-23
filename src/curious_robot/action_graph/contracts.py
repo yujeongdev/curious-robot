@@ -135,6 +135,16 @@ class ActionGraph(_GraphModel):
             for node_id in self.terminal_node_ids
         ):
             raise ValueError("action graph requires an absorbing safe-stop terminal")
+        declared_safe_stops = {
+            node_id
+            for node_id in self.terminal_node_ids
+            if nodes_by_id[node_id].kind is ActionNodeKind.SAFE_STOP
+        }
+        all_safe_stops = {
+            node.node_id for node in self.nodes if node.kind is ActionNodeKind.SAFE_STOP
+        }
+        if all_safe_stops != declared_safe_stops:
+            raise ValueError("every safe-stop node must be a declared absorbing terminal")
 
         outgoing: dict[str, list[ActionGraphEdge]] = defaultdict(list)
         edge_keys: set[tuple[str, EdgeGuard]] = set()

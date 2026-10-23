@@ -188,3 +188,15 @@ def test_graph_rejects_observation_failure_that_bypasses_safe_stop() -> None:
 
     with pytest.raises(ValidationError, match="must reach safe-stop"):
         ActionGraph.model_validate({**graph.model_dump(), "edges": edges})
+
+
+def test_graph_rejects_safe_stop_omitted_from_terminal_declarations() -> None:
+    graph = _compiled_graph()
+    terminals = tuple(
+        node_id for node_id in graph.terminal_node_ids if node_id != "terminal_safe_stop"
+    )
+
+    with pytest.raises(ValidationError, match="safe-stop terminal"):
+        ActionGraph.model_validate(
+            {**graph.model_dump(), "terminal_node_ids": terminals}
+        )
