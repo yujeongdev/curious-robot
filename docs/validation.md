@@ -56,6 +56,12 @@ from a committed event recording and published with a versioned release.
   and model agreement are reported separately.
 - Hardware interfaces and preflight checks are implemented, but no physical
   robot trial is claimed.
+- Hardware plans now embed a typed ActionGraph and require graph-ID attestation
+  from preflight and transport results. No concrete pylibfranka/ROS 2 transport
+  or native 1 kHz executor is implemented, so hardware execution remains unavailable.
+- Wrist RGB-D contracts validate intrinsics, hand-eye calibration, timestamp
+  provenance, image/depth artifacts, and pose covariance. A simulated frame
+  producer and real camera adapter remain planned rather than claimed.
 - The first T-bar slice fixes COM to the public uniform-density geometry
   centroid; it is an assumption, not an inferred episode parameter. Yaw inertia
   is likewise not independently identified by the current friction probes.

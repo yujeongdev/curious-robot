@@ -200,6 +200,27 @@ crossbar side using observed yaw, then translates from the best opposing public
 face; after settling, it re-observes the complete pose and may recover. This is
 a bounded, one-sided MVP envelope, not a claim of arbitrary-orientation control.
 
+### ActionGraph and field deployment
+
+The evidence-gated `LaboratoryPipeline` remains the Reality → Twin → Reality
+orchestrator. Below a selected policy, a separate content-addressed ActionGraph
+binds observation guards, fixed-controller motion nodes, terminal verification,
+return-to-agent, and absorbing safe-stop paths. Every compiled hardware motion
+segment maps to exactly one graph node. Preflight and transport results must
+attest the same graph, motion-plan, and calibration identities.
+
+The current hardware push graph declares Cartesian pose control with an
+independent force guard; it does not claim Cartesian impedance or torque
+control. `MoveJReady`, compliant contact leaves, and a native 1 kHz libfranka
+executor remain required before physical use. See the
+[field-deployment spec](specs/2026-10-23-action-graph-field-deployment.md).
+
+Wrist vision is an artifact-backed observation producer, not a physics or UI
+authority. Camera frames contain image/depth artifact IDs, intrinsics,
+extrinsics, timestamps, and quality flags. Pose estimates add estimator
+identity, source frames, 6×6 covariance, and registration residuals; raw Newton
+body state is forbidden at that boundary.
+
 Successful terminal runs can be distilled into an agent-visible
 `CapabilityArtifact`. The trusted coordinator declassifies only the evaluator's
 success decision into a public `CapabilityAttestation`; the evaluator payload
