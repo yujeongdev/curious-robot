@@ -1,6 +1,5 @@
 import { useState } from "react";
 import type { RunState, WorldScene } from "../state/run-reducer";
-import { AgentCausalBridge, TwinCandidateFleet } from "./agent-causal-bridge";
 import { NewtonViewport } from "./newton-viewport";
 
 export function isSceneAdvancing(run: RunState, scene: WorldScene): boolean {
@@ -23,8 +22,6 @@ export function DualNewtonWorkspace({
   const terminal = ["completed", "failed", "cancelled", "abandoned"].includes(run.status);
   return (
     <section className="dual-newton-workspace" aria-label="Reality and learned Twin comparison">
-      <AgentCausalBridge run={run} />
-      <TwinCandidateFleet run={run} />
       <div className="mobile-world-switch" role="group" aria-label="Displayed physics world">
         <button type="button" aria-pressed={mobileWorld === "truth"} onClick={() => setMobileWorld("truth")}>Reality stand-in</button>
         <button type="button" aria-pressed={mobileWorld === "belief"} onClick={() => setMobileWorld("belief")}>Learned Twin</button>

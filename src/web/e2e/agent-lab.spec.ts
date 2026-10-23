@@ -19,12 +19,12 @@ test("synthetic preview identifies its illustrative provenance", async ({ page }
   }
   await expect(page.getByRole("heading", { name: "Learned Newton Twin" })).toBeVisible();
   await expect(page.getByLabel("Reality and learned Twin comparison")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Observe, estimate, rebuild, validate, deploy" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Twin candidate fleet" })).toBeVisible();
-  await expect(page.getByText("Observation boundary")).toBeVisible();
-  await expect(page.getByText("Posterior → Twin patch")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Action graph" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Discovery phases" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Agent evidence" })).toBeVisible();
+  await expect(page.locator(".action-graph").getByText("Safe stop")).toBeVisible({ timeout: 25_000 });
+  await page.getByRole("button", { name: /inspect full graph/i }).click();
+  await expect(page.getByText("Operational node → Safe stop")).toBeVisible();
   await page.getByRole("tab", { name: "Replay", exact: true }).click();
   await expect(page.getByRole("note", { name: "Preview provenance" })).toBeVisible();
 });
@@ -34,6 +34,8 @@ test("mobile companion keeps safe stop reachable", async ({ page }, testInfo) =>
   await page.goto("/runs/demo?fixture=true");
   await expect(page.getByRole("button", { name: /safe stop/i }).last()).toBeVisible();
   await expect(page.getByText("Current phase")).toBeVisible();
-  await page.getByRole("button", { name: "Telemetry" }).click();
-  await expect(page.getByRole("dialog", { name: "Telemetry" })).toBeVisible();
+  await page.getByRole("button", { name: "Plan & evidence" }).click();
+  await expect(page.getByRole("dialog", { name: "Plan and evidence" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /safe stop/i }).last()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
