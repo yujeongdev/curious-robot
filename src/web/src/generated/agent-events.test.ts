@@ -25,6 +25,26 @@ describe("agent event boundary", () => {
     expect(() => actionNodeTransitionPayloadSchema.parse({ ...transition.payload, state: "teleported" })).toThrow();
   });
 
+  it("keeps the synthetic graph commitment content-addressed", async () => {
+    const compiled = demoEvents.find((event) => event.type === "action.graph_compiled")!;
+    const canonicalize = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(canonicalize);
+      if (value !== null && typeof value === "object") {
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, child]) => [key, canonicalize(child)]),
+        );
+      }
+      return value;
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(canonicalize(compiled.payload.graph)));
+    const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+      .map((value) => value.toString(16).padStart(2, "0"))
+      .join("");
+    expect(compiled.payload.graph_id).toBe(`sha256:${digest}`);
+  });
+
   it("accepts versioned public compound geometry without physical parameters", () => {
     const visual = demoEvents.find((event) => event.type === "simulation.visual_frame")!;
     const parsed = parseAgentEvent({
