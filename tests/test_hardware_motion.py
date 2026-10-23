@@ -317,6 +317,33 @@ def test_push_plan_rejects_reordered_graph_motion_success_path() -> None:
         type(plan).model_validate(document)
 
 
+def test_push_plan_id_is_canonical_across_parameter_key_order() -> None:
+    plan = _compile()
+    document = plan.model_dump()
+    motion_node = next(
+        node for node in document["action_graph"]["nodes"] if node["kind"] == "motion"
+    )
+    motion_node["parameters"] = dict(reversed(tuple(motion_node["parameters"].items())))
+
+    reordered = type(plan).model_validate(document)
+
+    assert reordered.plan_id == plan.plan_id
+
+
+def test_push_plan_rejects_supervisor_node_semantic_tampering() -> None:
+    plan = _compile()
+    document = plan.model_dump()
+    verify = next(
+        node
+        for node in document["action_graph"]["nodes"]
+        if node["node_id"] == "verify_goal"
+    )
+    verify["authority"] = "reality"
+
+    with pytest.raises(ValueError, match="supervisor node contract"):
+        type(plan).model_validate(document)
+
+
 def test_plan_deadline_uses_quantized_schedule_duration() -> None:
     plan = _compile()
     assert plan.planned_duration_s == pytest.approx(plan.waypoint_count * plan.control_period_s)

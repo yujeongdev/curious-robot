@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from enum import StrEnum
 
@@ -15,6 +16,9 @@ from curious_robot.action_graph import (
     DeploymentBundle,
     DeploymentSafetyEnvelope,
     MotionControlMode,
+    NodeAuthority,
+    NodeExecutor,
+    NodeOutcome,
     compile_motion_action_graph,
     push_protocol_binding_id,
 )
@@ -218,11 +222,54 @@ class FrankaPushMotionPlan(_MotionModel):
         )
         if self.action_graph.success_path_node_ids() != expected_success_path:
             raise ValueError("action graph motion success path does not match segment order")
+        nodes_by_id = {node.node_id: node for node in self.action_graph.nodes}
+        expected_supervisor_contract = {
+            "observe_initial_object_pose": (
+                ActionNodeKind.OBSERVE,
+                NodeAuthority.REALITY,
+                NodeExecutor.PERCEPTION,
+            ),
+            "validate_initial_observation": (
+                ActionNodeKind.GUARD,
+                NodeAuthority.SUPERVISOR,
+                NodeExecutor.SUPERVISOR,
+            ),
+            "observe_terminal_object_pose": (
+                ActionNodeKind.OBSERVE,
+                NodeAuthority.REALITY,
+                NodeExecutor.PERCEPTION,
+            ),
+            "verify_goal": (
+                ActionNodeKind.VERIFY,
+                NodeAuthority.SUPERVISOR,
+                NodeExecutor.SUPERVISOR,
+            ),
+        }
+        if any(
+            (
+                nodes_by_id[node_id].kind,
+                nodes_by_id[node_id].authority,
+                nodes_by_id[node_id].executor,
+            )
+            != expected
+            for node_id, expected in expected_supervisor_contract.items()
+        ):
+            raise ValueError("action graph supervisor node contract does not match the plan")
+        if (
+            self.action_graph.next_node("verify_goal", NodeOutcome.GOAL_MISS)
+            != "terminal_return_to_agent"
+        ):
+            raise ValueError("action graph goal-miss path does not return to agent")
         return self
 
     @property
     def plan_id(self) -> str:
-        digest = hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+        canonical = json.dumps(
+            self.model_dump(mode="json", exclude_none=False),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest = hashlib.sha256(canonical.encode()).hexdigest()
         return f"sha256:{digest}"
 
 

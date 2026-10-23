@@ -146,6 +146,7 @@ class FakeTransport:
         self.preflight_calls = []
         self.preflight_feasible = True
         self.preflight_errors = ()
+        self.mutate_graph_during_preflight = False
         self.arm_calls = 0
 
     def read_tool_pose(self, timeout_s: float) -> HardwareToolPose:
@@ -163,6 +164,11 @@ class FakeTransport:
     def validate_motion_plan(self, motion_plan, timeout_s):  # noqa: ANN001, ANN201
         assert timeout_s > 0
         self.preflight_calls.append(motion_plan)
+        if self.mutate_graph_during_preflight:
+            motion_node = next(
+                node for node in motion_plan.action_graph.nodes if node.kind.value == "motion"
+            )
+            motion_node.parameters["phase"] = "tampered"
         return HardwareMotionPreflight(
             plan_id=motion_plan.plan_id,
             action_graph_id=motion_plan.action_graph.graph_id,
@@ -641,6 +647,18 @@ def test_preflight_delay_exhausts_graph_deadline_before_watchdog_or_motion(tmp_p
     assert transport.calls == []
     assert transport.safe_stop_calls == 1
     assert perception.ended == [f"hardware:{request.arguments['invocation_id']}"]
+
+
+def test_preflight_cannot_mutate_admitted_graph_before_motion(tmp_path) -> None:
+    _, _, transport, _, reality, request = _hardware_case(tmp_path)
+    transport.mutate_graph_during_preflight = True
+
+    result = reality.execute(request)
+
+    assert result.status == "failed"
+    assert transport.arm_calls == 0
+    assert transport.calls == []
+    assert transport.safe_stop_calls == 1
 
 
 def test_stale_perception_is_rejected_before_motion(tmp_path) -> None:

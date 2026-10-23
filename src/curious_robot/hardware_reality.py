@@ -43,6 +43,7 @@ from .hardware_interfaces import (
 )
 from .hardware_motion import (
     FrankaPushCalibration,
+    FrankaPushMotionPlan,
     HardwareToolPose,
     compile_franka_deployment_bundle,
     compile_franka_push_plan,
@@ -283,15 +284,25 @@ class FrankaHardwareReality:
                     "hardware runtime rejected deployment bundle: "
                     + ", ".join(admission.blockers)
                 )
+            expected_plan_id = motion_plan.plan_id
+            expected_graph_id = motion_plan.action_graph.graph_id
+            canonical_plan = motion_plan.model_dump_json(exclude_none=False)
             preflight = self.transport.validate_motion_plan(
                 motion_plan,
                 self.perception_timeout_s,
             )
             _validate_preflight(
                 preflight,
-                motion_plan.plan_id,
-                motion_plan.action_graph.graph_id,
+                expected_plan_id,
+                expected_graph_id,
             )
+            motion_plan = FrankaPushMotionPlan.model_validate_json(canonical_plan)
+            if (
+                motion_plan.plan_id != expected_plan_id
+                or motion_plan.action_graph.graph_id != expected_graph_id
+                or deployment_bundle.motion_plan_id != expected_plan_id
+            ):
+                raise ValueError("hardware preflight mutated the admitted deployment plan")
             remaining_graph_time_s = _remaining_graph_time_s(
                 started_s=graph_started_s,
                 deadline_s=motion_plan.action_graph.wall_clock_deadline_s,
