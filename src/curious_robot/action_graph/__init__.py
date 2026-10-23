@@ -10,6 +10,7 @@ from .bundle import (
 from .compiler import (
     TERMINAL_TRANSITION_TIMEOUT_S,
     compile_motion_action_graph,
+    compile_skill_action_graph,
     push_protocol_binding_id,
 )
 from .contracts import (
@@ -41,5 +42,6 @@ __all__ = [
     "TERMINAL_TRANSITION_TIMEOUT_S",
     "admit_deployment_bundle",
     "compile_motion_action_graph",
+    "compile_skill_action_graph",
     "push_protocol_binding_id",
 ]

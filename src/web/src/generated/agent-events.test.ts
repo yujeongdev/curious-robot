@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { demoEvents } from "../fixtures/demo-run";
-import { parseAgentEvent, visualFramePayloadSchema } from "./agent-events";
+import { actionGraphCompiledPayloadSchema, actionNodeTransitionPayloadSchema, parseAgentEvent, visualFramePayloadSchema } from "./agent-events";
 
 describe("agent event boundary", () => {
   it("accepts all fixture events", () => {
@@ -14,6 +14,56 @@ describe("agent event boundary", () => {
   it("rejects malformed authoritative visual frames", () => {
     const visual = demoEvents.find((event) => event.type === "simulation.visual_frame")!;
     expect(() => parseAgentEvent({ ...visual, payload: { ...visual.payload, bodies: [{ body_id: "cube" }] } })).toThrow();
+  });
+
+  it("validates graph commitments and node transitions", () => {
+    const compiled = demoEvents.find((event) => event.type === "action.graph_compiled")!;
+    const transition = demoEvents.find((event) => event.type === "action.node_transitioned")!;
+    expect(actionGraphCompiledPayloadSchema.parse(compiled.payload).graph.nodes.length).toBeGreaterThan(1);
+    expect(actionNodeTransitionPayloadSchema.parse(transition.payload).node_id).toBe("observe_initial_object_pose");
+    expect(() => actionGraphCompiledPayloadSchema.parse({ ...compiled.payload, graph_id: "not-a-hash" })).toThrow();
+    expect(() => actionGraphCompiledPayloadSchema.parse({ ...compiled.payload, motion_plan_id: null })).toThrow(/requires a motion plan/i);
+    expect(() => actionNodeTransitionPayloadSchema.parse({ ...transition.payload, state: "teleported" })).toThrow();
+    expect(() => actionNodeTransitionPayloadSchema.parse({ ...transition.payload, state: "entered", outcome: "success" })).toThrow(/cannot declare/i);
+    expect(() => actionNodeTransitionPayloadSchema.parse({ ...transition.payload, state: "completed", outcome: null })).toThrow(/do not match/i);
+    expect(() => actionNodeTransitionPayloadSchema.parse({ ...transition.payload, state: "failed", outcome: "success" })).toThrow(/do not match/i);
+  });
+
+  it("keeps the synthetic graph commitment content-addressed", async () => {
+    const compiled = demoEvents.find((event) => event.type === "action.graph_compiled")!;
+    const canonicalize = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(canonicalize);
+      if (value !== null && typeof value === "object") {
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, child]) => [key, canonicalize(child)]),
+        );
+      }
+      return value;
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(canonicalize(compiled.payload.graph)));
+    const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+      .map((value) => value.toString(16).padStart(2, "0"))
+      .join("");
+    expect(compiled.payload.graph_id).toBe(`sha256:${digest}`);
+  });
+
+  it("rejects graph topology references to missing nodes", () => {
+    const compiled = demoEvents.find((event) => event.type === "action.graph_compiled")!;
+    const graph = compiled.payload.graph as Record<string, unknown>;
+    expect(() => actionGraphCompiledPayloadSchema.parse({
+      ...compiled.payload,
+      graph: { ...graph, entry_node_id: "missing_entry" },
+    })).toThrow(/entry node must exist/i);
+    expect(() => actionGraphCompiledPayloadSchema.parse({
+      ...compiled.payload,
+      graph: { ...graph, terminal_node_ids: ["missing_terminal"] },
+    })).toThrow(/terminal node must exist/i);
+    expect(() => actionGraphCompiledPayloadSchema.parse({
+      ...compiled.payload,
+      graph: { ...graph, edges: [{ source_node_id: "missing", target_node_id: "also_missing", guard: "on_success" }] },
+    })).toThrow(/edge nodes must exist/i);
   });
 
   it("accepts versioned public compound geometry without physical parameters", () => {

@@ -20,6 +20,8 @@ def test_real_episode_streams_typed_events_and_visual_frames(tmp_path, monkeypat
         assert "belief.updated" in event_types
         assert "simulation.visual_frame" in event_types
         assert "action.selected" in event_types
+        assert "action.graph_compiled" in event_types
+        assert "action.node_transitioned" in event_types
         assert "verification.completed" in event_types
         assert event_types[-1] == "run.completed"
         run_directory = tmp_path / started["run_id"]

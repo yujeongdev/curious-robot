@@ -42,18 +42,17 @@ onto the tabletop at the target pose. The physical T-bar must overlap that
 same-shape silhouette within the task's planar-position and yaw tolerances.
 The marker comes from the recorded target manifest; R3F does not infer it.
 
-A five-step causal bridge makes the authority transition explicit:
-
-1. Reality experiment
-2. Observation boundary
-3. Posterior update and Twin rebuild
-4. Two or three independent Twin candidate validations
-5. Fresh Reality deployment
+The six-phase rail shows the scientific loop. After policy selection, a separate
+ActionGraph inspector shows the deterministic execution contract and its recorded
+node progress. Reality experiments, observation boundaries, posterior updates,
+Twin validation, and fresh Reality deployment remain auditable in the evidence
+history rather than occupying a second permanent progress rail.
 
 Evidence cards are independently labeled `REALITY`, `TWIN`, `INFERENCE`, or
 `SYSTEM`. A synchronized telemetry dock keeps measured force, posterior
-parameters, candidate worlds, and predicted-versus-observed outcomes in separate regions. Mobile
-views retain both states and use a 42svh world selector to show one at a time.
+parameters, candidate worlds, and predicted-versus-observed outcomes separate.
+Mobile views retain both physics states and use a 42svh world selector to show
+one at a time.
 
 The stage rail groups the execution into six phases:
 
@@ -66,6 +65,19 @@ The stage rail groups the execution into six phases:
 
 Repeated experiments retain their iteration identity rather than overwriting
 earlier evidence.
+
+## ActionGraph inspection
+
+After a controller publishes an admitted ActionGraph, the execution inspector
+shows the recorded current node, its neighboring success-path nodes, the graph
+deadline, and the shared safe-stop exit. The complete topology and contract IDs
+remain behind `Inspect full graph` so the Newton view stays visually primary.
+
+The browser never derives a graph from an action name and never advances a node.
+It reduces only `action.graph_compiled` and `action.node_transitioned` events from
+the append-only run log. A backend that has not emitted those records is shown as
+`NOT ADMITTED`; the UI does not fabricate an execution trace. Live and replay
+therefore render the same graph state at the same event cursor.
 
 ## Event and replay rules
 

@@ -6,6 +6,7 @@ import csv
 import hashlib
 import importlib.metadata
 import json
+import math
 import os
 import platform
 import secrets
@@ -23,6 +24,7 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt  # noqa: E402
 
+from .action_graph import MotionControlMode, NodeOutcome, compile_skill_action_graph
 from .belief import initial_belief_for_object
 from .environment import PhysicalParameters, StepControl, TruthEnvironment, WorldConfig
 from .events import DiscoveryStage
@@ -30,8 +32,8 @@ from .objects import get_object_archetype, registered_planar_corner_error
 from .planner_adapters import DeterministicPlannerAdapter, PlannerAdapter
 from .planning import action_utility, candidate_actions
 from .ports import RobotRealityAdapter
-from .protocol import protocol_sha256
-from .schemas import ActionResult, EpisodeResult, ParameterName, PhysicalBelief
+from .protocol import PhysicalExperimentProtocol, protocol_sha256
+from .schemas import ActionCandidate, ActionResult, EpisodeResult, ParameterName, PhysicalBelief
 from .surface import SurfaceFamily, SurfaceProfile, sample_surface_profile
 from .sysid import (
     calibrate_coulomb_surrogate,
@@ -41,6 +43,7 @@ from .sysid import (
 )
 from .tasks import (
     PlanarPose,
+    TaskPreset,
     evaluate_planar_goal,
     get_task_definition,
     get_task_preset,
@@ -48,7 +51,10 @@ from .tasks import (
     yaw_from_quaternion_xyzw,
 )
 from .tools import RobotTools
+from .trajectory import minimum_jerk_duration_s, physics_substeps_for_target_speed
 from .world_config import object_kind_from_archetype_id
+
+MAX_FRANKA_JOINT_DELTA_RAD = 2.0 * math.pi
 
 
 class EventSink(Protocol):
@@ -108,6 +114,40 @@ class _EpisodeEvents:
         self.started = time.monotonic()
         self._emit_stage_entered()
 
+    def action_node(
+        self,
+        graph_id: str,
+        node_id: str,
+        state: str,
+        outcome: NodeOutcome | None = None,
+    ) -> None:
+        self.emit(
+            "action.node_transitioned",
+            {
+                "graph_id": graph_id,
+                "node_id": node_id,
+                "state": state,
+                "outcome": outcome.value if outcome is not None else None,
+                "evidence_ids": [],
+            },
+        )
+
+    def stop_action_graph(
+        self,
+        graph_id: str,
+        node_id: str,
+        state: str,
+        outcome: NodeOutcome,
+    ) -> None:
+        self.action_node(graph_id, node_id, state, outcome)
+        self.action_node(graph_id, "terminal_safe_stop", "entered")
+        self.action_node(
+            graph_id,
+            "terminal_safe_stop",
+            "completed",
+            NodeOutcome.SUCCESS,
+        )
+
     def finish(self) -> None:
         if self.sink is not None:
             self.emit(
@@ -143,6 +183,70 @@ def _distribution(estimate) -> dict[str, Any]:
         },
         "units": estimate.units,
     }
+
+
+def _simulated_reality_calibration_id(task_id: str, geometry_hash: str) -> str:
+    document = json.dumps(
+        {
+            "authority": "simulated-reality",
+            "controller": "newton-franka-skill-v1",
+            "geometry_hash": geometry_hash,
+            "task_id": task_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return f"sha256:{hashlib.sha256(document.encode()).hexdigest()}"
+
+
+def _skill_timeout_bound_s(
+    action: ActionCandidate,
+    task: TaskPreset,
+    protocol: PhysicalExperimentProtocol,
+    config: WorldConfig,
+) -> float:
+    final_push = protocol.final_push
+    translation_attempts = final_push.maximum_attempts
+    yaw_attempts = task.yaw_alignment.maximum_attempts if task.yaw_alignment.enabled else 0
+    correction_passes = config.maximum_cartesian_corrections + 1
+    joint_motion_bound_s = minimum_jerk_duration_s(
+        MAX_FRANKA_JOINT_DELTA_RAD,
+        config.maximum_joint_target_speed_rad_s,
+    )
+    cartesian_command_bound_s = correction_passes * (
+        joint_motion_bound_s + config.maximum_cartesian_settle_s
+    )
+    cartesian_commands_per_attempt = 4
+
+    def contact_ramp_bound_s(travel_m: float, speed_m_s: float) -> float:
+        command_count = math.ceil(travel_m / final_push.command_increment_m)
+        substeps = physics_substeps_for_target_speed(
+            increment_m=final_push.command_increment_m,
+            speed_m_s=speed_m_s,
+            dt_s=config.dt_s,
+        )
+        return command_count * substeps * config.dt_s
+
+    translation_attempt_bound_s = (
+        cartesian_commands_per_attempt * cartesian_command_bound_s
+        + contact_ramp_bound_s(final_push.maximum_travel_m, action.speed_m_s)
+        + 0.05
+        + final_push.post_attempt_settle_s
+    )
+    yaw_attempt_bound_s = (
+        cartesian_commands_per_attempt * cartesian_command_bound_s
+        + contact_ramp_bound_s(
+            task.yaw_alignment.correction_travel_m,
+            task.yaw_alignment.speed_m_s,
+        )
+        + 0.05
+    )
+    return max(
+        1.0,
+        translation_attempts * translation_attempt_bound_s
+        + yaw_attempts * yaw_attempt_bound_s
+        + final_push.terminal_settle_s,
+    )
 
 
 def run_episode(
@@ -506,8 +610,64 @@ def run_episode(
             scene="truth",
             scenario_id="fresh-policy-deployment",
         )
-        deployment_reality.settle(0.25)
-        deployment_observation = deployment_reality.observe_object_pose()
+        episode_events.enter(DiscoveryStage.EXECUTE)
+        skill_capabilities = (
+            ("cartesian_pose", "force_guard", "contact_monitor")
+            if selected_action.kind == "push"
+            else ("cartesian_pose", "gripper_position", "force_guard")
+        )
+        skill_timeout_s = _skill_timeout_bound_s(
+            selected_action,
+            task,
+            tools.protocol,
+            config,
+        )
+        action_graph = compile_skill_action_graph(
+            task_id=task.preset_id,
+            task_version=task.version,
+            object_id=f"unknown-{archetype.archetype_id}",
+            object_archetype_version=archetype.version,
+            geometry_hash=archetype.geometry_hash,
+            calibration_id=_simulated_reality_calibration_id(
+                task.preset_id,
+                archetype.geometry_hash,
+            ),
+            protocol_binding_id=f"sha256:{protocol_sha256(tools.protocol)}",
+            skill_id=selected_action.action_id,
+            control_mode=MotionControlMode.CARTESIAN_POSE,
+            required_capabilities=skill_capabilities,
+            observation_timeout_s=config.maximum_cartesian_settle_s,
+            skill_timeout_s=skill_timeout_s,
+        )
+        episode_events.emit(
+            "action.graph_compiled",
+            {
+                "graph_id": action_graph.graph_id,
+                "graph": action_graph.model_dump(mode="json", exclude_none=False),
+            },
+        )
+        episode_events.action_node(
+            action_graph.graph_id,
+            "observe_initial_object_pose",
+            "entered",
+        )
+        try:
+            deployment_reality.settle(0.25)
+            deployment_observation = deployment_reality.observe_object_pose()
+        except Exception:
+            episode_events.stop_action_graph(
+                action_graph.graph_id,
+                "observe_initial_object_pose",
+                "failed",
+                NodeOutcome.FAILURE,
+            )
+            raise
+        episode_events.action_node(
+            action_graph.graph_id,
+            "observe_initial_object_pose",
+            "completed",
+            NodeOutcome.SUCCESS,
+        )
         deployment_config = replace(
             config,
             initial_position_m=deployment_observation.pose.position_m,
@@ -523,65 +683,120 @@ def run_episode(
             control_gate=control_gate,
             event_sink=event_sink,
         )
-        if selected_action.kind == "pick_place":
-            deployment_tools.grasp_object()
-        initial_position, initial_orientation, initial_velocity = (
-            deployment_reality.cube_controller_state()
+        episode_events.action_node(
+            action_graph.graph_id,
+            "execute_selected_skill",
+            "entered",
         )
-        initial_final_pose = tuple(float(v) for v in initial_position)
-        initial_body_q = (*initial_final_pose, *(float(v) for v in initial_orientation))
-        initial_body_qd = tuple(float(v) for v in initial_velocity)
-        initial_joint_q = tuple(float(v) for v in deployment_reality.state_0.joint_q.numpy())
-        initial_joint_qd = tuple(float(v) for v in deployment_reality.state_0.joint_qd.numpy())
-        initial_joint_target_q = tuple(
-            float(v) for v in deployment_reality.control.joint_target_q.numpy()
-        )
-        deployment_reality.clear_trace()
-        episode_events.enter(DiscoveryStage.EXECUTE)
-        replay_path = output / "scene_replay.bin"
-        deployment_reality.start_recording(replay_path, stride=4)
-        controller_result = "completed"
-        safety_event_ids: list[str] = []
-        if selected_action.kind == "push":
-            execution = deployment_tools.execute_safe_push(
-                selected_action.target_m,
-                selected_action.max_force_n,
-                speed_m_s=selected_action.speed_m_s,
-                push_height_m=selected_action.push_height_m,
-                lateral_contact_offset_m=selected_action.lateral_contact_offset_m,
-                contact_surface_id=selected_action.contact_surface_id,
+        try:
+            if selected_action.kind == "pick_place":
+                deployment_tools.grasp_object()
+            initial_position, initial_orientation, initial_velocity = (
+                deployment_reality.cube_controller_state()
             )
-            final_samples = list(execution.samples)
-            controller_result = execution.outcome.value
-            if execution.safety_tripped:
-                safety_event_ids.append(
-                    str(
-                        episode_events.emit(
-                            "safety.triggered",
-                            {
-                                "condition": "tool contact force norm exceeded action limit",
-                                "measured_value": execution.peak_contact_force_n,
-                                "limit": selected_action.max_force_n,
-                                "units": "N",
-                                "controller_response": "latched measured joints and stopped push",
-                                "can_continue": False,
-                            },
+            initial_final_pose = tuple(float(v) for v in initial_position)
+            initial_body_q = (*initial_final_pose, *(float(v) for v in initial_orientation))
+            initial_body_qd = tuple(float(v) for v in initial_velocity)
+            initial_joint_q = tuple(float(v) for v in deployment_reality.state_0.joint_q.numpy())
+            initial_joint_qd = tuple(float(v) for v in deployment_reality.state_0.joint_qd.numpy())
+            initial_joint_target_q = tuple(
+                float(v) for v in deployment_reality.control.joint_target_q.numpy()
+            )
+            deployment_reality.clear_trace()
+            replay_path = output / "scene_replay.bin"
+            deployment_reality.start_recording(replay_path, stride=4)
+            controller_result = "completed"
+            safety_event_ids: list[str] = []
+            if selected_action.kind == "push":
+                execution = deployment_tools.execute_safe_push(
+                    selected_action.target_m,
+                    selected_action.max_force_n,
+                    speed_m_s=selected_action.speed_m_s,
+                    push_height_m=selected_action.push_height_m,
+                    lateral_contact_offset_m=selected_action.lateral_contact_offset_m,
+                    contact_surface_id=selected_action.contact_surface_id,
+                )
+                final_samples = list(execution.samples)
+                controller_result = execution.outcome.value
+                if execution.safety_tripped:
+                    safety_event_ids.append(
+                        str(
+                            episode_events.emit(
+                                "safety.triggered",
+                                {
+                                    "condition": "tool contact force norm exceeded action limit",
+                                    "measured_value": execution.peak_contact_force_n,
+                                    "limit": selected_action.max_force_n,
+                                    "units": "N",
+                                    "controller_response": "latched measured joints and stopped push",
+                                    "can_continue": False,
+                                },
+                            )
                         )
                     )
+            else:
+                final_samples = deployment_reality.execute_pick_place(
+                    selected_action.target_m,
+                    selected_action.max_force_n,
+                    assumed_mass_kg=tools.belief.parameters[ParameterName.MASS].mean,
                 )
-        else:
-            final_samples = deployment_reality.execute_pick_place(
-                selected_action.target_m,
-                selected_action.max_force_n,
-                assumed_mass_kg=tools.belief.parameters[ParameterName.MASS].mean,
+            deployment_reality.stop_recording()
+            final_control_trace = list(deployment_reality.control_trace)
+            final_state_trace = list(deployment_reality.state_trace)
+            final_orientation_trace = list(deployment_reality.orientation_trace)
+            if selected_action.kind == "pick_place":
+                deployment_tools.release_object()
+        except Exception:
+            episode_events.stop_action_graph(
+                action_graph.graph_id,
+                "execute_selected_skill",
+                "failed",
+                NodeOutcome.FAILURE,
             )
-        deployment_reality.stop_recording()
-        final_control_trace = list(deployment_reality.control_trace)
-        final_state_trace = list(deployment_reality.state_trace)
-        final_orientation_trace = list(deployment_reality.orientation_trace)
-        if selected_action.kind == "pick_place":
-            deployment_tools.release_object()
-        observed_pose = deployment_reality.observe_object_pose().pose
+            raise
+
+        if controller_result == "completed":
+            episode_events.action_node(
+                action_graph.graph_id,
+                "execute_selected_skill",
+                "completed",
+                NodeOutcome.SUCCESS,
+            )
+        else:
+            transition_state = "safety_trip" if execution.safety_tripped else "failed"
+            transition_outcome = (
+                NodeOutcome.SAFETY_TRIP if execution.safety_tripped else NodeOutcome.FAILURE
+            )
+            episode_events.stop_action_graph(
+                action_graph.graph_id,
+                "execute_selected_skill",
+                transition_state,
+                transition_outcome,
+            )
+        if controller_result == "completed":
+            episode_events.action_node(
+                action_graph.graph_id,
+                "observe_terminal_object_pose",
+                "entered",
+            )
+            try:
+                observed_pose = deployment_reality.observe_object_pose().pose
+            except Exception:
+                episode_events.stop_action_graph(
+                    action_graph.graph_id,
+                    "observe_terminal_object_pose",
+                    "failed",
+                    NodeOutcome.FAILURE,
+                )
+                raise
+            episode_events.action_node(
+                action_graph.graph_id,
+                "observe_terminal_object_pose",
+                "completed",
+                NodeOutcome.SUCCESS,
+            )
+        else:
+            observed_pose = deployment_reality.observe_object_pose().pose
         observed = observed_pose.position_m
         episode_events.emit(
             "action.executed",
@@ -617,7 +832,19 @@ def run_episode(
             ),
         )
         episode_events.enter(DiscoveryStage.VERIFY)
-        success = deployment_tools.verify_task_success() and controller_result == "completed"
+        if controller_result == "completed":
+            episode_events.action_node(action_graph.graph_id, "verify_goal", "entered")
+        try:
+            success = deployment_tools.verify_task_success() and controller_result == "completed"
+        except Exception:
+            if controller_result == "completed":
+                episode_events.stop_action_graph(
+                    action_graph.graph_id,
+                    "verify_goal",
+                    "failed",
+                    NodeOutcome.FAILURE,
+                )
+            raise
         verification = deployment_tools.records[-1].result_summary
         tools.records.extend(deployment_tools.records)
         episode_events.emit(
@@ -638,6 +865,24 @@ def run_episode(
                 "yaw_tolerance_rad": task.goal.yaw_tolerance_rad,
             },
         )
+        if controller_result == "completed":
+            verification_outcome = NodeOutcome.SUCCESS if success else NodeOutcome.GOAL_MISS
+            episode_events.action_node(
+                action_graph.graph_id,
+                "verify_goal",
+                "completed" if success else "goal_miss",
+                verification_outcome,
+            )
+            terminal_node_id = (
+                "terminal_completed" if success else "terminal_return_to_agent"
+            )
+            episode_events.action_node(action_graph.graph_id, terminal_node_id, "entered")
+            episode_events.action_node(
+                action_graph.graph_id,
+                terminal_node_id,
+                "completed",
+                NodeOutcome.SUCCESS,
+            )
         _log(
             "VERIFY",
             f"success={success}, prediction_error={prediction_error:.4f} m, observed_position={observed}",

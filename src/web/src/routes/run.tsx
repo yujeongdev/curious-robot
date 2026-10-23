@@ -2,8 +2,8 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { CircleDot, Download, Radio, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commandRun, subscribeToRun } from "../api/events";
-import { EvidenceFeed } from "../components/evidence-feed";
 import { DualNewtonWorkspace } from "../components/dual-newton-workspace";
+import { ExecutionInspector } from "../components/execution-inspector";
 import { MobileInspectors } from "../components/mobile-inspectors";
 import { RunControls } from "../components/run-controls";
 import { ResizableWorkspace } from "../components/resizable-workspace";
@@ -120,10 +120,10 @@ export function RunRoute({ runId, fixture }: { runId: string; fixture?: boolean 
       <StageStepper run={run} />
       <ResizableWorkspace
         primary={<DualNewtonWorkspace run={run} disconnected={viewerDisconnected} />}
-        secondary={<EvidenceFeed run={run} />}
+        secondary={<ExecutionInspector run={run} />}
       />
       <TelemetryDock run={run} />
-      <MobileInspectors run={run} />
+      <MobileInspectors run={run} status={controlStatus} onCommand={control} />
       {mode === "replay" && (
         <div className="replay-bar" aria-label="Replay controls">
           <Button size="compact" variant="ghost" onClick={() => seek(Math.max(1, (selectedSequence ?? 1) - 1))}>− frame</Button>

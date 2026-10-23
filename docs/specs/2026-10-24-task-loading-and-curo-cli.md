@@ -170,7 +170,7 @@ repository의 `.agents/skills/curo/SKILL.md`가 이 workflow를 안내한다. �
 
 ## 9. 이번 구현의 검증 결과
 
-2026-10-24 확인. Click command tree에는 26개 leaf가 있으며 6개는 실제 callback, 20개는 명시적 미구현 진입점이다. portable Python suite 311개, 프런트엔드 unit test 34개를 통과했다. 새 CLI·setup·task description의 측정 line coverage는 90.4%이며 strict mypy는 15개 source에서 통과했다. lint/typecheck/build와 packaged web asset 일치, 스킬 validator도 확인했다. E2E는 다른 작업의 서버를 건드리지 않도록 별도 임시 포트에서 실행한다.
+2026-10-24 확인. Click command tree에는 26개 leaf가 있으며 6개는 실제 callback, 20개는 명시적 미구현 진입점이다. portable Python suite 320개, 프런트엔드 unit test 40개를 통과했다. 새 CLI·setup·task description의 측정 line coverage는 90.4%이며 strict mypy는 15개 source에서 통과했다. lint/typecheck/build와 packaged web asset 일치, 스킬 validator도 확인했다. E2E는 다른 작업의 서버를 건드리지 않도록 별도 임시 포트에서 실행한다.
 
 실제 `cuda:0`/Newton `1.7.0`에서 full-robot cube, full-robot T-bar, reduced cube의 prior world를 각각 생성하고 24 step·finite state·pose observation을 확인했다. 이는 setup smoke의 증거이며 물성 식별의 검증은 아니다.
 

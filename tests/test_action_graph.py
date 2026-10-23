@@ -12,6 +12,7 @@ from curious_robot.action_graph import (
     NodeExecutor,
     NodeOutcome,
     compile_motion_action_graph,
+    compile_skill_action_graph,
 )
 
 HASH_A = "sha256:" + "a" * 64
@@ -56,6 +57,37 @@ def test_motion_graph_is_content_addressed_and_routes_every_failure_to_safe_stop
         assert graph.next_node(node.node_id, NodeOutcome.SAFETY_TRIP) == "terminal_safe_stop"
     assert graph.next_node("terminal_completed", NodeOutcome.SUCCESS) is None
     assert graph.next_node("verify_goal", NodeOutcome.GOAL_MISS) == "terminal_return_to_agent"
+
+
+def test_monolithic_skill_graph_exposes_only_observable_atomic_progress() -> None:
+    graph = compile_skill_action_graph(
+        task_id="push-cube-v1",
+        task_version="1.0.0",
+        object_id="unknown-cube",
+        object_archetype_version="1.0.0",
+        geometry_hash=HASH_C,
+        calibration_id=HASH_A,
+        protocol_binding_id=HASH_B,
+        skill_id="push_straight_low",
+        control_mode=MotionControlMode.CARTESIAN_POSE,
+        required_capabilities=("cartesian_pose", "force_guard", "contact_monitor"),
+        observation_timeout_s=1.0,
+        skill_timeout_s=10.0,
+    )
+
+    assert graph.success_path_node_ids() == (
+        "observe_initial_object_pose",
+        "execute_selected_skill",
+        "observe_terminal_object_pose",
+        "verify_goal",
+        "terminal_completed",
+    )
+    assert graph.next_node("execute_selected_skill", NodeOutcome.SAFETY_TRIP) == (
+        "terminal_safe_stop"
+    )
+    assert graph.next_node("verify_goal", NodeOutcome.GOAL_MISS) == (
+        "terminal_return_to_agent"
+    )
 
 
 def test_graph_identity_changes_with_bound_protocol() -> None:
