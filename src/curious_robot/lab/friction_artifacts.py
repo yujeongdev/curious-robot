@@ -242,11 +242,10 @@ class RealityDeploymentPayload(_FrictionModel):
 
     @model_validator(mode="after")
     def validate_attempts(self) -> RealityDeploymentPayload:
-        hardware_ids = (self.motion_plan_id, self.action_graph_id, self.calibration_id)
-        if any(value is not None for value in hardware_ids) and not all(
-            value is not None for value in hardware_ids
-        ):
-            raise ValueError("hardware plan, action graph, and calibration IDs must be supplied together")
+        if (self.motion_plan_id is None) != (self.calibration_id is None):
+            raise ValueError("hardware plan and calibration IDs must be supplied together")
+        if self.action_graph_id is not None and self.motion_plan_id is None:
+            raise ValueError("hardware action graph requires plan and calibration IDs")
         motion_measurements = (
             self.maximum_measured_speed_m_s,
             self.maximum_measured_acceleration_m_s2,

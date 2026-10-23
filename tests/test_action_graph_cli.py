@@ -17,7 +17,11 @@ HASH_C = "sha256:" + "c" * 64
 
 def _graph():  # noqa: ANN202
     return compile_motion_action_graph(
+        task_id="push-cube-v1",
+        task_version="1.0.0",
         object_id="cube",
+        object_archetype_version="1.0.0",
+        geometry_hash=HASH_C,
         calibration_id=HASH_A,
         protocol_binding_id=HASH_B,
         phases=("approach", "push", "retreat"),
@@ -51,7 +55,14 @@ def test_bundle_validate_cli_fails_closed_with_runtime_blockers(tmp_path, capsys
         protocol_binding_id=HASH_B,
         calibration_id=HASH_A,
         executor_abi="franka-action-graph-v1",
-        required_backend_capabilities=("cartesian_pose", "force_guard"),
+        required_backend_capabilities=(
+            "external_object_pose",
+            "observation_quality_guard",
+            "cartesian_pose",
+            "force_guard",
+            "contact_monitor",
+            "task_goal_evaluator",
+        ),
         validation_artifact_ids=(HASH_C,),
         safety=DeploymentSafetyEnvelope(
             maximum_force_n=10.0,
@@ -64,7 +75,13 @@ def test_bundle_validate_cli_fails_closed_with_runtime_blockers(tmp_path, capsys
         backend_id="field-host",
         executor_abi="franka-action-graph-v1",
         supported_graph_schema_versions=("action-graph-v1",),
-        capabilities=("cartesian_pose",),
+        capabilities=(
+            "external_object_pose",
+            "observation_quality_guard",
+            "cartesian_pose",
+            "contact_monitor",
+            "task_goal_evaluator",
+        ),
         approved_calibration_ids=(HASH_A,),
         maximum_force_n=15.0,
         maximum_speed_m_s=0.1,

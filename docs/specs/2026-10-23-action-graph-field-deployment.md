@@ -38,9 +38,10 @@ observe initial pose
 every physical failure or safety trip → absorbing safe-stop
 ```
 
-각 node는 stable ID, authority, executor, required capability, timeout, maximum attempts,
+각 node는 stable ID, authority, executor, required capability, timeout,
 checkpoint safety, symbolic parameters를 가진다. Edge는 allowlisted outcome guard만 사용하며
-임의 Python expression을 저장하지 않는다. Cycle은 traversal bound 없이는 거부한다.
+임의 Python expression을 저장하지 않는다. v1 graph는 cycle을 모두 거부하며 recovery는
+`return_to_agent` 이후 새 graph execution으로만 시작한다.
 
 Graph는 task의 private truth를 포함하지 않는다. Object ID, protocol binding,
 calibration ID, public observation reference만 graph identity에 포함된다.
@@ -55,6 +56,9 @@ calibration ID, public observation reference만 graph identity에 포함된다.
 
 현재 concrete pylibfranka/ROS 2 transport는 없다. 따라서 이 graph는 hardware ABI와
 preflight 계약까지 구현하지만 실물 실행 완료를 주장하지 않는다.
+현재 Python supervisor는 기존 monolithic transport 호출 주위를 graph identity로
+결합한다. 실제 node-by-node feedback/interrupt trace는 native executor가 이 ABI를
+구현하는 다음 단계의 완료 조건이다.
 
 ## 4. Atomic action의 의미
 

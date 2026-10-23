@@ -218,7 +218,12 @@ class FakeTransport:
         return HardwarePushResult(**values)
 
 
-def _hardware_case(tmp_path, *, backend=HardwareBackendKind.PYLIBFRANKA):  # noqa: ANN001, ANN201
+def _hardware_case(  # noqa: ANN201
+    tmp_path,  # noqa: ANN001
+    *,
+    backend=HardwareBackendKind.PYLIBFRANKA,
+    monotonic=None,  # noqa: ANN001
+):
     stores = LaboratoryArtifactStores(tmp_path)
     capability_ref = distill_friction_capability(stores, _successful_result(stores))
     skill = DeterministicFrictionSkill.load(stores.agent, capability_ref)
@@ -238,7 +243,7 @@ def _hardware_case(tmp_path, *, backend=HardwareBackendKind.PYLIBFRANKA):  # noq
         transport_factories={backend: lambda: transport},
         push_calibration=_calibration(),
         perception=perception,
-        monotonic=lambda: NOW,
+        monotonic=monotonic or (lambda: NOW),
     )
     decision = skill.begin(
         current_position_m=applicability.validated_initial_position_m,
@@ -310,7 +315,8 @@ def test_hardware_reality_executes_only_guarded_capability(tmp_path) -> None:
     assert decision.request is not None
 
     result = reality.execute(decision.request)
-    deployment = RealityDeploymentPayload.model_validate(stores.agent.get(result.evidence[0]).payload)
+    deployment_document = stores.agent.get(result.evidence[0]).payload
+    deployment = RealityDeploymentPayload.model_validate(deployment_document)
 
     assert result.status == "completed"
     assert deployment.request_id == decision.request.request_id
@@ -328,6 +334,11 @@ def test_hardware_reality_executes_only_guarded_capability(tmp_path) -> None:
     motion_plan = transport.calls[0]["motion_plan"]
     assert motion_plan.hardware_frame_id == "world"
     assert motion_plan.capability_frame_id == "simulation_world"
+    legacy_document = dict(deployment_document)
+    legacy_document.pop("action_graph_id")
+    assert RealityDeploymentPayload.model_validate(legacy_document).motion_plan_id == (
+        deployment.motion_plan_id
+    )
     assert transport.preflight_calls == [motion_plan]
     assert any(segment.phase is HardwareMotionPhase.CONTACT_PUSH for segment in motion_plan.segments)
 
@@ -587,6 +598,28 @@ def test_failed_motion_preflight_never_arms_or_executes(tmp_path) -> None:
     assert transport.arm_calls == 0
     assert transport.calls == []
     assert transport.safe_stop_calls == 1
+
+
+def test_preflight_delay_exhausts_graph_deadline_before_watchdog_or_motion(tmp_path) -> None:
+    calls = 0
+
+    def delayed_monotonic() -> float:
+        nonlocal calls
+        calls += 1
+        return NOW if calls <= 4 else NOW + 100.0
+
+    _, _, transport, perception, reality, request = _hardware_case(
+        tmp_path,
+        monotonic=delayed_monotonic,
+    )
+
+    result = reality.execute(request)
+
+    assert result.status == "failed"
+    assert transport.arm_calls == 0
+    assert transport.calls == []
+    assert transport.safe_stop_calls == 1
+    assert perception.ended == [f"hardware:{request.arguments['invocation_id']}"]
 
 
 def test_stale_perception_is_rejected_before_motion(tmp_path) -> None:

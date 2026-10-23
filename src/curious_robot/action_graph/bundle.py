@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -41,7 +42,11 @@ class DeploymentBundle(_BundleModel):
     @model_validator(mode="after")
     def validate_bindings(self) -> DeploymentBundle:
         if (
-            self.action_graph.object_id != self.object_id
+            self.action_graph.task_id != self.task_id
+            or self.action_graph.task_version != self.task_version
+            or self.action_graph.object_id != self.object_id
+            or self.action_graph.object_archetype_version != self.object_archetype_version
+            or self.action_graph.geometry_hash != self.geometry_hash
             or self.action_graph.protocol_binding_id != self.protocol_binding_id
             or self.action_graph.calibration_id != self.calibration_id
         ):
@@ -54,13 +59,30 @@ class DeploymentBundle(_BundleModel):
             not _is_sha256_id(artifact_id) for artifact_id in self.validation_artifact_ids
         ):
             raise ValueError("deployment validation artifacts must be unique SHA-256 IDs")
+        graph_capabilities = {
+            capability
+            for node in self.action_graph.nodes
+            for capability in node.required_capabilities
+        }
+        missing_bindings = sorted(
+            graph_capabilities - set(self.required_backend_capabilities)
+        )
+        if missing_bindings:
+            raise ValueError(
+                "deployment bundle omits graph capabilities: " + ", ".join(missing_bindings)
+            )
         if self.action_graph.wall_clock_deadline_s > self.safety.execution_deadline_s:
             raise ValueError("deployment graph exceeds the bundle execution deadline")
         return self
 
     @property
     def bundle_id(self) -> str:
-        canonical = self.model_dump_json(exclude_none=False)
+        document = self.model_dump(mode="json", exclude_none=False)
+        document["required_backend_capabilities"] = sorted(
+            document["required_backend_capabilities"]
+        )
+        document["validation_artifact_ids"] = sorted(document["validation_artifact_ids"])
+        canonical = json.dumps(document, sort_keys=True, separators=(",", ":"))
         return f"sha256:{hashlib.sha256(canonical.encode()).hexdigest()}"
 
 
@@ -74,6 +96,19 @@ class RuntimeCapabilityManifest(_BundleModel):
     maximum_speed_m_s: float = Field(gt=0.0)
     realtime_ready: bool
     watchdog_ready: bool
+
+    @model_validator(mode="after")
+    def validate_runtime_identity(self) -> RuntimeCapabilityManifest:
+        for values, label in (
+            (self.supported_graph_schema_versions, "graph schema versions"),
+            (self.capabilities, "runtime capabilities"),
+            (self.approved_calibration_ids, "approved calibration IDs"),
+        ):
+            if len(set(values)) != len(values):
+                raise ValueError(f"{label} must be unique")
+        if any(not _is_sha256_id(value) for value in self.approved_calibration_ids):
+            raise ValueError("approved calibration IDs must be SHA-256 IDs")
+        return self
 
 
 class BundleAdmission(_BundleModel):

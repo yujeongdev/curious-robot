@@ -49,7 +49,11 @@ def push_protocol_binding_id(protocol_document: str) -> str:
 
 def compile_motion_action_graph(
     *,
+    task_id: str,
+    task_version: str,
     object_id: str,
+    object_archetype_version: str,
+    geometry_hash: str,
     calibration_id: str,
     protocol_binding_id: str,
     phases: Sequence[str],
@@ -63,6 +67,16 @@ def compile_motion_action_graph(
 
     motion_nodes = _compile_motion_nodes(phases, phase_durations_s, contact_expectations)
     supervisor = _compile_supervisor_nodes(observation_timeout_s, observation_capabilities)
+    minimum_deadline_s = (
+        sum(node.timeout_s for node in motion_nodes)
+        + supervisor.observe_initial.timeout_s
+        + supervisor.validate_observation.timeout_s
+        + supervisor.observe_final.timeout_s
+        + supervisor.verify_goal.timeout_s
+        + supervisor.complete.timeout_s
+    )
+    if wall_clock_deadline_s < minimum_deadline_s:
+        raise ValueError("action graph deadline is shorter than its success path")
     edges = (
         *_entry_edges(supervisor, motion_nodes[0]),
         *_motion_edges(motion_nodes, supervisor),
@@ -70,7 +84,11 @@ def compile_motion_action_graph(
     )
     return ActionGraph(
         graph_name="franka-bounded-push",
+        task_id=task_id,
+        task_version=task_version,
         object_id=object_id,
+        object_archetype_version=object_archetype_version,
+        geometry_hash=geometry_hash,
         calibration_id=calibration_id,
         protocol_binding_id=protocol_binding_id,
         entry_node_id=supervisor.observe_initial.node_id,
@@ -79,7 +97,6 @@ def compile_motion_action_graph(
             supervisor.return_to_agent.node_id,
             supervisor.safe_stop.node_id,
         ),
-        maximum_node_executions=len(motion_nodes) + len(supervisor.all),
         wall_clock_deadline_s=wall_clock_deadline_s,
         nodes=(
             supervisor.observe_initial,

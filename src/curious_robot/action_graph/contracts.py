@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections import defaultdict
 from enum import StrEnum
 from typing import Literal
@@ -72,7 +73,6 @@ class ActionGraphNode(_GraphModel):
     control_mode: MotionControlMode | None = None
     required_capabilities: tuple[str, ...] = ()
     timeout_s: float = Field(gt=0.0)
-    maximum_attempts: int = Field(default=1, gt=0, le=10)
     checkpoint_safe: bool = False
     parameters: dict[str, GraphParameter] = Field(default_factory=dict)
 
@@ -95,19 +95,21 @@ class ActionGraphEdge(_GraphModel):
     source_node_id: str
     target_node_id: str
     guard: EdgeGuard
-    maximum_traversals: int | None = Field(default=None, gt=0, le=10)
 
 
 class ActionGraph(_GraphModel):
     graph_schema_version: Literal["action-graph-v1"] = "action-graph-v1"
     compiler_version: Literal["motion-plan-compiler-v1"] = "motion-plan-compiler-v1"
     graph_name: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9-]*$")
+    task_id: str = Field(min_length=1)
+    task_version: str = Field(min_length=1)
     object_id: str = Field(min_length=1)
+    object_archetype_version: str = Field(min_length=1)
+    geometry_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     calibration_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     protocol_binding_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     entry_node_id: str
     terminal_node_ids: tuple[str, ...] = Field(min_length=1)
-    maximum_node_executions: int = Field(gt=0, le=10_000)
     wall_clock_deadline_s: float = Field(gt=0.0)
     nodes: tuple[ActionGraphNode, ...] = Field(min_length=1)
     edges: tuple[ActionGraphEdge, ...]
@@ -128,6 +130,11 @@ class ActionGraph(_GraphModel):
             for node_id in self.terminal_node_ids
         ):
             raise ValueError("terminal IDs must reference terminal or safe-stop nodes")
+        if not any(
+            nodes_by_id[node_id].kind is ActionNodeKind.SAFE_STOP
+            for node_id in self.terminal_node_ids
+        ):
+            raise ValueError("action graph requires an absorbing safe-stop terminal")
 
         outgoing: dict[str, list[ActionGraphEdge]] = defaultdict(list)
         edge_keys: set[tuple[str, EdgeGuard]] = set()
@@ -151,6 +158,14 @@ class ActionGraph(_GraphModel):
                 guards = {edge.guard for edge in outgoing[node.node_id]}
                 if not {EdgeGuard.ON_FAILURE, EdgeGuard.ON_SAFETY_TRIP}.issubset(guards):
                     raise ValueError("every motion node requires failure and safety-stop edges")
+                unsafe_targets = [
+                    edge.target_node_id
+                    for edge in outgoing[node.node_id]
+                    if edge.guard in {EdgeGuard.ON_FAILURE, EdgeGuard.ON_SAFETY_TRIP}
+                    and nodes_by_id[edge.target_node_id].kind is not ActionNodeKind.SAFE_STOP
+                ]
+                if unsafe_targets:
+                    raise ValueError("motion failure and safety-trip edges must reach safe-stop")
 
         reachable = {self.entry_node_id}
         frontier = [self.entry_node_id]
@@ -163,32 +178,31 @@ class ActionGraph(_GraphModel):
         if reachable != set(nodes_by_id):
             raise ValueError("action graph contains unreachable nodes")
 
-        unbounded = {
-            source: tuple(edge.target_node_id for edge in edges if edge.maximum_traversals is None)
-            for source, edges in outgoing.items()
-        }
         visiting: set[str] = set()
         visited: set[str] = set()
 
         def visit(node_id: str) -> None:
             if node_id in visiting:
-                raise ValueError("action graph cycles require an explicit traversal bound")
+                raise ValueError("action graph v1 must be acyclic")
             if node_id in visited:
                 return
             visiting.add(node_id)
-            for target in unbounded.get(node_id, ()):
+            for edge in outgoing.get(node_id, ()):
+                target = edge.target_node_id
                 visit(target)
             visiting.remove(node_id)
             visited.add(node_id)
 
         visit(self.entry_node_id)
-        if self.maximum_node_executions < len(self.nodes):
-            raise ValueError("node-execution budget cannot be smaller than the graph")
         return self
 
     @property
     def graph_id(self) -> str:
-        canonical = self.model_dump_json(exclude_none=False)
+        canonical = json.dumps(
+            self.model_dump(mode="json", exclude_none=False),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         return f"sha256:{hashlib.sha256(canonical.encode()).hexdigest()}"
 
     def next_node(self, node_id: str, outcome: NodeOutcome) -> str | None:

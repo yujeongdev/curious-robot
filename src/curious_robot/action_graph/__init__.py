@@ -7,7 +7,11 @@ from .bundle import (
     RuntimeCapabilityManifest,
     admit_deployment_bundle,
 )
-from .compiler import compile_motion_action_graph, push_protocol_binding_id
+from .compiler import (
+    TERMINAL_TRANSITION_TIMEOUT_S,
+    compile_motion_action_graph,
+    push_protocol_binding_id,
+)
 from .contracts import (
     ActionGraph,
     ActionGraphEdge,
@@ -34,6 +38,7 @@ __all__ = [
     "NodeExecutor",
     "NodeOutcome",
     "RuntimeCapabilityManifest",
+    "TERMINAL_TRANSITION_TIMEOUT_S",
     "admit_deployment_bundle",
     "compile_motion_action_graph",
     "push_protocol_binding_id",

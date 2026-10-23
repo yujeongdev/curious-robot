@@ -16,11 +16,16 @@ from curious_robot.action_graph import (
 
 HASH_A = "sha256:" + "a" * 64
 HASH_B = "sha256:" + "b" * 64
+HASH_C = "sha256:" + "c" * 64
 
 
 def _compiled_graph() -> ActionGraph:
     return compile_motion_action_graph(
+        task_id="push-cube-v1",
+        task_version="1.0.0",
         object_id="cube",
+        object_archetype_version="1.0.0",
+        geometry_hash=HASH_C,
         calibration_id=HASH_A,
         protocol_binding_id=HASH_B,
         phases=("approach", "contact_push", "retreat"),
@@ -60,6 +65,40 @@ def test_graph_identity_changes_with_bound_protocol() -> None:
     assert first.graph_id != second.graph_id
 
 
+def test_graph_identity_ignores_parameter_key_order() -> None:
+    graph = _compiled_graph()
+    document = graph.model_dump()
+    motion_index = next(
+        index
+        for index, node in enumerate(document["nodes"])
+        if node["kind"] == ActionNodeKind.MOTION
+    )
+    parameters = document["nodes"][motion_index]["parameters"]
+    document["nodes"][motion_index]["parameters"] = dict(reversed(tuple(parameters.items())))
+
+    reordered = ActionGraph.model_validate(document)
+
+    assert reordered.graph_id == graph.graph_id
+
+
+def test_compiler_rejects_deadline_shorter_than_success_path() -> None:
+    with pytest.raises(ValueError, match="shorter than its success path"):
+        compile_motion_action_graph(
+            task_id="push-cube-v1",
+            task_version="1.0.0",
+            object_id="cube",
+            object_archetype_version="1.0.0",
+            geometry_hash=HASH_C,
+            calibration_id=HASH_A,
+            protocol_binding_id=HASH_B,
+            phases=("approach", "push", "retreat"),
+            phase_durations_s=(0.5, 1.0, 0.5),
+            contact_expectations=("unexpected", "maintain", "release"),
+            observation_timeout_s=0.25,
+            wall_clock_deadline_s=3.0,
+        )
+
+
 def test_graph_rejects_unreachable_nodes_and_ambiguous_edges() -> None:
     graph = _compiled_graph()
     unreachable = ActionGraphNode(
@@ -75,7 +114,6 @@ def test_graph_rejects_unreachable_nodes_and_ambiguous_edges() -> None:
                 **graph.model_dump(),
                 "nodes": (*graph.nodes, unreachable),
                 "terminal_node_ids": (*graph.terminal_node_ids, unreachable.node_id),
-                "maximum_node_executions": graph.maximum_node_executions + 1,
             }
         )
 
@@ -90,21 +128,39 @@ def test_graph_rejects_unreachable_nodes_and_ambiguous_edges() -> None:
 
 def test_graph_rejects_unbounded_cycles() -> None:
     graph = _compiled_graph()
-    motion_nodes = tuple(node for node in graph.nodes if node.kind is ActionNodeKind.MOTION)
     edges = tuple(
         edge
         for edge in graph.edges
         if not (
-            edge.source_node_id == motion_nodes[1].node_id
+            edge.source_node_id == "observe_terminal_object_pose"
             and edge.guard is EdgeGuard.ON_FAILURE
         )
     ) + (
         ActionGraphEdge(
-            source_node_id=motion_nodes[1].node_id,
-            target_node_id=motion_nodes[0].node_id,
+            source_node_id="observe_terminal_object_pose",
+            target_node_id="observe_initial_object_pose",
             guard=EdgeGuard.ON_FAILURE,
         ),
     )
 
-    with pytest.raises(ValidationError, match="cycles require"):
+    with pytest.raises(ValidationError, match="must be acyclic"):
+        ActionGraph.model_validate({**graph.model_dump(), "edges": edges})
+
+
+def test_graph_rejects_motion_failure_that_bypasses_safe_stop() -> None:
+    graph = _compiled_graph()
+    motion = next(node for node in graph.nodes if node.kind is ActionNodeKind.MOTION)
+    edges = tuple(
+        edge
+        for edge in graph.edges
+        if not (edge.source_node_id == motion.node_id and edge.guard is EdgeGuard.ON_FAILURE)
+    ) + (
+        ActionGraphEdge(
+            source_node_id=motion.node_id,
+            target_node_id="terminal_completed",
+            guard=EdgeGuard.ON_FAILURE,
+        ),
+    )
+
+    with pytest.raises(ValidationError, match="must reach safe-stop"):
         ActionGraph.model_validate({**graph.model_dump(), "edges": edges})

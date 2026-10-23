@@ -23,6 +23,8 @@ from curious_robot.lab.contracts import (
 )
 from curious_robot.lab.friction_artifacts import RealityDeploymentPayload
 from curious_robot.lab.ports import PortAuthority, RuntimeIdentity
+from curious_robot.objects import get_object_archetype
+from curious_robot.tasks import get_task_preset
 
 from .hardware_backends import (
     CANONICAL_BACKEND_CONTRACTS,
@@ -148,6 +150,7 @@ class FrankaHardwareReality:
             self._command_lock.release()
 
     def _execute_serialized(self, request: OperationRequest) -> OperationResult:
+        graph_started_s = self._monotonic()
         arguments = request.arguments
         if not isinstance(arguments, dict):
             return self._failure(request, "arguments_not_object")
@@ -165,6 +168,15 @@ class FrankaHardwareReality:
             policy_ref = _reference(
                 skill.payload.policy_artifact_id,
                 LabArtifactKind.POLICY_ARTIFACT.value,
+            )
+            policy = self.store.get(policy_ref)
+            if not isinstance(policy.payload, dict):
+                raise TypeError("hardware policy payload must be an object")
+            task_id = str(policy.payload.get("task_id", "push-cube-v1"))
+            task = get_task_preset(task_id)
+            archetype = get_object_archetype(
+                task.object_archetype_id,
+                task.object_archetype_version,
             )
             provenance = (policy_ref, capability_ref)
             session_key = f"{capability_ref.artifact_id}:{invocation.invocation_id}"
@@ -225,10 +237,14 @@ class FrankaHardwareReality:
             tool_pose = self.transport.read_tool_pose(self.perception_timeout_s)
             self._validate_tool_pose(tool_pose)
             motion_plan = compile_franka_push_plan(
+                task_id=task.preset_id,
+                task_version=task.version,
                 action=skill.payload.action_template,
                 protocol=skill.payload.protocol.final_push,
                 capability_frame_id=skill.payload.applicability.frame_id,
                 capability_object_id=skill.payload.applicability.object_id,
+                object_archetype_version=archetype.version,
+                geometry_hash=archetype.geometry_hash,
                 current_object_position_m=precommand_observation.position_m,
                 current_object_orientation_xyzw=precommand_observation.orientation_xyzw,
                 current_tool_pose=tool_pose,
@@ -247,21 +263,29 @@ class FrankaHardwareReality:
                 motion_plan.plan_id,
                 motion_plan.action_graph.graph_id,
             )
-            watchdog_token = self.transport.arm_watchdog(self.command_timeout_s)
+            remaining_graph_time_s = _remaining_graph_time_s(
+                started_s=graph_started_s,
+                deadline_s=motion_plan.action_graph.wall_clock_deadline_s,
+                monotonic=self._monotonic,
+            )
+            if motion_plan.planned_duration_s > remaining_graph_time_s:
+                raise TimeoutError("insufficient action-graph time remains for the motion plan")
+            transport_timeout_s = min(self.command_timeout_s, remaining_graph_time_s)
+            watchdog_token = self.transport.arm_watchdog(transport_timeout_s)
             if not watchdog_token:
                 raise ValueError("hardware transport did not arm an independent watchdog")
             result = self.transport.execute_bounded_push(
                 motion_plan=motion_plan,
                 maximum_force_n=motion_plan.maximum_force_n,
                 maximum_speed_m_s=skill.payload.safety.maximum_speed_m_s,
-                command_timeout_s=self.command_timeout_s,
+                command_timeout_s=transport_timeout_s,
             )
             self._require_open()
             _validate_push_result(
                 result,
                 maximum_force_n=motion_plan.maximum_force_n,
                 maximum_speed_m_s=skill.payload.safety.maximum_speed_m_s,
-                command_timeout_s=self.command_timeout_s,
+                command_timeout_s=transport_timeout_s,
                 watchdog_token=watchdog_token,
                 motion_plan_id=motion_plan.plan_id,
                 action_graph_id=motion_plan.action_graph.graph_id,
@@ -278,6 +302,11 @@ class FrankaHardwareReality:
                 final_observation,
                 expected_episode_id=session.episode.episode_id,
             )
+            _remaining_graph_time_s(
+                started_s=graph_started_s,
+                deadline_s=motion_plan.action_graph.wall_clock_deadline_s,
+                monotonic=self._monotonic,
+            )
             final_position = final_observation.position_m
             hardware_target = transform_capability_position(
                 skill.payload.applicability.validated_target_m,
@@ -286,6 +315,11 @@ class FrankaHardwareReality:
             target_error = math.dist(
                 final_position[:2],
                 hardware_target[:2],
+            )
+            _remaining_graph_time_s(
+                started_s=graph_started_s,
+                deadline_s=motion_plan.action_graph.wall_clock_deadline_s,
+                monotonic=self._monotonic,
             )
             session.attempts.append(
                 {
@@ -551,6 +585,18 @@ def _validate_preflight(
         raise ValueError("hardware preflight did not perform every required check")
     if not preflight.feasible or preflight.errors:
         raise ValueError("hardware motion plan failed transport preflight")
+
+
+def _remaining_graph_time_s(
+    *,
+    started_s: float,
+    deadline_s: float,
+    monotonic: Callable[[], float],
+) -> float:
+    remaining_s = deadline_s - (monotonic() - started_s)
+    if remaining_s <= 0.0:
+        raise TimeoutError("hardware action graph exceeded its wall-clock deadline")
+    return remaining_s
 
 
 def _reference(artifact_id: str, kind: str) -> ArtifactRef:

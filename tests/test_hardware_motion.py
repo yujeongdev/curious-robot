@@ -9,9 +9,11 @@ from curious_robot.hardware_motion import (
     FrankaPushCalibration,
     HardwareMotionPhase,
     HardwareToolPose,
+    compile_franka_deployment_bundle,
     compile_franka_push_plan,
     sample_segment,
 )
+from curious_robot.objects import CUBE_V1
 from curious_robot.protocol import load_default_protocol
 from curious_robot.schemas import ActionCandidate
 
@@ -61,6 +63,8 @@ def _tool_pose(calibration: FrankaPushCalibration) -> HardwareToolPose:
 def _compile(**updates):  # noqa: ANN003, ANN202
     calibration = updates.pop("calibration", _calibration())
     values = {
+        "task_id": "push-cube-v1",
+        "task_version": "1.0.0",
         "action": ActionCandidate(
             action_id="push-diagonal",
             kind="push",
@@ -73,6 +77,8 @@ def _compile(**updates):  # noqa: ANN003, ANN202
         "protocol": load_default_protocol().final_push,
         "capability_frame_id": "simulation_world",
         "capability_object_id": "cube",
+        "object_archetype_version": CUBE_V1.version,
+        "geometry_hash": CUBE_V1.geometry_hash,
         "current_object_position_m": (0.10, 0.00, 0.025),
         "current_object_orientation_xyzw": (0.0, 0.0, 0.0, 1.0),
         "current_tool_pose": _tool_pose(calibration),
@@ -130,6 +136,16 @@ def test_push_plan_has_continuous_guarded_contact_path() -> None:
         graph_motion_nodes[0].node_id,
         NodeOutcome.SAFETY_TRIP,
     ) == "terminal_safe_stop"
+    bundle = compile_franka_deployment_bundle(
+        plan,
+        validation_artifact_ids=("sha256:" + "f" * 64,),
+    )
+    assert bundle.action_graph.graph_id == plan.action_graph.graph_id
+    assert set(bundle.required_backend_capabilities) == {
+        capability
+        for node in plan.action_graph.nodes
+        for capability in node.required_capabilities
+    }
 
 
 def test_minimum_jerk_samples_respect_segment_peak_speed() -> None:
