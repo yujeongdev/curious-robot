@@ -36,4 +36,25 @@ describe("ActionGraphPanel", () => {
     expect(screen.getByText("NOT ADMITTED")).toBeVisible();
     expect(screen.getByText(/has not published an execution graph/i)).toBeVisible();
   });
+
+  it("renders recorded off-spine terminals instead of falling back to the entry node", () => {
+    const completed = reduceRunEvents(demoEvents);
+    const safeStop = {
+      ...completed,
+      activeActionNodeId: "terminal_safe_stop",
+      lastActionNodeId: "terminal_safe_stop",
+      actionNodeStates: { ...completed.actionNodeStates, terminal_safe_stop: "entered" as const },
+    };
+    render(<ActionGraphPanel run={safeStop} />);
+    expect(screen.getByText("TERMINAL BRANCH")).toBeVisible();
+    expect(within(screen.getByRole("listitem", { current: "step" })).getByText("Safe stop")).toBeVisible();
+    expect(screen.queryByText("Observe object pose", { selector: ".action-graph-summary strong" })).not.toBeInTheDocument();
+  });
+
+  it("uses unique accessible title IDs for multiple inspector instances", () => {
+    const run = reduceRunEvents(demoEvents);
+    render(<><ActionGraphPanel run={run} /><ActionGraphPanel run={run} /></>);
+    const ids = screen.getAllByRole("heading", { name: "Action graph" }).map((heading) => heading.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });

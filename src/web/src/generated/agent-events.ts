@@ -79,6 +79,10 @@ export const actionGraphCompiledPayloadSchema = z.object({
   motion_plan_id: sha256IdSchema.nullable().optional(),
   deployment_bundle_id: sha256IdSchema.nullable().optional(),
   graph: actionGraphSchema,
+}).superRefine((payload, context) => {
+  if (payload.deployment_bundle_id && !payload.motion_plan_id) {
+    context.addIssue({ code: "custom", message: "deployment bundle ID requires a motion plan ID", path: ["deployment_bundle_id"] });
+  }
 });
 
 export const actionNodeTransitionPayloadSchema = z.object({
@@ -87,6 +91,19 @@ export const actionNodeTransitionPayloadSchema = z.object({
   state: z.enum(["entered", "completed", "failed", "safety_trip", "goal_miss"]),
   outcome: z.enum(["success", "failure", "safety_trip", "goal_miss"]).nullable().optional(),
   evidence_ids: z.array(z.string()).default([]),
+}).superRefine((transition, context) => {
+  const expected = {
+    completed: "success",
+    failed: "failure",
+    safety_trip: "safety_trip",
+    goal_miss: "goal_miss",
+  } as const;
+  if (transition.state === "entered" && transition.outcome != null) {
+    context.addIssue({ code: "custom", message: "entered action node cannot declare a terminal outcome", path: ["outcome"] });
+  }
+  if (transition.state !== "entered" && transition.outcome !== expected[transition.state]) {
+    context.addIssue({ code: "custom", message: "action node transition state and outcome do not match", path: ["outcome"] });
+  }
 });
 
 export const vector3Schema = z.tuple([z.number(), z.number(), z.number()]);

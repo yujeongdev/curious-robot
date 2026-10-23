@@ -164,7 +164,7 @@ a { color: inherit; text-decoration: none; }
 .action-graph--empty > p { margin: 0; padding: 0 12px; color: var(--text-muted); font-size: .82rem; }
 .action-graph-summary { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 6px 12px; }
 .action-graph-summary > div { min-width: 0; display: flex; flex-direction: column; }
-.action-graph-summary strong { overflow: hidden; color: var(--signal); font-size: .98rem; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
+.action-graph-summary strong { overflow: hidden; color: var(--signal); font-size: 1.0625rem; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
 .action-graph-summary .mono { color: var(--text-muted); font-size: .66rem; }
 .action-graph-window, .action-graph-details ol { margin: 0; padding: 0; list-style: none; }
 .action-graph-window { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -177,13 +177,13 @@ a { color: inherit; text-decoration: none; }
 .action-node-state svg { width: 14px; height: 14px; }
 .action-node-copy { min-width: 0; display: flex; flex-direction: column; }
 .action-node-copy strong, .action-node-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.action-node-copy strong { color: var(--text-secondary); font-size: .75rem; text-transform: capitalize; }
+.action-node-copy strong { color: var(--text-secondary); font-size: 1rem; text-transform: capitalize; }
 .action-node-copy small { margin-top: 2px; color: var(--text-muted); font-family: "IBM Plex Mono", monospace; font-size: .62rem; }
-.action-node > b { color: currentcolor; font-family: "IBM Plex Mono", monospace; font-size: .58rem; font-weight: 400; text-transform: uppercase; }
+.action-node > b { color: currentcolor; font-family: "IBM Plex Mono", monospace; font-size: 1rem; font-weight: 400; text-transform: uppercase; }
 .action-graph-window .action-node > b { display: none; }
-.action-graph-safety { min-height: 34px; display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 7px; border-top: 1px solid var(--border); padding: 5px 12px; color: var(--text-muted); font-size: .72rem; }
+.action-graph-safety { min-height: 44px; display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 7px; border-top: 1px solid var(--border); padding: 7px 12px; color: var(--text-secondary); font-size: 1rem; }
 .action-graph-safety svg { width: 15px; color: var(--danger); }
-.action-graph-safety strong { color: var(--danger); font-family: "IBM Plex Mono", monospace; font-size: .68rem; text-transform: uppercase; }
+.action-graph-safety strong { color: var(--danger); font-family: "IBM Plex Mono", monospace; font-size: 1rem; text-transform: uppercase; }
 .action-graph-trigger { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 7px; border: 0; border-top: 1px solid var(--border); padding: 7px 12px; background: transparent; color: var(--text-secondary); cursor: pointer; font: inherit; font-size: .82rem; text-align: left; }
 .action-graph-trigger svg { width: 15px; }
 .action-graph-trigger svg:last-child { margin-left: auto; }

@@ -1,6 +1,6 @@
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import { Check, ChevronDown, Circle, CircleDot, GitBranch, ShieldAlert } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { ActionGraphNode } from "../generated/agent-events";
 import type { ActionNodeState, RunState } from "../state/run-reducer";
 import { Badge } from "./ui/badge";
@@ -72,12 +72,13 @@ function NodeRow({ node, state, compact = false }: { node: ActionGraphNode; stat
 
 export function ActionGraphPanel({ run, compact = false }: { run: RunState; compact?: boolean }) {
   const [open, setOpen] = useState(false);
+  const titleId = useId();
   const path = useMemo(() => successPath(run), [run]);
   if (!run.actionGraph || !run.actionGraphId) {
     return (
-      <section className="action-graph action-graph--empty" aria-labelledby="action-graph-title">
+      <section className="action-graph action-graph--empty" aria-labelledby={titleId}>
         <header>
-          <div><span className="eyebrow">Deterministic execution</span><h2 id="action-graph-title">Action graph</h2></div>
+          <div><span className="eyebrow">Deterministic execution</span><h2 id={titleId}>Action graph</h2></div>
           <Badge>NOT ADMITTED</Badge>
         </header>
         <p>The selected policy has not published an execution graph yet.</p>
@@ -86,25 +87,28 @@ export function ActionGraphPanel({ run, compact = false }: { run: RunState; comp
   }
 
   const currentId = run.activeActionNodeId ?? run.lastActionNodeId ?? run.actionGraph.entry_node_id;
-  const currentIndex = Math.max(0, path.findIndex((node) => node.node_id === currentId));
-  const visible = path.slice(Math.max(0, currentIndex - 1), currentIndex + 2);
+  const currentIndex = path.findIndex((node) => node.node_id === currentId);
+  const currentNode = run.actionGraph.nodes.find((node) => node.node_id === currentId) ?? path[0]!;
+  const visible = currentIndex >= 0
+    ? path.slice(Math.max(0, currentIndex - 1), currentIndex + 2)
+    : [currentNode];
   const hasTrace = Object.values(run.actionNodeStates).some((state) => state !== "pending");
   const graphShort = `${run.actionGraphId.slice(0, 13)}…`;
 
   return (
-    <section className="action-graph" aria-labelledby="action-graph-title">
+    <section className="action-graph" aria-labelledby={titleId}>
       <header>
         <div>
           <span className="eyebrow">Deterministic execution</span>
-          <h2 id="action-graph-title">Action graph</h2>
+          <h2 id={titleId}>Action graph</h2>
         </div>
         <Badge>{hasTrace ? "RECORDED TRACE" : "CONTRACT ONLY"}</Badge>
       </header>
       {run.actionGraphContractError && <p className="action-graph-error" role="alert">{run.actionGraphContractError}</p>}
       <div className="action-graph-summary">
         <div>
-          <span className="mono">NODE {Math.min(currentIndex + 1, path.length)} / {path.length}</span>
-          <strong>{nodeLabel(path[currentIndex] ?? run.actionGraph.nodes[0]!)}</strong>
+          <span className="mono">{currentIndex >= 0 ? `NODE ${currentIndex + 1} / ${path.length}` : "TERMINAL BRANCH"}</span>
+          <strong>{nodeLabel(currentNode)}</strong>
         </div>
         <span className="mono">{run.actionGraph.wall_clock_deadline_s.toFixed(1)} s deadline</span>
       </div>

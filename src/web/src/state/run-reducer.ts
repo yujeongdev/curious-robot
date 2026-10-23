@@ -241,7 +241,7 @@ export function reduceRunEvent(state: RunState, event: AgentEvent): RunState {
       actionNodeStates: { ...state.actionNodeStates, [transition.node_id]: transition.state },
       activeActionNodeId: transition.state === "entered" ? transition.node_id : state.activeActionNodeId === transition.node_id ? null : state.activeActionNodeId,
       lastActionNodeId: transition.node_id,
-      actionGraphContractError: null,
+      actionGraphContractError: state.actionGraphContractError,
     };
   }
   if (event.type.startsWith("tool.")) {

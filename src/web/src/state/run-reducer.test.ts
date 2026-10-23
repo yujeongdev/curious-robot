@@ -67,6 +67,13 @@ describe("run reducer", () => {
     const rejected = reduceRunEvent(admitted, invalid);
     expect(rejected.actionGraphContractError).toMatch(/does not match/i);
     expect(rejected.activeActionNodeId).toBeNull();
+
+    const valid = {
+      ...transition,
+      event_id: "valid-transition-after-contract-error",
+      sequence: rejected.lastSequence + 1,
+    };
+    expect(reduceRunEvent(rejected, valid).actionGraphContractError).toMatch(/does not match/i);
   });
 
   it("retains independent Reality and Twin frames across interleaved events and seek", () => {

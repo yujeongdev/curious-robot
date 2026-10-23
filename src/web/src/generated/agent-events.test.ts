@@ -22,7 +22,11 @@ describe("agent event boundary", () => {
     expect(actionGraphCompiledPayloadSchema.parse(compiled.payload).graph.nodes.length).toBeGreaterThan(1);
     expect(actionNodeTransitionPayloadSchema.parse(transition.payload).node_id).toBe("observe_initial_object_pose");
     expect(() => actionGraphCompiledPayloadSchema.parse({ ...compiled.payload, graph_id: "not-a-hash" })).toThrow();
+    expect(() => actionGraphCompiledPayloadSchema.parse({ ...compiled.payload, motion_plan_id: null })).toThrow(/requires a motion plan/i);
     expect(() => actionNodeTransitionPayloadSchema.parse({ ...transition.payload, state: "teleported" })).toThrow();
+    expect(() => actionNodeTransitionPayloadSchema.parse({ ...transition.payload, state: "entered", outcome: "success" })).toThrow(/cannot declare/i);
+    expect(() => actionNodeTransitionPayloadSchema.parse({ ...transition.payload, state: "completed", outcome: null })).toThrow(/do not match/i);
+    expect(() => actionNodeTransitionPayloadSchema.parse({ ...transition.payload, state: "failed", outcome: "success" })).toThrow(/do not match/i);
   });
 
   it("keeps the synthetic graph commitment content-addressed", async () => {
