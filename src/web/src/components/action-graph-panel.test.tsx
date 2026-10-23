@@ -26,8 +26,10 @@ describe("ActionGraphPanel", () => {
     await user.click(screen.getByRole("button", { name: /inspect full graph/i }));
 
     expect(screen.getByRole("list", { name: "Full action graph success path" })).toBeVisible();
-    expect(screen.getByText("Verify goal → Return to agent")).toBeVisible();
-    expect(screen.getByText("Operational node → Safe stop")).toBeVisible();
+    const branches = screen.getByRole("list", { name: "Action graph branch edges" });
+    expect(within(branches).getByText("goal miss")).toBeVisible();
+    expect(within(branches).getByText("Return to agent")).toBeVisible();
+    expect(within(branches).getAllByText("Safe stop").length).toBeGreaterThan(0);
     expect(screen.getByText("action-graph-v1")).toBeVisible();
     expect(screen.getByText(/hardware · cartesian pose · 5\.0 s/i)).toBeVisible();
     expect(screen.getAllByText(/cartesian_pose · force_guard · contact_monitor/i)).toHaveLength(3);

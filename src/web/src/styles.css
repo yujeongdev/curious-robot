@@ -190,10 +190,13 @@ a { color: inherit; text-decoration: none; }
 .action-graph-trigger svg:last-child { margin-left: auto; }
 .action-graph-details { max-height: min(44svh, 380px); overflow: auto; border-top: 1px solid var(--border); }
 .action-graph-details .action-node { min-height: 46px; border-right: 0; border-bottom: 1px solid var(--border); padding-inline: 12px; }
-.action-graph-branches { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); }
-.action-graph-branches p { display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 10px 12px; color: var(--text-muted); font-size: .72rem; }
-.action-graph-branches p:first-child { border-right: 1px solid var(--border); }
-.action-graph-branches strong { color: var(--text-secondary); }
+.action-graph-branches { border-bottom: 1px solid var(--border); padding: 10px 12px; }
+.action-graph-branches > strong { display: block; margin-bottom: 7px; color: var(--text-secondary); font-size: 1rem; }
+.action-graph-branches ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.action-graph-branches li { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 7px; color: var(--text-secondary); font-size: .875rem; }
+.action-graph-branches li span { overflow: hidden; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
+.action-graph-branches li span:last-child { text-align: right; }
+.action-graph-branches li b { color: var(--danger); font-family: "IBM Plex Mono", monospace; font-size: .75rem; font-weight: 400; text-transform: uppercase; }
 .action-graph-contract { margin: 0; padding: 8px 12px 12px; }
 .action-graph-contract > div { display: grid; grid-template-columns: 70px 1fr; gap: 8px; padding: 3px 0; font-size: .68rem; }
 .action-graph-contract dt { color: var(--text-muted); }
@@ -320,7 +323,7 @@ a { color: inherit; text-decoration: none; }
   .camera-label { display: none; }
 }
 
-@media (min-width: 768px) and (max-width: 1023px) {
+@media (min-width: 768px) and (max-width: 1279px) {
   .mobile-world-switch { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); background: var(--surface-1); }
   .mobile-world-switch button { min-height: 44px; border: 0; border-right: 1px solid var(--border); background: transparent; color: var(--text-secondary); font: inherit; }
   .mobile-world-switch button:last-child { border-right: 0; }

@@ -112,6 +112,87 @@ def compile_motion_action_graph(
     )
 
 
+def compile_skill_action_graph(
+    *,
+    task_id: str,
+    task_version: str,
+    object_id: str,
+    object_archetype_version: str,
+    geometry_hash: str,
+    calibration_id: str,
+    protocol_binding_id: str,
+    skill_id: str,
+    control_mode: MotionControlMode,
+    required_capabilities: tuple[str, ...],
+    observation_timeout_s: float,
+    skill_timeout_s: float,
+) -> ActionGraph:
+    """Compile one monolithic deterministic skill without inventing internal phases."""
+
+    observe_initial = _observation_node(
+        "observe_initial_object_pose",
+        "precommand",
+        observation_timeout_s,
+        ("external_object_pose",),
+    )
+    execute_skill = ActionGraphNode(
+        node_id="execute_selected_skill",
+        kind=ActionNodeKind.MOTION,
+        authority=NodeAuthority.HARDWARE,
+        executor=NodeExecutor.DETERMINISTIC_TRANSPORT,
+        control_mode=control_mode,
+        required_capabilities=required_capabilities,
+        timeout_s=skill_timeout_s,
+        parameters={"skill_id": skill_id},
+    )
+    supervisor = _compile_supervisor_nodes(observation_timeout_s, ("external_object_pose",))
+    nodes = (
+        observe_initial,
+        execute_skill,
+        supervisor.observe_final,
+        supervisor.verify_goal,
+        supervisor.complete,
+        supervisor.return_to_agent,
+        supervisor.safe_stop,
+    )
+    edges = (
+        _edge(observe_initial, execute_skill, EdgeGuard.ON_SUCCESS),
+        _edge(observe_initial, supervisor.safe_stop, EdgeGuard.ON_FAILURE),
+        _edge(execute_skill, supervisor.observe_final, EdgeGuard.ON_SUCCESS),
+        _edge(execute_skill, supervisor.safe_stop, EdgeGuard.ON_FAILURE),
+        _edge(execute_skill, supervisor.safe_stop, EdgeGuard.ON_SAFETY_TRIP),
+        _edge(supervisor.observe_final, supervisor.verify_goal, EdgeGuard.ON_SUCCESS),
+        _edge(supervisor.observe_final, supervisor.safe_stop, EdgeGuard.ON_FAILURE),
+        _edge(supervisor.verify_goal, supervisor.complete, EdgeGuard.ON_SUCCESS),
+        _edge(supervisor.verify_goal, supervisor.return_to_agent, EdgeGuard.ON_GOAL_MISS),
+        _edge(supervisor.verify_goal, supervisor.safe_stop, EdgeGuard.ON_FAILURE),
+    )
+    deadline_s = (
+        3.0 * observation_timeout_s
+        + skill_timeout_s
+        + TERMINAL_TRANSITION_TIMEOUT_S
+    )
+    return ActionGraph(
+        graph_name="simulated-reality-skill",
+        task_id=task_id,
+        task_version=task_version,
+        object_id=object_id,
+        object_archetype_version=object_archetype_version,
+        geometry_hash=geometry_hash,
+        calibration_id=calibration_id,
+        protocol_binding_id=protocol_binding_id,
+        entry_node_id=observe_initial.node_id,
+        terminal_node_ids=(
+            supervisor.complete.node_id,
+            supervisor.return_to_agent.node_id,
+            supervisor.safe_stop.node_id,
+        ),
+        wall_clock_deadline_s=deadline_s,
+        nodes=nodes,
+        edges=edges,
+    )
+
+
 def _compile_motion_nodes(
     phases: Sequence[str],
     durations_s: Sequence[float],

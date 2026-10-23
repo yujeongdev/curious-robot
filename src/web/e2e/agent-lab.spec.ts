@@ -24,7 +24,7 @@ test("synthetic preview identifies its illustrative provenance", async ({ page }
   await expect(page.getByRole("heading", { name: "Agent evidence" })).toBeVisible();
   await expect(page.locator(".action-graph").getByText("Safe stop")).toBeVisible({ timeout: 25_000 });
   await page.getByRole("button", { name: /inspect full graph/i }).click();
-  await expect(page.getByText("Operational node → Safe stop")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Action graph branch edges" })).toContainText("Safe stop");
   await expect(page.locator("body")).not.toContainText(/hidden_mass|ground_truth|truth_mu_static/i);
   await page.getByRole("tab", { name: "Replay", exact: true }).click();
   await expect(page.getByRole("note", { name: "Preview provenance" })).toBeVisible();
@@ -36,7 +36,7 @@ test("synthetic preview identifies its illustrative provenance", async ({ page }
 
 test("tablet presents one readable physics world at a time", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "desktop engine with tablet viewport");
-  await page.setViewportSize({ width: 900, height: 900 });
+  await page.setViewportSize({ width: 1100, height: 900 });
   await page.goto("/runs/demo?fixture=true");
   await expect(page.getByRole("button", { name: "Reality stand-in" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Reality Stand-in" })).toBeVisible();

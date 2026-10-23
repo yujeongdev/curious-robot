@@ -95,6 +95,8 @@ export function ActionGraphPanel({ run }: { run: RunState }) {
     : [currentNode];
   const hasTrace = Object.values(run.actionNodeStates).some((state) => state !== "pending");
   const graphShort = `${run.actionGraphId.slice(0, 13)}…`;
+  const nodesById = new Map(run.actionGraph.nodes.map((node) => [node.node_id, node]));
+  const branchEdges = run.actionGraph.edges.filter((edge) => edge.guard !== "on_success");
 
   return (
     <section className="action-graph" aria-labelledby={titleId}>
@@ -126,8 +128,16 @@ export function ActionGraphPanel({ run }: { run: RunState }) {
               {path.map((node) => <NodeRow key={node.node_id} node={node} state={run.actionNodeStates[node.node_id] ?? "pending"} />)}
             </ol>
             <div className="action-graph-branches">
-              <p><strong>Goal miss</strong><span>Verify goal → Return to agent</span></p>
-              <p><strong>Failure / safety</strong><span>Operational node → Safe stop</span></p>
+              <strong>Recorded branch topology</strong>
+              <ul aria-label="Action graph branch edges">
+                {branchEdges.map((edge) => (
+                  <li key={`${edge.source_node_id}-${edge.guard}-${edge.target_node_id}`}>
+                    <span>{nodeLabel(nodesById.get(edge.source_node_id)!)}</span>
+                    <b>{edge.guard.replace("on_", "").replaceAll("_", " ")}</b>
+                    <span>{nodeLabel(nodesById.get(edge.target_node_id)!)}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
             <dl className="action-graph-contract">
               <div><dt>Graph</dt><dd className="mono">{graphShort}</dd></div>
