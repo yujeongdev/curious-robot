@@ -2,6 +2,31 @@
 
 All notable changes to Curious Robot are documented here.
 
+## [0.4.0] - 2026-10-24
+
+### Added
+
+- Select registered tasks, inspect pipeline availability, run discovery, and build a public-prior simulation with the `curo` CLI.
+- Expose all pipeline command groups with explicit messages, dependency hints, and a nonzero exit code for stages that are not implemented.
+- Guide agents through task selection, setup and evidence inspection with the repository Curo skill.
+- Document the staged roadmap for autonomous simulation construction, two-robot bowling and material-model discovery.
+
+### Changed
+
+- Use native Click commands as the shared source for help, input parsing and capability discovery, with typed callbacks and lazy physics imports.
+- Share task descriptions between CLI, HTTP and setup consumers, and check the new Python interfaces with mypy in CI.
+- Load the selected task into Agent Lab without starting an experiment, and restore task-specific defaults when switching tasks.
+
+### Fixed
+
+- Preserve failed-run evidence locations and protect simulation reports and run directories from competing writers and accidental replacement.
+- Verify the exact simulation device and report successful state checks independently of observation failures.
+
+### Boundaries
+
+- Simulation setup currently validates initialization and finite stepping of public priors; calibration and deployment require their own evidence.
+- Standalone assets, experiments, SysID, model selection and hardware commands remain explicitly unimplemented. Existing physical quality gates are retained.
+
 ## [0.3.0] - 2026-10-23
 
 ### Added
