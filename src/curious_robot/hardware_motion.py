@@ -208,6 +208,16 @@ class FrankaPushMotionPlan(_MotionModel):
                 or node.timeout_s != segment.duration_s
             ):
                 raise ValueError("action graph motion node does not match its segment")
+        expected_success_path = (
+            "observe_initial_object_pose",
+            "validate_initial_observation",
+            *(node.node_id for node in graph_motion_nodes),
+            "observe_terminal_object_pose",
+            "verify_goal",
+            "terminal_completed",
+        )
+        if self.action_graph.success_path_node_ids() != expected_success_path:
+            raise ValueError("action graph motion success path does not match segment order")
         return self
 
     @property

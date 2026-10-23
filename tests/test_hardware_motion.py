@@ -295,6 +295,28 @@ def test_push_plan_rejects_graph_control_mode_tampering() -> None:
         type(plan).model_validate(document)
 
 
+def test_push_plan_rejects_reordered_graph_motion_success_path() -> None:
+    plan = _compile()
+    document = plan.model_dump()
+    edges = document["action_graph"]["edges"]
+    motion_ids = [
+        node["node_id"]
+        for node in document["action_graph"]["nodes"]
+        if node["kind"] == "motion"
+    ]
+    rewired_targets = {
+        "validate_initial_observation": motion_ids[1],
+        motion_ids[1]: motion_ids[0],
+        motion_ids[0]: motion_ids[2],
+    }
+    for edge in edges:
+        if edge["guard"] == "on_success" and edge["source_node_id"] in rewired_targets:
+            edge["target_node_id"] = rewired_targets[edge["source_node_id"]]
+
+    with pytest.raises(ValueError, match="success path does not match"):
+        type(plan).model_validate(document)
+
+
 def test_plan_deadline_uses_quantized_schedule_duration() -> None:
     plan = _compile()
     assert plan.planned_duration_s == pytest.approx(plan.waypoint_count * plan.control_period_s)

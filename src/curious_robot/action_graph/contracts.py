@@ -256,3 +256,14 @@ class ActionGraph(_GraphModel):
         if len(matches) != 1:
             raise ValueError(f"node {node_id} has no deterministic edge for {guard.value}")
         return matches[0].target_node_id
+
+    def success_path_node_ids(self) -> tuple[str, ...]:
+        """Return the unique entry-to-terminal path for normal success outcomes."""
+
+        path = [self.entry_node_id]
+        while path[-1] not in self.terminal_node_ids:
+            following = self.next_node(path[-1], NodeOutcome.SUCCESS)
+            if following is None:
+                raise ValueError("operational success path ended before a terminal node")
+            path.append(following)
+        return tuple(path)
