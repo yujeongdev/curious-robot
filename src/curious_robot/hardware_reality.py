@@ -26,6 +26,7 @@ from curious_robot.lab.ports import PortAuthority, RuntimeIdentity
 from curious_robot.objects import get_object_archetype
 from curious_robot.tasks import get_task_preset
 
+from .action_graph import RuntimeCapabilityManifest, admit_deployment_bundle
 from .hardware_backends import (
     CANONICAL_BACKEND_CONTRACTS,
     HardwareBackendContract,
@@ -43,6 +44,7 @@ from .hardware_interfaces import (
 from .hardware_motion import (
     FrankaPushCalibration,
     HardwareToolPose,
+    compile_franka_deployment_bundle,
     compile_franka_push_plan,
     transform_capability_position,
 )
@@ -118,6 +120,20 @@ class FrankaHardwareReality:
         self.perception = perception
         self.store = artifact_store
         self.push_calibration = push_calibration
+        self.runtime_manifest = RuntimeCapabilityManifest(
+            backend_id=probe.contract.kind.value,
+            executor_abi=probe.contract.executor_abi,
+            supported_graph_schema_versions=("action-graph-v1",),
+            capabilities=probe.contract.action_graph_capabilities,
+            approved_calibration_ids=(push_calibration.calibration_id,),
+            maximum_force_n=probe.readiness.approved_maximum_force_n or 0.0,
+            maximum_speed_m_s=probe.readiness.approved_maximum_speed_m_s or 0.0,
+            realtime_ready=probe.readiness.realtime_host_ready,
+            watchdog_ready=(
+                probe.readiness.independent_safety_ready
+                and probe.readiness.command_timeout_configured
+            ),
+        )
         self.command_timeout_s = command_timeout_s
         self.perception_timeout_s = perception_timeout_s
         self.observation_max_age_s = observation_max_age_s
@@ -254,6 +270,19 @@ class FrankaHardwareReality:
                 command_timeout_s=self.command_timeout_s,
                 observation_timeout_s=self.perception_timeout_s,
             )
+            deployment_bundle = compile_franka_deployment_bundle(
+                motion_plan,
+                validation_artifact_ids=tuple(
+                    sorted((policy_ref.artifact_id, capability_ref.artifact_id))
+                ),
+                executor_abi=self.probe.contract.executor_abi,
+            )
+            admission = admit_deployment_bundle(deployment_bundle, self.runtime_manifest)
+            if not admission.admitted:
+                raise RuntimeError(
+                    "hardware runtime rejected deployment bundle: "
+                    + ", ".join(admission.blockers)
+                )
             preflight = self.transport.validate_motion_plan(
                 motion_plan,
                 self.perception_timeout_s,
@@ -276,6 +305,7 @@ class FrankaHardwareReality:
                 raise ValueError("hardware transport did not arm an independent watchdog")
             result = self.transport.execute_bounded_push(
                 motion_plan=motion_plan,
+                deployment_bundle_id=deployment_bundle.bundle_id,
                 maximum_force_n=motion_plan.maximum_force_n,
                 maximum_speed_m_s=skill.payload.safety.maximum_speed_m_s,
                 command_timeout_s=transport_timeout_s,
@@ -289,6 +319,7 @@ class FrankaHardwareReality:
                 watchdog_token=watchdog_token,
                 motion_plan_id=motion_plan.plan_id,
                 action_graph_id=motion_plan.action_graph.graph_id,
+                deployment_bundle_id=deployment_bundle.bundle_id,
                 calibration_id=motion_plan.calibration_id,
                 maximum_acceleration_m_s2=motion_plan.maximum_linear_acceleration_m_s2,
                 maximum_angular_speed_rad_s=motion_plan.maximum_angular_speed_rad_s,
@@ -351,6 +382,7 @@ class FrankaHardwareReality:
                 object_id=self.push_calibration.object_id,
                 motion_plan_id=motion_plan.plan_id,
                 action_graph_id=motion_plan.action_graph.graph_id,
+                deployment_bundle_id=deployment_bundle.bundle_id,
                 calibration_id=motion_plan.calibration_id,
                 maximum_measured_speed_m_s=result.maximum_measured_speed_m_s,
                 maximum_measured_acceleration_m_s2=(result.maximum_measured_acceleration_m_s2),
@@ -539,6 +571,7 @@ def _validate_push_result(
     watchdog_token: str,
     motion_plan_id: str,
     action_graph_id: str,
+    deployment_bundle_id: str,
     calibration_id: str,
     maximum_acceleration_m_s2: float,
     maximum_angular_speed_rad_s: float,
@@ -548,6 +581,7 @@ def _validate_push_result(
     if (
         result.motion_plan_id != motion_plan_id
         or result.action_graph_id != action_graph_id
+        or result.deployment_bundle_id != deployment_bundle_id
         or result.calibration_id != calibration_id
     ):
         raise ValueError("hardware transport result attests another graph, plan, or calibration")

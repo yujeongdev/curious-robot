@@ -9,6 +9,7 @@ All notable changes to Curious Robot are documented here.
 - Add a typed, content-addressed ActionGraph with observation guards, explicit motion control modes, terminal verification, return-to-agent, and absorbing safe-stop paths.
 - Compile every bounded Franka Cartesian push segment into the graph and require preflight/transport graph-ID attestation.
 - Add content-addressed DeploymentBundle and fail-closed runtime admission for backend capabilities, calibration, safety limits, realtime readiness, and watchdog readiness.
+- Bind each admitted bundle to the exact executable motion-plan hash and enforce admission inside HardwareReality before preflight or watchdog arming.
 - Add CLI graph and deployment-bundle validation commands for field preflight.
 - Add wrist RGB-D intrinsics, frame-artifact, hand-eye calibration, and covariance-bearing vision-pose contracts.
 

@@ -141,6 +141,7 @@ def test_push_plan_has_continuous_guarded_contact_path() -> None:
         validation_artifact_ids=("sha256:" + "f" * 64,),
     )
     assert bundle.action_graph.graph_id == plan.action_graph.graph_id
+    assert bundle.motion_plan_id == plan.plan_id
     assert set(bundle.required_backend_capabilities) == {
         capability
         for node in plan.action_graph.nodes

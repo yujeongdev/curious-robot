@@ -207,7 +207,9 @@ orchestrator. Below a selected policy, a separate content-addressed ActionGraph
 binds observation guards, fixed-controller motion nodes, terminal verification,
 return-to-agent, and absorbing safe-stop paths. Every compiled hardware motion
 segment maps to exactly one graph node. Preflight and transport results must
-attest the same graph, motion-plan, and calibration identities.
+attest the same deployment-bundle, graph, motion-plan, and calibration
+identities. HardwareReality performs bundle admission before transport
+preflight or watchdog arming.
 
 The current hardware push graph declares Cartesian pose control with an
 independent force guard; it does not claim Cartesian impedance or torque

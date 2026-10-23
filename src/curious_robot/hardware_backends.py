@@ -24,6 +24,8 @@ class HardwareBackendContract:
     requires_realtime_host: bool
     state_surface: str
     command_surface: str
+    executor_abi: str = ""
+    action_graph_capabilities: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +42,8 @@ class HardwareReadinessEvidence:
     hardware_component_active: bool = False
     command_controller_active: bool = False
     approved_calibration_id: str | None = None
+    approved_maximum_force_n: float | None = None
+    approved_maximum_speed_m_s: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +67,10 @@ class HardwareBackendProbe:
         blockers.extend(name for name, ready in common.items() if not ready)
         if not self.readiness.approved_calibration_id:
             blockers.append("approved_calibration_id")
+        if not self.readiness.approved_maximum_force_n or self.readiness.approved_maximum_force_n <= 0:
+            blockers.append("approved_maximum_force_n")
+        if not self.readiness.approved_maximum_speed_m_s or self.readiness.approved_maximum_speed_m_s <= 0:
+            blockers.append("approved_maximum_speed_m_s")
         if self.contract.requires_realtime_host and not self.readiness.realtime_host_ready:
             blockers.append("realtime_host_ready")
         if self.contract.kind is HardwareBackendKind.ROS2_CONTROL:
@@ -83,6 +91,15 @@ PYLIBFRANKA_CONTRACT = HardwareBackendContract(
     requires_realtime_host=True,
     command_surface="1 kHz FCI joint/Cartesian position, velocity, or torque control",
     state_surface="Franka RobotState, model, joint state, and estimated external wrench",
+    executor_abi="franka-action-graph-v1",
+    action_graph_capabilities=(
+        "external_object_pose",
+        "observation_quality_guard",
+        "cartesian_pose",
+        "force_guard",
+        "contact_monitor",
+        "task_goal_evaluator",
+    ),
 )
 
 ROS2_CONTROL_CONTRACT = HardwareBackendContract(
@@ -91,6 +108,15 @@ ROS2_CONTROL_CONTRACT = HardwareBackendContract(
     requires_realtime_host=True,
     command_surface="franka_hardware ros2_control position/velocity/effort interfaces",
     state_surface="joint state, Franka semantic state, and TCP ForceTorqueSensor interfaces",
+    executor_abi="franka-action-graph-v1",
+    action_graph_capabilities=(
+        "external_object_pose",
+        "observation_quality_guard",
+        "cartesian_pose",
+        "force_guard",
+        "contact_monitor",
+        "task_goal_evaluator",
+    ),
 )
 
 BACKEND_CONTRACTS = (PYLIBFRANKA_CONTRACT, ROS2_CONTROL_CONTRACT)

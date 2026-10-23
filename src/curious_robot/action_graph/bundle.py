@@ -31,6 +31,7 @@ class DeploymentBundle(_BundleModel):
     object_id: str = Field(min_length=1)
     object_archetype_version: str = Field(min_length=1)
     geometry_hash: str = Field(pattern=SHA256_ID)
+    motion_plan_id: str = Field(pattern=SHA256_ID)
     protocol_binding_id: str = Field(pattern=SHA256_ID)
     calibration_id: str = Field(pattern=SHA256_ID)
     executor_abi: str = Field(min_length=1)

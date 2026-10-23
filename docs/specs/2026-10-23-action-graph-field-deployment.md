@@ -80,6 +80,7 @@ bounded residual을 제안할 수 있지만 모든 출력은 schema, Twin rollou
 현장 배포 단위는 다음 identity를 묶는 content-addressed bundle이어야 한다.
 
 - graph ID와 compiler/schema version
+- executable motion-plan ID와 Cartesian endpoints를 포함한 plan hash
 - task/object/public geometry/protocol IDs
 - capability artifact와 validation report IDs
 - robot/tool/camera calibration IDs
@@ -89,6 +90,10 @@ bounded residual을 제안할 수 있지만 모든 출력은 schema, Twin rollou
 현장 순서는 bundle hash 검증 → backend probe → calibration load → graph dry-run →
 watchdog/IK/collision preflight → inactive-to-active 전환 → 실행 → node trace 저장 →
 safe-stop/deactivate다.
+
+`FrankaHardwareReality`는 이 admission을 advisory CLI로만 두지 않는다. Motion plan을
+bundle에 결합하고 canonical backend runtime manifest와 대조한 뒤에만 transport
+preflight와 watchdog을 시작한다.
 
 ## 6. UI
 

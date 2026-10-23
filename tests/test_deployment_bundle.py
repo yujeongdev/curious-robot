@@ -36,6 +36,7 @@ def _bundle() -> DeploymentBundle:
         object_id="cube",
         object_archetype_version="1.0.0",
         geometry_hash=HASH_C,
+        motion_plan_id=HASH_C,
         protocol_binding_id=HASH_B,
         calibration_id=HASH_A,
         executor_abi="franka-action-graph-v1",

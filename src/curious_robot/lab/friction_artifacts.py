@@ -217,6 +217,7 @@ class RealityDeploymentPayload(_FrictionModel):
     geometry_hash: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     motion_plan_id: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     action_graph_id: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    deployment_bundle_id: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     calibration_id: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     maximum_measured_speed_m_s: float | None = Field(default=None, ge=0.0)
     maximum_measured_acceleration_m_s2: float | None = Field(default=None, ge=0.0)
@@ -244,8 +245,12 @@ class RealityDeploymentPayload(_FrictionModel):
     def validate_attempts(self) -> RealityDeploymentPayload:
         if (self.motion_plan_id is None) != (self.calibration_id is None):
             raise ValueError("hardware plan and calibration IDs must be supplied together")
-        if self.action_graph_id is not None and self.motion_plan_id is None:
-            raise ValueError("hardware action graph requires plan and calibration IDs")
+        if (self.action_graph_id is not None or self.deployment_bundle_id is not None) and (
+            self.motion_plan_id is None
+        ):
+            raise ValueError("hardware action graph and bundle require plan and calibration IDs")
+        if self.deployment_bundle_id is not None and self.action_graph_id is None:
+            raise ValueError("hardware deployment bundle requires an action graph ID")
         motion_measurements = (
             self.maximum_measured_speed_m_s,
             self.maximum_measured_acceleration_m_s2,

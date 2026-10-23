@@ -471,6 +471,7 @@ def compile_franka_deployment_bundle(
         object_id=plan.object_id,
         object_archetype_version=plan.object_archetype_version,
         geometry_hash=plan.geometry_hash,
+        motion_plan_id=plan.plan_id,
         protocol_binding_id=plan.action_graph.protocol_binding_id,
         calibration_id=plan.calibration_id,
         executor_abi=executor_abi,

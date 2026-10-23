@@ -48,6 +48,8 @@ def _ready(**updates: object) -> HardwareReadinessEvidence:
         "hardware_component_active": True,
         "command_controller_active": True,
         "approved_calibration_id": _calibration().calibration_id,
+        "approved_maximum_force_n": 15.0,
+        "approved_maximum_speed_m_s": 0.15,
     }
     values.update(updates)
     return HardwareReadinessEvidence(**values)
@@ -201,6 +203,7 @@ class FakeTransport:
         values = {
             "motion_plan_id": motion_plan.plan_id,
             "action_graph_id": motion_plan.action_graph.graph_id,
+            "deployment_bundle_id": kwargs["deployment_bundle_id"],
             "calibration_id": motion_plan.calibration_id,
             "controller_outcome": "completed",
             "peak_contact_force_n": 4.0,
@@ -323,6 +326,7 @@ def test_hardware_reality_executes_only_guarded_capability(tmp_path) -> None:
     assert deployment.prediction_target_error_m == pytest.approx(0.02)
     assert deployment.motion_plan_id == transport.calls[0]["motion_plan"].plan_id
     assert deployment.action_graph_id == transport.calls[0]["motion_plan"].action_graph.graph_id
+    assert deployment.deployment_bundle_id == transport.calls[0]["deployment_bundle_id"]
     assert deployment.calibration_id == _calibration().calibration_id
     assert deployment.maximum_measured_acceleration_m_s2 == pytest.approx(0.2)
     assert deployment.motion_elapsed_s == pytest.approx(1.0)
@@ -336,6 +340,7 @@ def test_hardware_reality_executes_only_guarded_capability(tmp_path) -> None:
     assert motion_plan.capability_frame_id == "simulation_world"
     legacy_document = dict(deployment_document)
     legacy_document.pop("action_graph_id")
+    legacy_document.pop("deployment_bundle_id")
     assert RealityDeploymentPayload.model_validate(legacy_document).motion_plan_id == (
         deployment.motion_plan_id
     )
@@ -572,6 +577,7 @@ def test_builder_rejects_unapproved_calibration_before_transport_factory(tmp_pat
         {"safety_tripped": True},
         {"motion_plan_id": "sha256:" + "0" * 64},
         {"action_graph_id": "sha256:" + "0" * 64},
+        {"deployment_bundle_id": "sha256:" + "0" * 64},
     ],
 )
 def test_hardware_result_violation_stops_and_records_failure(tmp_path, updates) -> None:  # noqa: ANN001
@@ -595,6 +601,21 @@ def test_failed_motion_preflight_never_arms_or_executes(tmp_path) -> None:
 
     assert result.status == "failed"
     assert transport.preflight_calls
+    assert transport.arm_calls == 0
+    assert transport.calls == []
+    assert transport.safe_stop_calls == 1
+
+
+def test_runtime_bundle_admission_blocks_motion_before_preflight(tmp_path) -> None:
+    _, _, transport, _, reality, request = _hardware_case(tmp_path)
+    reality.runtime_manifest = reality.runtime_manifest.model_copy(
+        update={"capabilities": ("cartesian_pose",)}
+    )
+
+    result = reality.execute(request)
+
+    assert result.status == "failed"
+    assert transport.preflight_calls == []
     assert transport.arm_calls == 0
     assert transport.calls == []
     assert transport.safe_stop_calls == 1
