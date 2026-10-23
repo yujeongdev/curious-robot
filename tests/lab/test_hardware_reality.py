@@ -48,6 +48,8 @@ def _ready(**updates: object) -> HardwareReadinessEvidence:
         "hardware_component_active": True,
         "command_controller_active": True,
         "approved_calibration_id": _calibration().calibration_id,
+        "approved_maximum_force_n": 15.0,
+        "approved_maximum_speed_m_s": 0.15,
     }
     values.update(updates)
     return HardwareReadinessEvidence(**values)
@@ -144,6 +146,8 @@ class FakeTransport:
         self.preflight_calls = []
         self.preflight_feasible = True
         self.preflight_errors = ()
+        self.mutate_graph_during_preflight = False
+        self.mutate_graph_during_execution = False
         self.arm_calls = 0
 
     def read_tool_pose(self, timeout_s: float) -> HardwareToolPose:
@@ -161,8 +165,14 @@ class FakeTransport:
     def validate_motion_plan(self, motion_plan, timeout_s):  # noqa: ANN001, ANN201
         assert timeout_s > 0
         self.preflight_calls.append(motion_plan)
+        if self.mutate_graph_during_preflight:
+            motion_node = next(
+                node for node in motion_plan.action_graph.nodes if node.kind.value == "motion"
+            )
+            motion_node.parameters["phase"] = "tampered"
         return HardwareMotionPreflight(
             plan_id=motion_plan.plan_id,
+            action_graph_id=motion_plan.action_graph.graph_id,
             feasible=self.preflight_feasible,
             checks=(
                 "ik",
@@ -197,8 +207,15 @@ class FakeTransport:
     def execute_bounded_push(self, **kwargs):  # noqa: ANN003, ANN201
         self.calls.append(kwargs)
         motion_plan = kwargs["motion_plan"]
+        if self.mutate_graph_during_execution:
+            motion_node = next(
+                node for node in motion_plan.action_graph.nodes if node.kind.value == "motion"
+            )
+            motion_node.parameters["phase"] = "tampered"
         values = {
             "motion_plan_id": motion_plan.plan_id,
+            "action_graph_id": motion_plan.action_graph.graph_id,
+            "deployment_bundle_id": kwargs["deployment_bundle_id"],
             "calibration_id": motion_plan.calibration_id,
             "controller_outcome": "completed",
             "peak_contact_force_n": 4.0,
@@ -216,7 +233,12 @@ class FakeTransport:
         return HardwarePushResult(**values)
 
 
-def _hardware_case(tmp_path, *, backend=HardwareBackendKind.PYLIBFRANKA):  # noqa: ANN001, ANN201
+def _hardware_case(  # noqa: ANN201
+    tmp_path,  # noqa: ANN001
+    *,
+    backend=HardwareBackendKind.PYLIBFRANKA,
+    monotonic=None,  # noqa: ANN001
+):
     stores = LaboratoryArtifactStores(tmp_path)
     capability_ref = distill_friction_capability(stores, _successful_result(stores))
     skill = DeterministicFrictionSkill.load(stores.agent, capability_ref)
@@ -236,7 +258,7 @@ def _hardware_case(tmp_path, *, backend=HardwareBackendKind.PYLIBFRANKA):  # noq
         transport_factories={backend: lambda: transport},
         push_calibration=_calibration(),
         perception=perception,
-        monotonic=lambda: NOW,
+        monotonic=monotonic or (lambda: NOW),
     )
     decision = skill.begin(
         current_position_m=applicability.validated_initial_position_m,
@@ -308,12 +330,15 @@ def test_hardware_reality_executes_only_guarded_capability(tmp_path) -> None:
     assert decision.request is not None
 
     result = reality.execute(decision.request)
-    deployment = RealityDeploymentPayload.model_validate(stores.agent.get(result.evidence[0]).payload)
+    deployment_document = stores.agent.get(result.evidence[0]).payload
+    deployment = RealityDeploymentPayload.model_validate(deployment_document)
 
     assert result.status == "completed"
     assert deployment.request_id == decision.request.request_id
     assert deployment.prediction_target_error_m == pytest.approx(0.02)
     assert deployment.motion_plan_id == transport.calls[0]["motion_plan"].plan_id
+    assert deployment.action_graph_id == transport.calls[0]["motion_plan"].action_graph.graph_id
+    assert deployment.deployment_bundle_id == transport.calls[0]["deployment_bundle_id"]
     assert deployment.calibration_id == _calibration().calibration_id
     assert deployment.maximum_measured_acceleration_m_s2 == pytest.approx(0.2)
     assert deployment.motion_elapsed_s == pytest.approx(1.0)
@@ -325,6 +350,12 @@ def test_hardware_reality_executes_only_guarded_capability(tmp_path) -> None:
     motion_plan = transport.calls[0]["motion_plan"]
     assert motion_plan.hardware_frame_id == "world"
     assert motion_plan.capability_frame_id == "simulation_world"
+    legacy_document = dict(deployment_document)
+    legacy_document.pop("action_graph_id")
+    legacy_document.pop("deployment_bundle_id")
+    assert RealityDeploymentPayload.model_validate(legacy_document).motion_plan_id == (
+        deployment.motion_plan_id
+    )
     assert transport.preflight_calls == [motion_plan]
     assert any(segment.phase is HardwareMotionPhase.CONTACT_PUSH for segment in motion_plan.segments)
 
@@ -557,6 +588,8 @@ def test_builder_rejects_unapproved_calibration_before_transport_factory(tmp_pat
         {"deadline_enforced": False},
         {"safety_tripped": True},
         {"motion_plan_id": "sha256:" + "0" * 64},
+        {"action_graph_id": "sha256:" + "0" * 64},
+        {"deployment_bundle_id": "sha256:" + "0" * 64},
     ],
 )
 def test_hardware_result_violation_stops_and_records_failure(tmp_path, updates) -> None:  # noqa: ANN001
@@ -582,6 +615,66 @@ def test_failed_motion_preflight_never_arms_or_executes(tmp_path) -> None:
     assert transport.preflight_calls
     assert transport.arm_calls == 0
     assert transport.calls == []
+    assert transport.safe_stop_calls == 1
+
+
+def test_runtime_bundle_admission_blocks_motion_before_preflight(tmp_path) -> None:
+    _, _, transport, _, reality, request = _hardware_case(tmp_path)
+    reality.runtime_manifest = reality.runtime_manifest.model_copy(
+        update={"capabilities": ("cartesian_pose",)}
+    )
+
+    result = reality.execute(request)
+
+    assert result.status == "failed"
+    assert transport.preflight_calls == []
+    assert transport.arm_calls == 0
+    assert transport.calls == []
+    assert transport.safe_stop_calls == 1
+
+
+def test_preflight_delay_exhausts_graph_deadline_before_watchdog_or_motion(tmp_path) -> None:
+    calls = 0
+
+    def delayed_monotonic() -> float:
+        nonlocal calls
+        calls += 1
+        return NOW if calls <= 4 else NOW + 100.0
+
+    _, _, transport, perception, reality, request = _hardware_case(
+        tmp_path,
+        monotonic=delayed_monotonic,
+    )
+
+    result = reality.execute(request)
+
+    assert result.status == "failed"
+    assert transport.arm_calls == 0
+    assert transport.calls == []
+    assert transport.safe_stop_calls == 1
+    assert perception.ended == [f"hardware:{request.arguments['invocation_id']}"]
+
+
+def test_preflight_cannot_mutate_admitted_graph_before_motion(tmp_path) -> None:
+    _, _, transport, _, reality, request = _hardware_case(tmp_path)
+    transport.mutate_graph_during_preflight = True
+
+    result = reality.execute(request)
+
+    assert result.status == "failed"
+    assert transport.arm_calls == 0
+    assert transport.calls == []
+    assert transport.safe_stop_calls == 1
+
+
+def test_transport_cannot_mutate_admitted_graph_and_recompute_attestation(tmp_path) -> None:
+    _, _, transport, _, reality, request = _hardware_case(tmp_path)
+    transport.mutate_graph_during_execution = True
+
+    result = reality.execute(request)
+
+    assert result.status == "failed"
+    assert len(transport.calls) == 1
     assert transport.safe_stop_calls == 1
 
 

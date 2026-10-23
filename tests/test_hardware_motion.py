@@ -4,13 +4,16 @@ import math
 
 import pytest
 
+from curious_robot.action_graph import ActionNodeKind, NodeOutcome
 from curious_robot.hardware_motion import (
     FrankaPushCalibration,
     HardwareMotionPhase,
     HardwareToolPose,
+    compile_franka_deployment_bundle,
     compile_franka_push_plan,
     sample_segment,
 )
+from curious_robot.objects import CUBE_V1
 from curious_robot.protocol import load_default_protocol
 from curious_robot.schemas import ActionCandidate
 
@@ -60,6 +63,8 @@ def _tool_pose(calibration: FrankaPushCalibration) -> HardwareToolPose:
 def _compile(**updates):  # noqa: ANN003, ANN202
     calibration = updates.pop("calibration", _calibration())
     values = {
+        "task_id": "push-cube-v1",
+        "task_version": "1.0.0",
         "action": ActionCandidate(
             action_id="push-diagonal",
             kind="push",
@@ -72,6 +77,8 @@ def _compile(**updates):  # noqa: ANN003, ANN202
         "protocol": load_default_protocol().final_push,
         "capability_frame_id": "simulation_world",
         "capability_object_id": "cube",
+        "object_archetype_version": CUBE_V1.version,
+        "geometry_hash": CUBE_V1.geometry_hash,
         "current_object_position_m": (0.10, 0.00, 0.025),
         "current_object_orientation_xyzw": (0.0, 0.0, 0.0, 1.0),
         "current_tool_pose": _tool_pose(calibration),
@@ -79,6 +86,7 @@ def _compile(**updates):  # noqa: ANN003, ANN202
         "maximum_force_n": 12.0,
         "maximum_speed_m_s": 0.04,
         "command_timeout_s": 30.0,
+        "observation_timeout_s": 2.0,
     }
     values.update(updates)
     return compile_franka_push_plan(**values)
@@ -118,6 +126,27 @@ def test_push_plan_has_continuous_guarded_contact_path() -> None:
     assert plan.calibration_id == _calibration().calibration_id
     assert plan.planned_duration_s <= plan.command_timeout_s
     assert plan.maximum_force_n == pytest.approx(6.0)
+    graph_motion_nodes = tuple(
+        node for node in plan.action_graph.nodes if node.kind is ActionNodeKind.MOTION
+    )
+    assert len(graph_motion_nodes) == len(plan.segments)
+    assert plan.action_graph.object_id == plan.object_id
+    assert plan.action_graph.calibration_id == plan.calibration_id
+    assert plan.action_graph.next_node(
+        graph_motion_nodes[0].node_id,
+        NodeOutcome.SAFETY_TRIP,
+    ) == "terminal_safe_stop"
+    bundle = compile_franka_deployment_bundle(
+        plan,
+        validation_artifact_ids=("sha256:" + "f" * 64,),
+    )
+    assert bundle.action_graph.graph_id == plan.action_graph.graph_id
+    assert bundle.motion_plan_id == plan.plan_id
+    assert set(bundle.required_backend_capabilities) == {
+        capability
+        for node in plan.action_graph.nodes
+        for capability in node.required_capabilities
+    }
 
 
 def test_minimum_jerk_samples_respect_segment_peak_speed() -> None:
@@ -252,6 +281,79 @@ def test_push_plan_rejects_wrong_tool_frame_orientation_and_nonfinite_pose() -> 
                 math.cos(angle / 2.0),
             )
         )
+
+
+def test_push_plan_rejects_graph_control_mode_tampering() -> None:
+    plan = _compile()
+    document = plan.model_dump()
+    motion_node = next(
+        node for node in document["action_graph"]["nodes"] if node["kind"] == "motion"
+    )
+    motion_node["control_mode"] = "joint_torque"
+
+    with pytest.raises(ValueError, match="does not match its segment"):
+        type(plan).model_validate(document)
+
+
+def test_push_plan_rejects_motion_authority_tampering() -> None:
+    plan = _compile()
+    document = plan.model_dump()
+    motion_node = next(
+        node for node in document["action_graph"]["nodes"] if node["kind"] == "motion"
+    )
+    motion_node["authority"] = "supervisor"
+
+    with pytest.raises(ValueError, match="hardware authority"):
+        type(plan).model_validate(document)
+
+
+def test_push_plan_rejects_reordered_graph_motion_success_path() -> None:
+    plan = _compile()
+    document = plan.model_dump()
+    edges = document["action_graph"]["edges"]
+    motion_ids = [
+        node["node_id"]
+        for node in document["action_graph"]["nodes"]
+        if node["kind"] == "motion"
+    ]
+    rewired_targets = {
+        "validate_initial_observation": motion_ids[1],
+        motion_ids[1]: motion_ids[0],
+        motion_ids[0]: motion_ids[2],
+    }
+    for edge in edges:
+        if edge["guard"] == "on_success" and edge["source_node_id"] in rewired_targets:
+            edge["target_node_id"] = rewired_targets[edge["source_node_id"]]
+
+    with pytest.raises(ValueError, match="success path does not match"):
+        type(plan).model_validate(document)
+
+
+def test_push_plan_id_is_canonical_across_parameter_key_order() -> None:
+    plan = _compile()
+    document = plan.model_dump()
+    motion_node = next(
+        node for node in document["action_graph"]["nodes"] if node["kind"] == "motion"
+    )
+    motion_node["parameters"] = dict(reversed(tuple(motion_node["parameters"].items())))
+
+    reordered = type(plan).model_validate(document)
+
+    assert reordered.plan_id == plan.plan_id
+
+
+def test_push_plan_rejects_supervisor_node_semantic_tampering() -> None:
+    plan = _compile()
+    document = plan.model_dump()
+    verify = next(
+        node
+        for node in document["action_graph"]["nodes"]
+        if node["node_id"] == "verify_goal"
+    )
+    verify["authority"] = "reality"
+
+    with pytest.raises(ValueError, match="supervisor node contract"):
+        type(plan).model_validate(document)
 
 
 def test_plan_deadline_uses_quantized_schedule_duration() -> None:

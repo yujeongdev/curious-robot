@@ -3,11 +3,25 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from curious_robot.action_graph import (
+    TERMINAL_TRANSITION_TIMEOUT_S,
+    ActionGraph,
+    ActionNodeKind,
+    DeploymentBundle,
+    DeploymentSafetyEnvelope,
+    MotionControlMode,
+    NodeAuthority,
+    NodeExecutor,
+    NodeOutcome,
+    compile_motion_action_graph,
+    push_protocol_binding_id,
+)
 from curious_robot.protocol import PushProtocol
 from curious_robot.schemas import ActionCandidate
 from curious_robot.trajectory import minimum_jerk_blend, minimum_jerk_duration_s
@@ -124,11 +138,16 @@ class CartesianMotionSegment(_MotionModel):
 
 
 class FrankaPushMotionPlan(_MotionModel):
+    task_id: str
+    task_version: str
     capability_frame_id: str
     hardware_frame_id: str
     object_id: str
+    object_archetype_version: str
+    geometry_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     tool_id: str
     calibration_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    action_graph: ActionGraph
     control_period_s: float = Field(gt=0.0)
     segments: tuple[CartesianMotionSegment, ...]
     maximum_force_n: float = Field(gt=0.0)
@@ -164,20 +183,106 @@ class FrankaPushMotionPlan(_MotionModel):
             raise ValueError("hardware motion duration is not control-period quantized")
         if self.planned_duration_s > self.command_timeout_s:
             raise ValueError("hardware motion plan exceeds command timeout")
+        if (
+            self.action_graph.task_id != self.task_id
+            or self.action_graph.task_version != self.task_version
+            or self.action_graph.object_id != self.object_id
+            or self.action_graph.object_archetype_version != self.object_archetype_version
+            or self.action_graph.geometry_hash != self.geometry_hash
+            or self.action_graph.calibration_id != self.calibration_id
+            or self.action_graph.wall_clock_deadline_s < self.command_timeout_s
+        ):
+            raise ValueError("action graph identity does not match the motion plan")
+        graph_motion_nodes = tuple(
+            node for node in self.action_graph.nodes if node.kind is ActionNodeKind.MOTION
+        )
+        if len(graph_motion_nodes) != len(self.segments):
+            raise ValueError("action graph must bind every motion segment exactly once")
+        for index, (node, segment) in enumerate(
+            zip(graph_motion_nodes, self.segments, strict=True)
+        ):
+            if (
+                node.parameters.get("segment_index") != index
+                or node.control_mode is not MotionControlMode.CARTESIAN_POSE
+                or set(node.required_capabilities)
+                != {"cartesian_pose", "force_guard", "contact_monitor"}
+                or node.parameters.get("phase") != segment.phase.value
+                or node.parameters.get("contact_expectation")
+                != segment.contact_expectation.value
+                or node.timeout_s != segment.duration_s
+            ):
+                raise ValueError("action graph motion node does not match its segment")
+        expected_success_path = (
+            "observe_initial_object_pose",
+            "validate_initial_observation",
+            *(node.node_id for node in graph_motion_nodes),
+            "observe_terminal_object_pose",
+            "verify_goal",
+            "terminal_completed",
+        )
+        if self.action_graph.success_path_node_ids() != expected_success_path:
+            raise ValueError("action graph motion success path does not match segment order")
+        nodes_by_id = {node.node_id: node for node in self.action_graph.nodes}
+        expected_supervisor_contract = {
+            "observe_initial_object_pose": (
+                ActionNodeKind.OBSERVE,
+                NodeAuthority.REALITY,
+                NodeExecutor.PERCEPTION,
+            ),
+            "validate_initial_observation": (
+                ActionNodeKind.GUARD,
+                NodeAuthority.SUPERVISOR,
+                NodeExecutor.SUPERVISOR,
+            ),
+            "observe_terminal_object_pose": (
+                ActionNodeKind.OBSERVE,
+                NodeAuthority.REALITY,
+                NodeExecutor.PERCEPTION,
+            ),
+            "verify_goal": (
+                ActionNodeKind.VERIFY,
+                NodeAuthority.SUPERVISOR,
+                NodeExecutor.SUPERVISOR,
+            ),
+        }
+        if any(
+            (
+                nodes_by_id[node_id].kind,
+                nodes_by_id[node_id].authority,
+                nodes_by_id[node_id].executor,
+            )
+            != expected
+            for node_id, expected in expected_supervisor_contract.items()
+        ):
+            raise ValueError("action graph supervisor node contract does not match the plan")
+        if (
+            self.action_graph.next_node("verify_goal", NodeOutcome.GOAL_MISS)
+            != "terminal_return_to_agent"
+        ):
+            raise ValueError("action graph goal-miss path does not return to agent")
         return self
 
     @property
     def plan_id(self) -> str:
-        digest = hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+        canonical = json.dumps(
+            self.model_dump(mode="json", exclude_none=False),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest = hashlib.sha256(canonical.encode()).hexdigest()
         return f"sha256:{digest}"
 
 
 def compile_franka_push_plan(
     *,
+    task_id: str,
+    task_version: str,
     action: ActionCandidate,
     protocol: PushProtocol,
     capability_frame_id: str,
     capability_object_id: str,
+    object_archetype_version: str,
+    geometry_hash: str,
     current_object_position_m: Vec3,
     current_object_orientation_xyzw: Quat,
     current_tool_pose: HardwareToolPose,
@@ -185,6 +290,7 @@ def compile_franka_push_plan(
     maximum_force_n: float,
     maximum_speed_m_s: float,
     command_timeout_s: float,
+    observation_timeout_s: float,
 ) -> FrankaPushMotionPlan:
     """Compile a capability into a continuous bounded tool-tip path."""
 
@@ -343,12 +449,39 @@ def compile_franka_push_plan(
         _require_inside_workspace(segment.start_position_m, calibration)
         _require_inside_workspace(segment.end_position_m, calibration)
     duration_s = waypoint_count * calibration.control_period_s
+    if duration_s > command_timeout_s:
+        raise ValueError("hardware motion plan exceeds command timeout")
+    action_graph = compile_motion_action_graph(
+        task_id=task_id,
+        task_version=task_version,
+        object_id=calibration.object_id,
+        object_archetype_version=object_archetype_version,
+        geometry_hash=geometry_hash,
+        calibration_id=calibration.calibration_id,
+        protocol_binding_id=push_protocol_binding_id(protocol.model_dump_json(exclude_none=False)),
+        phases=tuple(segment.phase.value for segment in segments),
+        phase_durations_s=tuple(segment.duration_s for segment in segments),
+        contact_expectations=tuple(
+            segment.contact_expectation.value for segment in segments
+        ),
+        observation_timeout_s=observation_timeout_s,
+        wall_clock_deadline_s=(
+            command_timeout_s
+            + 4.0 * observation_timeout_s
+            + TERMINAL_TRANSITION_TIMEOUT_S
+        ),
+    )
     return FrankaPushMotionPlan(
+        task_id=task_id,
+        task_version=task_version,
         capability_frame_id=capability_frame_id,
         hardware_frame_id=calibration.hardware_frame_id,
         object_id=calibration.object_id,
+        object_archetype_version=object_archetype_version,
+        geometry_hash=geometry_hash,
         tool_id=calibration.tool_id,
         calibration_id=calibration.calibration_id,
+        action_graph=action_graph,
         control_period_s=calibration.control_period_s,
         segments=segments,
         maximum_force_n=protocol.safety_stop_fraction * maximum_force_n,
@@ -372,6 +505,45 @@ def transform_capability_position(position_m: Vec3, calibration: FrankaPushCalib
         cosine * position_m[0] - sine * position_m[1] + translation[0],
         sine * position_m[0] + cosine * position_m[1] + translation[1],
         position_m[2] + translation[2],
+    )
+
+
+def compile_franka_deployment_bundle(
+    plan: FrankaPushMotionPlan,
+    *,
+    validation_artifact_ids: tuple[str, ...],
+    executor_abi: str = "franka-action-graph-v1",
+) -> DeploymentBundle:
+    """Package one validated motion plan for fail-closed field admission."""
+
+    required_capabilities = tuple(
+        sorted(
+            {
+                capability
+                for node in plan.action_graph.nodes
+                for capability in node.required_capabilities
+            }
+        )
+    )
+    return DeploymentBundle(
+        bundle_name=f"{plan.task_id}-deployment",
+        task_id=plan.task_id,
+        task_version=plan.task_version,
+        object_id=plan.object_id,
+        object_archetype_version=plan.object_archetype_version,
+        geometry_hash=plan.geometry_hash,
+        motion_plan_id=plan.plan_id,
+        protocol_binding_id=plan.action_graph.protocol_binding_id,
+        calibration_id=plan.calibration_id,
+        executor_abi=executor_abi,
+        required_backend_capabilities=required_capabilities,
+        validation_artifact_ids=validation_artifact_ids,
+        safety=DeploymentSafetyEnvelope(
+            maximum_force_n=plan.maximum_force_n,
+            maximum_speed_m_s=max(segment.maximum_speed_m_s for segment in plan.segments),
+            execution_deadline_s=plan.action_graph.wall_clock_deadline_s,
+        ),
+        action_graph=plan.action_graph,
     )
 
 

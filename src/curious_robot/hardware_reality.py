@@ -23,7 +23,14 @@ from curious_robot.lab.contracts import (
 )
 from curious_robot.lab.friction_artifacts import RealityDeploymentPayload
 from curious_robot.lab.ports import PortAuthority, RuntimeIdentity
+from curious_robot.objects import get_object_archetype
+from curious_robot.tasks import get_task_preset
 
+from .action_graph import (
+    DeploymentBundle,
+    RuntimeCapabilityManifest,
+    admit_deployment_bundle,
+)
 from .hardware_backends import (
     CANONICAL_BACKEND_CONTRACTS,
     HardwareBackendContract,
@@ -40,7 +47,9 @@ from .hardware_interfaces import (
 )
 from .hardware_motion import (
     FrankaPushCalibration,
+    FrankaPushMotionPlan,
     HardwareToolPose,
+    compile_franka_deployment_bundle,
     compile_franka_push_plan,
     transform_capability_position,
 )
@@ -116,6 +125,20 @@ class FrankaHardwareReality:
         self.perception = perception
         self.store = artifact_store
         self.push_calibration = push_calibration
+        self.runtime_manifest = RuntimeCapabilityManifest(
+            backend_id=probe.contract.kind.value,
+            executor_abi=probe.contract.executor_abi,
+            supported_graph_schema_versions=("action-graph-v1",),
+            capabilities=probe.contract.action_graph_capabilities,
+            approved_calibration_ids=(push_calibration.calibration_id,),
+            maximum_force_n=probe.readiness.approved_maximum_force_n or 0.0,
+            maximum_speed_m_s=probe.readiness.approved_maximum_speed_m_s or 0.0,
+            realtime_ready=probe.readiness.realtime_host_ready,
+            watchdog_ready=(
+                probe.readiness.independent_safety_ready
+                and probe.readiness.command_timeout_configured
+            ),
+        )
         self.command_timeout_s = command_timeout_s
         self.perception_timeout_s = perception_timeout_s
         self.observation_max_age_s = observation_max_age_s
@@ -148,6 +171,7 @@ class FrankaHardwareReality:
             self._command_lock.release()
 
     def _execute_serialized(self, request: OperationRequest) -> OperationResult:
+        graph_started_s = self._monotonic()
         arguments = request.arguments
         if not isinstance(arguments, dict):
             return self._failure(request, "arguments_not_object")
@@ -165,6 +189,15 @@ class FrankaHardwareReality:
             policy_ref = _reference(
                 skill.payload.policy_artifact_id,
                 LabArtifactKind.POLICY_ARTIFACT.value,
+            )
+            policy = self.store.get(policy_ref)
+            if not isinstance(policy.payload, dict):
+                raise TypeError("hardware policy payload must be an object")
+            task_id = str(policy.payload.get("task_id", "push-cube-v1"))
+            task = get_task_preset(task_id)
+            archetype = get_object_archetype(
+                task.object_archetype_id,
+                task.object_archetype_version,
             )
             provenance = (policy_ref, capability_ref)
             session_key = f"{capability_ref.artifact_id}:{invocation.invocation_id}"
@@ -225,10 +258,14 @@ class FrankaHardwareReality:
             tool_pose = self.transport.read_tool_pose(self.perception_timeout_s)
             self._validate_tool_pose(tool_pose)
             motion_plan = compile_franka_push_plan(
+                task_id=task.preset_id,
+                task_version=task.version,
                 action=skill.payload.action_template,
                 protocol=skill.payload.protocol.final_push,
                 capability_frame_id=skill.payload.applicability.frame_id,
                 capability_object_id=skill.payload.applicability.object_id,
+                object_archetype_version=archetype.version,
+                geometry_hash=archetype.geometry_hash,
                 current_object_position_m=precommand_observation.position_m,
                 current_object_orientation_xyzw=precommand_observation.orientation_xyzw,
                 current_tool_pose=tool_pose,
@@ -236,29 +273,78 @@ class FrankaHardwareReality:
                 maximum_force_n=skill.payload.safety.maximum_force_n,
                 maximum_speed_m_s=skill.payload.safety.maximum_speed_m_s,
                 command_timeout_s=self.command_timeout_s,
+                observation_timeout_s=self.perception_timeout_s,
             )
+            deployment_bundle = compile_franka_deployment_bundle(
+                motion_plan,
+                validation_artifact_ids=tuple(
+                    sorted((policy_ref.artifact_id, capability_ref.artifact_id))
+                ),
+                executor_abi=self.probe.contract.executor_abi,
+            )
+            admission = admit_deployment_bundle(deployment_bundle, self.runtime_manifest)
+            if not admission.admitted:
+                raise RuntimeError(
+                    "hardware runtime rejected deployment bundle: "
+                    + ", ".join(admission.blockers)
+                )
+            expected_bundle_id = admission.bundle_id
+            canonical_bundle = deployment_bundle.model_dump_json(exclude_none=False)
+            expected_plan_id = motion_plan.plan_id
+            expected_graph_id = motion_plan.action_graph.graph_id
+            canonical_plan = motion_plan.model_dump_json(exclude_none=False)
             preflight = self.transport.validate_motion_plan(
                 motion_plan,
                 self.perception_timeout_s,
             )
-            _validate_preflight(preflight, motion_plan.plan_id)
-            watchdog_token = self.transport.arm_watchdog(self.command_timeout_s)
+            _validate_preflight(
+                preflight,
+                expected_plan_id,
+                expected_graph_id,
+            )
+            motion_plan = FrankaPushMotionPlan.model_validate_json(canonical_plan)
+            deployment_bundle = DeploymentBundle.model_validate_json(canonical_bundle)
+            if (
+                motion_plan.plan_id != expected_plan_id
+                or motion_plan.action_graph.graph_id != expected_graph_id
+                or deployment_bundle.motion_plan_id != expected_plan_id
+                or deployment_bundle.bundle_id != expected_bundle_id
+            ):
+                raise ValueError("hardware preflight mutated the admitted deployment plan")
+            remaining_graph_time_s = _remaining_graph_time_s(
+                started_s=graph_started_s,
+                deadline_s=motion_plan.action_graph.wall_clock_deadline_s,
+                monotonic=self._monotonic,
+            )
+            if motion_plan.planned_duration_s > remaining_graph_time_s:
+                raise TimeoutError("insufficient action-graph time remains for the motion plan")
+            transport_timeout_s = min(self.command_timeout_s, remaining_graph_time_s)
+            watchdog_token = self.transport.arm_watchdog(transport_timeout_s)
             if not watchdog_token:
                 raise ValueError("hardware transport did not arm an independent watchdog")
             result = self.transport.execute_bounded_push(
                 motion_plan=motion_plan,
+                deployment_bundle_id=expected_bundle_id,
                 maximum_force_n=motion_plan.maximum_force_n,
                 maximum_speed_m_s=skill.payload.safety.maximum_speed_m_s,
-                command_timeout_s=self.command_timeout_s,
+                command_timeout_s=transport_timeout_s,
             )
             self._require_open()
+            motion_plan = FrankaPushMotionPlan.model_validate_json(canonical_plan)
+            if (
+                motion_plan.plan_id != expected_plan_id
+                or motion_plan.action_graph.graph_id != expected_graph_id
+            ):
+                raise ValueError("hardware transport mutated the admitted deployment plan")
             _validate_push_result(
                 result,
                 maximum_force_n=motion_plan.maximum_force_n,
                 maximum_speed_m_s=skill.payload.safety.maximum_speed_m_s,
-                command_timeout_s=self.command_timeout_s,
+                command_timeout_s=transport_timeout_s,
                 watchdog_token=watchdog_token,
-                motion_plan_id=motion_plan.plan_id,
+                motion_plan_id=expected_plan_id,
+                action_graph_id=expected_graph_id,
+                deployment_bundle_id=expected_bundle_id,
                 calibration_id=motion_plan.calibration_id,
                 maximum_acceleration_m_s2=motion_plan.maximum_linear_acceleration_m_s2,
                 maximum_angular_speed_rad_s=motion_plan.maximum_angular_speed_rad_s,
@@ -272,6 +358,11 @@ class FrankaHardwareReality:
                 final_observation,
                 expected_episode_id=session.episode.episode_id,
             )
+            _remaining_graph_time_s(
+                started_s=graph_started_s,
+                deadline_s=motion_plan.action_graph.wall_clock_deadline_s,
+                monotonic=self._monotonic,
+            )
             final_position = final_observation.position_m
             hardware_target = transform_capability_position(
                 skill.payload.applicability.validated_target_m,
@@ -280,6 +371,11 @@ class FrankaHardwareReality:
             target_error = math.dist(
                 final_position[:2],
                 hardware_target[:2],
+            )
+            _remaining_graph_time_s(
+                started_s=graph_started_s,
+                deadline_s=motion_plan.action_graph.wall_clock_deadline_s,
+                monotonic=self._monotonic,
             )
             session.attempts.append(
                 {
@@ -310,6 +406,8 @@ class FrankaHardwareReality:
                 frame_id=self.push_calibration.hardware_frame_id,
                 object_id=self.push_calibration.object_id,
                 motion_plan_id=motion_plan.plan_id,
+                action_graph_id=motion_plan.action_graph.graph_id,
+                deployment_bundle_id=expected_bundle_id,
                 calibration_id=motion_plan.calibration_id,
                 maximum_measured_speed_m_s=result.maximum_measured_speed_m_s,
                 maximum_measured_acceleration_m_s2=(result.maximum_measured_acceleration_m_s2),
@@ -497,14 +595,21 @@ def _validate_push_result(
     command_timeout_s: float,
     watchdog_token: str,
     motion_plan_id: str,
+    action_graph_id: str,
+    deployment_bundle_id: str,
     calibration_id: str,
     maximum_acceleration_m_s2: float,
     maximum_angular_speed_rad_s: float,
     maximum_angular_acceleration_rad_s2: float,
     orientation_tolerance_rad: float,
 ) -> None:
-    if result.motion_plan_id != motion_plan_id or result.calibration_id != calibration_id:
-        raise ValueError("hardware transport result attests another plan or calibration")
+    if (
+        result.motion_plan_id != motion_plan_id
+        or result.action_graph_id != action_graph_id
+        or result.deployment_bundle_id != deployment_bundle_id
+        or result.calibration_id != calibration_id
+    ):
+        raise ValueError("hardware transport result attests another graph, plan, or calibration")
     if not result.deadline_enforced or result.watchdog_token != watchdog_token:
         raise ValueError("hardware transport did not attest the armed deadline")
     if result.elapsed_s > command_timeout_s:
@@ -526,15 +631,31 @@ def _validate_push_result(
         raise ValueError("hardware transport returned inconsistent safety status")
 
 
-def _validate_preflight(preflight: HardwareMotionPreflight, plan_id: str) -> None:
-    if preflight.plan_id != plan_id:
-        raise ValueError("hardware preflight attests another motion plan")
+def _validate_preflight(
+    preflight: HardwareMotionPreflight,
+    plan_id: str,
+    action_graph_id: str,
+) -> None:
+    if preflight.plan_id != plan_id or preflight.action_graph_id != action_graph_id:
+        raise ValueError("hardware preflight attests another action graph or motion plan")
     if frozenset(preflight.checks) != REQUIRED_PREFLIGHT_CHECKS or len(preflight.checks) != len(
         REQUIRED_PREFLIGHT_CHECKS
     ):
         raise ValueError("hardware preflight did not perform every required check")
     if not preflight.feasible or preflight.errors:
         raise ValueError("hardware motion plan failed transport preflight")
+
+
+def _remaining_graph_time_s(
+    *,
+    started_s: float,
+    deadline_s: float,
+    monotonic: Callable[[], float],
+) -> float:
+    remaining_s = deadline_s - (monotonic() - started_s)
+    if remaining_s <= 0.0:
+        raise TimeoutError("hardware action graph exceeded its wall-clock deadline")
+    return remaining_s
 
 
 def _reference(artifact_id: str, kind: str) -> ArtifactRef:

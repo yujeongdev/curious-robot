@@ -40,6 +40,8 @@ class HardwareEpisode(_HardwareModel):
 
 class HardwarePushResult(_HardwareModel):
     motion_plan_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    action_graph_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    deployment_bundle_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     calibration_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     controller_outcome: Literal["completed", "safety_stopped", "travel_exhausted"]
     peak_contact_force_n: float = Field(ge=0.0)
@@ -56,6 +58,7 @@ class HardwarePushResult(_HardwareModel):
 
 class HardwareMotionPreflight(_HardwareModel):
     plan_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    action_graph_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     feasible: bool
     checks: tuple[str, ...]
     errors: tuple[str, ...] = ()
@@ -75,6 +78,7 @@ class FrankaHardwareTransport(Protocol):
         self,
         *,
         motion_plan: FrankaPushMotionPlan,
+        deployment_bundle_id: str,
         maximum_force_n: float,
         maximum_speed_m_s: float,
         command_timeout_s: float,

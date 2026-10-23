@@ -7,6 +7,9 @@ Public documentation is organized by purpose rather than implementation date.
 | Architecture | `architecture.md` | Reality/Twin/Evaluator boundaries and data flow |
 | Agent Lab | `agent-lab.md` | UI, event, replay, and capture contracts |
 | Design specs | `designs/` | implementation-facing UI boundaries and interaction rules |
+| Engineering specs | `specs/` | versioned decisions for execution, deployment, and sensor contracts |
+| Plans | `plans/` | ordered implementation slices and acceptance gates |
+| Research | `research/` | external ecosystem findings kept separate from repository decisions |
 | Reproducibility | `reproducibility.md` | playback and re-execution semantics |
 | Validation | `validation.md` | executed capability and honest limits |
 | Roadmap | `roadmap.md` | task/object catalog and T-bar extension |

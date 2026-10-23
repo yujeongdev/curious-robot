@@ -6,6 +6,7 @@ import argparse
 import json
 import threading
 import webbrowser
+from pathlib import Path
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -40,6 +41,17 @@ def main(argv: list[str] | None = None) -> None:
     execute_skill.add_argument("--run", required=True)
     execute_skill.add_argument("--seed", type=int, default=7)
     execute_skill.add_argument("--device", default="cuda:0")
+    graph_validate = subparsers.add_parser(
+        "action-graph-validate",
+        help="validate and identify a persisted deterministic action graph",
+    )
+    graph_validate.add_argument("--graph", required=True)
+    bundle_validate = subparsers.add_parser(
+        "deployment-bundle-validate",
+        help="admit a deployment bundle against a field runtime manifest",
+    )
+    bundle_validate.add_argument("--bundle", required=True)
+    bundle_validate.add_argument("--runtime", required=True)
     web = subparsers.add_parser("web", help="launch the local Agent Lab")
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8765)
@@ -64,8 +76,6 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(2)
         return
     if args.command == "lab-friction":
-        from pathlib import Path
-
         from .lab.friction_runner import run_newton_friction_slice
 
         run_newton_friction_slice(
@@ -92,6 +102,38 @@ def main(argv: list[str] | None = None) -> None:
         decision = execute_from_manifest(args.run, device=args.device, seed=args.seed)
         print(decision.status.value)
         if decision.status.value == "return_to_agent":
+            raise SystemExit(2)
+        return
+    if args.command == "action-graph-validate":
+        from .action_graph import ActionGraph
+
+        graph = ActionGraph.model_validate_json(Path(args.graph).read_text())
+        print(
+            json.dumps(
+                {
+                    "graph_id": graph.graph_id,
+                    "graph_name": graph.graph_name,
+                    "nodes": len(graph.nodes),
+                    "edges": len(graph.edges),
+                    "terminal_node_ids": graph.terminal_node_ids,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+    if args.command == "deployment-bundle-validate":
+        from .action_graph import (
+            DeploymentBundle,
+            RuntimeCapabilityManifest,
+            admit_deployment_bundle,
+        )
+
+        bundle = DeploymentBundle.model_validate_json(Path(args.bundle).read_text())
+        runtime = RuntimeCapabilityManifest.model_validate_json(Path(args.runtime).read_text())
+        admission = admit_deployment_bundle(bundle, runtime)
+        print(admission.model_dump_json(indent=2))
+        if not admission.admitted:
             raise SystemExit(2)
         return
 
