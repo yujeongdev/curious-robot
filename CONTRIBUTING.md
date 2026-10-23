@@ -16,8 +16,14 @@ Python checks:
 ```bash
 uv run ruff format --check src tests
 uv run ruff check src tests
+uv run mypy
 uv run pytest -m "not gpu"
 ```
+
+The strict type check covers the Curo CLI, simulation setup service, and shared
+task description boundary. Warp's untyped runtime calls are excluded; project
+callbacks remain checked. For CLI extensions, follow the
+[native Click command procedure](docs/specs/2026-10-24-task-loading-and-curo-cli.md#4-cli-코드를-나누는-기준).
 
 Frontend checks:
 

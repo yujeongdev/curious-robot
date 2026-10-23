@@ -16,6 +16,14 @@ experiment, belief update, and manipulation decision.
 
 ## Workspace
 
+Agent Lab loads the selected catalog task into the same workspace. Cube and
+T-bar are existing task presets, rather than separate application modes.
+`curo web --task TASK` preselects that task without creating a run; the Run
+button or explicit `--autorun` starts execution. Task changes restore the
+selected task's defaults, and an unknown task or unavailable catalog blocks
+execution. The landing illustration is labeled as a schematic; recorded
+Newton state remains the authority for actual runs.
+
 The desktop layout reserves the primary region for two synchronized Newton
 viewports and the secondary region for the evidence feed:
 
@@ -75,7 +83,7 @@ worlds and compares numerical trajectories.
 uv sync --extra dev --extra web
 corepack pnpm --dir src/web install --frozen-lockfile
 corepack pnpm --dir src/web build
-uv run curious-robot web --open
+uv run curo web --task push-t-bar-v1 --open
 ```
 
 The server is local-only by default. It has no authentication layer and should
