@@ -634,8 +634,17 @@ def run_episode(
             "observe_initial_object_pose",
             "entered",
         )
-        deployment_reality.settle(0.25)
-        deployment_observation = deployment_reality.observe_object_pose()
+        try:
+            deployment_reality.settle(0.25)
+            deployment_observation = deployment_reality.observe_object_pose()
+        except Exception:
+            episode_events.stop_action_graph(
+                action_graph.graph_id,
+                "observe_initial_object_pose",
+                "failed",
+                NodeOutcome.FAILURE,
+            )
+            raise
         episode_events.action_node(
             action_graph.graph_id,
             "observe_initial_object_pose",
