@@ -8,6 +8,12 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from curious_robot.action_graph import (
+    ActionGraph,
+    ActionNodeKind,
+    compile_motion_action_graph,
+    push_protocol_binding_id,
+)
 from curious_robot.protocol import PushProtocol
 from curious_robot.schemas import ActionCandidate
 from curious_robot.trajectory import minimum_jerk_blend, minimum_jerk_duration_s
@@ -129,6 +135,7 @@ class FrankaPushMotionPlan(_MotionModel):
     object_id: str
     tool_id: str
     calibration_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    action_graph: ActionGraph
     control_period_s: float = Field(gt=0.0)
     segments: tuple[CartesianMotionSegment, ...]
     maximum_force_n: float = Field(gt=0.0)
@@ -164,6 +171,28 @@ class FrankaPushMotionPlan(_MotionModel):
             raise ValueError("hardware motion duration is not control-period quantized")
         if self.planned_duration_s > self.command_timeout_s:
             raise ValueError("hardware motion plan exceeds command timeout")
+        if (
+            self.action_graph.object_id != self.object_id
+            or self.action_graph.calibration_id != self.calibration_id
+            or self.action_graph.wall_clock_deadline_s < self.command_timeout_s
+        ):
+            raise ValueError("action graph identity does not match the motion plan")
+        graph_motion_nodes = tuple(
+            node for node in self.action_graph.nodes if node.kind is ActionNodeKind.MOTION
+        )
+        if len(graph_motion_nodes) != len(self.segments):
+            raise ValueError("action graph must bind every motion segment exactly once")
+        for index, (node, segment) in enumerate(
+            zip(graph_motion_nodes, self.segments, strict=True)
+        ):
+            if (
+                node.parameters.get("segment_index") != index
+                or node.parameters.get("phase") != segment.phase.value
+                or node.parameters.get("contact_expectation")
+                != segment.contact_expectation.value
+                or node.timeout_s != segment.duration_s
+            ):
+                raise ValueError("action graph motion node does not match its segment")
         return self
 
     @property
@@ -185,6 +214,7 @@ def compile_franka_push_plan(
     maximum_force_n: float,
     maximum_speed_m_s: float,
     command_timeout_s: float,
+    observation_timeout_s: float,
 ) -> FrankaPushMotionPlan:
     """Compile a capability into a continuous bounded tool-tip path."""
 
@@ -343,12 +373,25 @@ def compile_franka_push_plan(
         _require_inside_workspace(segment.start_position_m, calibration)
         _require_inside_workspace(segment.end_position_m, calibration)
     duration_s = waypoint_count * calibration.control_period_s
+    action_graph = compile_motion_action_graph(
+        object_id=calibration.object_id,
+        calibration_id=calibration.calibration_id,
+        protocol_binding_id=push_protocol_binding_id(protocol.model_dump_json(exclude_none=False)),
+        phases=tuple(segment.phase.value for segment in segments),
+        phase_durations_s=tuple(segment.duration_s for segment in segments),
+        contact_expectations=tuple(
+            segment.contact_expectation.value for segment in segments
+        ),
+        observation_timeout_s=observation_timeout_s,
+        wall_clock_deadline_s=command_timeout_s + 2.0 * observation_timeout_s,
+    )
     return FrankaPushMotionPlan(
         capability_frame_id=capability_frame_id,
         hardware_frame_id=calibration.hardware_frame_id,
         object_id=calibration.object_id,
         tool_id=calibration.tool_id,
         calibration_id=calibration.calibration_id,
+        action_graph=action_graph,
         control_period_s=calibration.control_period_s,
         segments=segments,
         maximum_force_n=protocol.safety_stop_fraction * maximum_force_n,

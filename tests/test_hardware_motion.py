@@ -4,6 +4,7 @@ import math
 
 import pytest
 
+from curious_robot.action_graph import ActionNodeKind, NodeOutcome
 from curious_robot.hardware_motion import (
     FrankaPushCalibration,
     HardwareMotionPhase,
@@ -79,6 +80,7 @@ def _compile(**updates):  # noqa: ANN003, ANN202
         "maximum_force_n": 12.0,
         "maximum_speed_m_s": 0.04,
         "command_timeout_s": 30.0,
+        "observation_timeout_s": 2.0,
     }
     values.update(updates)
     return compile_franka_push_plan(**values)
@@ -118,6 +120,16 @@ def test_push_plan_has_continuous_guarded_contact_path() -> None:
     assert plan.calibration_id == _calibration().calibration_id
     assert plan.planned_duration_s <= plan.command_timeout_s
     assert plan.maximum_force_n == pytest.approx(6.0)
+    graph_motion_nodes = tuple(
+        node for node in plan.action_graph.nodes if node.kind is ActionNodeKind.MOTION
+    )
+    assert len(graph_motion_nodes) == len(plan.segments)
+    assert plan.action_graph.object_id == plan.object_id
+    assert plan.action_graph.calibration_id == plan.calibration_id
+    assert plan.action_graph.next_node(
+        graph_motion_nodes[0].node_id,
+        NodeOutcome.SAFETY_TRIP,
+    ) == "terminal_safe_stop"
 
 
 def test_minimum_jerk_samples_respect_segment_peak_speed() -> None:

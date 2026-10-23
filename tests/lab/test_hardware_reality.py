@@ -163,6 +163,7 @@ class FakeTransport:
         self.preflight_calls.append(motion_plan)
         return HardwareMotionPreflight(
             plan_id=motion_plan.plan_id,
+            action_graph_id=motion_plan.action_graph.graph_id,
             feasible=self.preflight_feasible,
             checks=(
                 "ik",
@@ -199,6 +200,7 @@ class FakeTransport:
         motion_plan = kwargs["motion_plan"]
         values = {
             "motion_plan_id": motion_plan.plan_id,
+            "action_graph_id": motion_plan.action_graph.graph_id,
             "calibration_id": motion_plan.calibration_id,
             "controller_outcome": "completed",
             "peak_contact_force_n": 4.0,
@@ -314,6 +316,7 @@ def test_hardware_reality_executes_only_guarded_capability(tmp_path) -> None:
     assert deployment.request_id == decision.request.request_id
     assert deployment.prediction_target_error_m == pytest.approx(0.02)
     assert deployment.motion_plan_id == transport.calls[0]["motion_plan"].plan_id
+    assert deployment.action_graph_id == transport.calls[0]["motion_plan"].action_graph.graph_id
     assert deployment.calibration_id == _calibration().calibration_id
     assert deployment.maximum_measured_acceleration_m_s2 == pytest.approx(0.2)
     assert deployment.motion_elapsed_s == pytest.approx(1.0)
@@ -557,6 +560,7 @@ def test_builder_rejects_unapproved_calibration_before_transport_factory(tmp_pat
         {"deadline_enforced": False},
         {"safety_tripped": True},
         {"motion_plan_id": "sha256:" + "0" * 64},
+        {"action_graph_id": "sha256:" + "0" * 64},
     ],
 )
 def test_hardware_result_violation_stops_and_records_failure(tmp_path, updates) -> None:  # noqa: ANN001

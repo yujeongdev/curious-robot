@@ -236,12 +236,17 @@ class FrankaHardwareReality:
                 maximum_force_n=skill.payload.safety.maximum_force_n,
                 maximum_speed_m_s=skill.payload.safety.maximum_speed_m_s,
                 command_timeout_s=self.command_timeout_s,
+                observation_timeout_s=self.perception_timeout_s,
             )
             preflight = self.transport.validate_motion_plan(
                 motion_plan,
                 self.perception_timeout_s,
             )
-            _validate_preflight(preflight, motion_plan.plan_id)
+            _validate_preflight(
+                preflight,
+                motion_plan.plan_id,
+                motion_plan.action_graph.graph_id,
+            )
             watchdog_token = self.transport.arm_watchdog(self.command_timeout_s)
             if not watchdog_token:
                 raise ValueError("hardware transport did not arm an independent watchdog")
@@ -259,6 +264,7 @@ class FrankaHardwareReality:
                 command_timeout_s=self.command_timeout_s,
                 watchdog_token=watchdog_token,
                 motion_plan_id=motion_plan.plan_id,
+                action_graph_id=motion_plan.action_graph.graph_id,
                 calibration_id=motion_plan.calibration_id,
                 maximum_acceleration_m_s2=motion_plan.maximum_linear_acceleration_m_s2,
                 maximum_angular_speed_rad_s=motion_plan.maximum_angular_speed_rad_s,
@@ -310,6 +316,7 @@ class FrankaHardwareReality:
                 frame_id=self.push_calibration.hardware_frame_id,
                 object_id=self.push_calibration.object_id,
                 motion_plan_id=motion_plan.plan_id,
+                action_graph_id=motion_plan.action_graph.graph_id,
                 calibration_id=motion_plan.calibration_id,
                 maximum_measured_speed_m_s=result.maximum_measured_speed_m_s,
                 maximum_measured_acceleration_m_s2=(result.maximum_measured_acceleration_m_s2),
@@ -497,14 +504,19 @@ def _validate_push_result(
     command_timeout_s: float,
     watchdog_token: str,
     motion_plan_id: str,
+    action_graph_id: str,
     calibration_id: str,
     maximum_acceleration_m_s2: float,
     maximum_angular_speed_rad_s: float,
     maximum_angular_acceleration_rad_s2: float,
     orientation_tolerance_rad: float,
 ) -> None:
-    if result.motion_plan_id != motion_plan_id or result.calibration_id != calibration_id:
-        raise ValueError("hardware transport result attests another plan or calibration")
+    if (
+        result.motion_plan_id != motion_plan_id
+        or result.action_graph_id != action_graph_id
+        or result.calibration_id != calibration_id
+    ):
+        raise ValueError("hardware transport result attests another graph, plan, or calibration")
     if not result.deadline_enforced or result.watchdog_token != watchdog_token:
         raise ValueError("hardware transport did not attest the armed deadline")
     if result.elapsed_s > command_timeout_s:
@@ -526,9 +538,13 @@ def _validate_push_result(
         raise ValueError("hardware transport returned inconsistent safety status")
 
 
-def _validate_preflight(preflight: HardwareMotionPreflight, plan_id: str) -> None:
-    if preflight.plan_id != plan_id:
-        raise ValueError("hardware preflight attests another motion plan")
+def _validate_preflight(
+    preflight: HardwareMotionPreflight,
+    plan_id: str,
+    action_graph_id: str,
+) -> None:
+    if preflight.plan_id != plan_id or preflight.action_graph_id != action_graph_id:
+        raise ValueError("hardware preflight attests another action graph or motion plan")
     if frozenset(preflight.checks) != REQUIRED_PREFLIGHT_CHECKS or len(preflight.checks) != len(
         REQUIRED_PREFLIGHT_CHECKS
     ):

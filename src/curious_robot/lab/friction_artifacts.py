@@ -216,6 +216,7 @@ class RealityDeploymentPayload(_FrictionModel):
     object_archetype_version: str = Field(default="1.0.0", min_length=1)
     geometry_hash: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     motion_plan_id: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    action_graph_id: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     calibration_id: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     maximum_measured_speed_m_s: float | None = Field(default=None, ge=0.0)
     maximum_measured_acceleration_m_s2: float | None = Field(default=None, ge=0.0)
@@ -241,8 +242,11 @@ class RealityDeploymentPayload(_FrictionModel):
 
     @model_validator(mode="after")
     def validate_attempts(self) -> RealityDeploymentPayload:
-        if (self.motion_plan_id is None) != (self.calibration_id is None):
-            raise ValueError("hardware plan and calibration IDs must be supplied together")
+        hardware_ids = (self.motion_plan_id, self.action_graph_id, self.calibration_id)
+        if any(value is not None for value in hardware_ids) and not all(
+            value is not None for value in hardware_ids
+        ):
+            raise ValueError("hardware plan, action graph, and calibration IDs must be supplied together")
         motion_measurements = (
             self.maximum_measured_speed_m_s,
             self.maximum_measured_acceleration_m_s2,
