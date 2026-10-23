@@ -130,6 +130,13 @@ class ActionGraph(_GraphModel):
             for node_id in self.terminal_node_ids
         ):
             raise ValueError("terminal IDs must reference terminal or safe-stop nodes")
+        all_terminal_kind_nodes = {
+            node.node_id
+            for node in self.nodes
+            if node.kind in {ActionNodeKind.TERMINAL, ActionNodeKind.SAFE_STOP}
+        }
+        if set(self.terminal_node_ids) != all_terminal_kind_nodes:
+            raise ValueError("every terminal-kind node must be declared and absorbing")
         if not any(
             nodes_by_id[node_id].kind is ActionNodeKind.SAFE_STOP
             for node_id in self.terminal_node_ids

@@ -205,7 +205,21 @@ def test_graph_rejects_safe_stop_omitted_from_terminal_declarations() -> None:
         node_id for node_id in graph.terminal_node_ids if node_id != "terminal_safe_stop"
     )
 
-    with pytest.raises(ValidationError, match="safe-stop terminal"):
+    with pytest.raises(ValidationError, match="terminal-kind node"):
+        ActionGraph.model_validate(
+            {**graph.model_dump(), "terminal_node_ids": terminals}
+        )
+
+
+def test_graph_rejects_regular_terminal_omitted_from_declarations() -> None:
+    graph = _compiled_graph()
+    terminals = tuple(
+        node_id
+        for node_id in graph.terminal_node_ids
+        if node_id != "terminal_return_to_agent"
+    )
+
+    with pytest.raises(ValidationError, match="terminal-kind node"):
         ActionGraph.model_validate(
             {**graph.model_dump(), "terminal_node_ids": terminals}
         )
