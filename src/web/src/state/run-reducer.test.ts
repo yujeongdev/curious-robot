@@ -76,6 +76,19 @@ describe("run reducer", () => {
     expect(reduceRunEvent(rejected, valid).actionGraphContractError).toMatch(/does not match/i);
   });
 
+  it("flags a transition to an unknown node in the admitted graph", () => {
+    const compiledIndex = demoEvents.findIndex((event) => event.type === "action.graph_compiled");
+    const admitted = reduceRunEvents(demoEvents.slice(0, compiledIndex + 1));
+    const transition = demoEvents.find((event) => event.type === "action.node_transitioned")!;
+    const invalid = {
+      ...transition,
+      event_id: "unknown-node-transition",
+      sequence: admitted.lastSequence + 1,
+      payload: { ...transition.payload, node_id: "unknown_node" },
+    };
+    expect(reduceRunEvent(admitted, invalid).actionGraphContractError).toMatch(/unknown action graph node/i);
+  });
+
   it("retains independent Reality and Twin frames across interleaved events and seek", () => {
     const beliefEvent = demoEvents.find(
       (event) => event.type === "simulation.visual_frame" && event.payload.scene === "belief",

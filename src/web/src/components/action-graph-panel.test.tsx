@@ -29,6 +29,8 @@ describe("ActionGraphPanel", () => {
     expect(screen.getByText("Verify goal → Return to agent")).toBeVisible();
     expect(screen.getByText("Operational node → Safe stop")).toBeVisible();
     expect(screen.getByText("action-graph-v1")).toBeVisible();
+    expect(screen.getByText(/hardware · cartesian pose · 5\.0 s/i)).toBeVisible();
+    expect(screen.getAllByText(/cartesian_pose · force_guard · contact_monitor/i)).toHaveLength(3);
   });
 
   it("renders a compact honest empty state before graph admission", () => {
@@ -56,5 +58,11 @@ describe("ActionGraphPanel", () => {
     render(<><ActionGraphPanel run={run} /><ActionGraphPanel run={run} /></>);
     const ids = screen.getAllByRole("heading", { name: "Action graph" }).map((heading) => heading.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("shows a latched graph contract error to the operator", () => {
+    const run = { ...reduceRunEvents(demoEvents), actionGraphContractError: "Unknown action graph node: corrupted_node" };
+    render(<ActionGraphPanel run={run} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Unknown action graph node");
   });
 });

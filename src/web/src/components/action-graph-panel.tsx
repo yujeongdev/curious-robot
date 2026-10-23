@@ -64,6 +64,7 @@ function NodeRow({ node, state, compact = false }: { node: ActionGraphNode; stat
       <span className="action-node-copy">
         <strong>{nodeLabel(node)}</strong>
         {!compact && <small>{node.authority} · {node.control_mode?.replaceAll("_", " ") ?? node.executor.replaceAll("_", " ")} · {node.timeout_s.toFixed(node.timeout_s < .01 ? 3 : 1)} s</small>}
+        {!compact && node.required_capabilities.length > 0 && <span className="action-node-capabilities">{node.required_capabilities.join(" · ")}</span>}
       </span>
       <b>{stateLabel(state)}</b>
     </li>

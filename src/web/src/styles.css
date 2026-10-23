@@ -179,6 +179,7 @@ a { color: inherit; text-decoration: none; }
 .action-node-copy strong, .action-node-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-node-copy strong { color: var(--text-secondary); font-size: 1rem; text-transform: capitalize; }
 .action-node-copy small { margin-top: 2px; color: var(--text-muted); font-family: "IBM Plex Mono", monospace; font-size: .62rem; }
+.action-node-capabilities { margin-top: 2px; overflow: hidden; color: var(--text-muted); font-family: "IBM Plex Mono", monospace; font-size: .62rem; text-overflow: ellipsis; white-space: nowrap; }
 .action-node > b { color: currentcolor; font-family: "IBM Plex Mono", monospace; font-size: 1rem; font-weight: 400; text-transform: uppercase; }
 .action-graph-window .action-node > b { display: none; }
 .action-graph-safety { min-height: 44px; display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 7px; border-top: 1px solid var(--border); padding: 7px 12px; color: var(--text-secondary); font-size: 1rem; }

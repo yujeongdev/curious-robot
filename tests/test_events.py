@@ -179,6 +179,29 @@ def test_action_node_transition_is_observation_not_an_advance_command() -> None:
             outcome=NodeOutcome.FAILURE,
         )
 
+
+@pytest.mark.parametrize(
+    ("state", "outcome"),
+    [
+        ("failed", NodeOutcome.FAILURE),
+        ("safety_trip", NodeOutcome.SAFETY_TRIP),
+        ("goal_miss", NodeOutcome.GOAL_MISS),
+    ],
+)
+def test_action_node_terminal_outcomes_remain_distinct(
+    state: str,
+    outcome: NodeOutcome,
+) -> None:
+    graph = action_graph()
+    transition = ActionNodeTransitionedPayload(
+        graph_id=graph.graph_id,
+        node_id="verify_goal",
+        state=state,
+        outcome=outcome,
+    )
+    assert transition.state == state
+    assert transition.outcome is outcome
+
 def test_public_validation_blocks_truth_fields_sentinels_and_nonfinite_values() -> None:
     with pytest.raises(EventContractError, match="hidden_mass_kg"):
         validate_public_data({"result": {"hidden_mass_kg": 0.42}})

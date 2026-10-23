@@ -49,6 +49,23 @@ describe("agent event boundary", () => {
     expect(compiled.payload.graph_id).toBe(`sha256:${digest}`);
   });
 
+  it("rejects graph topology references to missing nodes", () => {
+    const compiled = demoEvents.find((event) => event.type === "action.graph_compiled")!;
+    const graph = compiled.payload.graph as Record<string, unknown>;
+    expect(() => actionGraphCompiledPayloadSchema.parse({
+      ...compiled.payload,
+      graph: { ...graph, entry_node_id: "missing_entry" },
+    })).toThrow(/entry node must exist/i);
+    expect(() => actionGraphCompiledPayloadSchema.parse({
+      ...compiled.payload,
+      graph: { ...graph, terminal_node_ids: ["missing_terminal"] },
+    })).toThrow(/terminal node must exist/i);
+    expect(() => actionGraphCompiledPayloadSchema.parse({
+      ...compiled.payload,
+      graph: { ...graph, edges: [{ source_node_id: "missing", target_node_id: "also_missing", guard: "on_success" }] },
+    })).toThrow(/edge nodes must exist/i);
+  });
+
   it("accepts versioned public compound geometry without physical parameters", () => {
     const visual = demoEvents.find((event) => event.type === "simulation.visual_frame")!;
     const parsed = parseAgentEvent({
