@@ -141,18 +141,18 @@ def test_graph_rejects_unbounded_cycles() -> None:
         edge
         for edge in graph.edges
         if not (
-            edge.source_node_id == "verify_goal"
-            and edge.guard is EdgeGuard.ON_GOAL_MISS
+            edge.source_node_id == "observe_terminal_object_pose"
+            and edge.guard is EdgeGuard.ON_SUCCESS
         )
     ) + (
         ActionGraphEdge(
-            source_node_id="verify_goal",
+            source_node_id="observe_terminal_object_pose",
             target_node_id="observe_initial_object_pose",
-            guard=EdgeGuard.ON_GOAL_MISS,
+            guard=EdgeGuard.ON_SUCCESS,
         ),
         ActionGraphEdge(
             source_node_id="observe_initial_object_pose",
-            target_node_id="terminal_return_to_agent",
+            target_node_id="verify_goal",
             guard=EdgeGuard.ON_SAFETY_TRIP,
         ),
     )
@@ -241,4 +241,19 @@ def test_graph_rejects_operational_node_without_success_transition() -> None:
     )
 
     with pytest.raises(ValidationError, match="requires a success edge"):
+        ActionGraph.model_validate({**graph.model_dump(), "edges": edges})
+
+
+def test_graph_rejects_verification_without_return_to_agent_goal_miss() -> None:
+    graph = _compiled_graph()
+    edges = tuple(
+        edge
+        for edge in graph.edges
+        if not (
+            edge.source_node_id == "verify_goal"
+            and edge.guard is EdgeGuard.ON_GOAL_MISS
+        )
+    )
+
+    with pytest.raises(ValidationError, match="requires a goal-miss edge"):
         ActionGraph.model_validate({**graph.model_dump(), "edges": edges})

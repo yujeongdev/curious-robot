@@ -199,6 +199,18 @@ def validate_camera_frame_binding(
         raise ValueError("camera frame and robot state exceed the synchronization bound")
 
 
+def validate_pose_estimate_binding(
+    estimate: VisionPoseEstimate,
+    frame: CameraFrameObservation,
+) -> None:
+    """Require a pose estimate to cite the supplied camera observation and episode."""
+
+    if estimate.episode_id != frame.episode_id:
+        raise ValueError("vision estimate episode does not match the camera frame")
+    if frame.observation_id not in estimate.contributing_frame_ids:
+        raise ValueError("vision estimate does not cite the supplied camera observation")
+
+
 def _content_id(document: str) -> str:
     return f"sha256:{hashlib.sha256(document.encode()).hexdigest()}"
 

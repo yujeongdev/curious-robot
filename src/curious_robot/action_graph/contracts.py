@@ -176,6 +176,22 @@ class ActionGraph(_GraphModel):
                 raise ValueError("every operational node requires a success edge")
             if EdgeGuard.ON_FAILURE not in guards:
                 raise ValueError("every operational node requires a failure edge")
+            if node.kind is ActionNodeKind.VERIFY:
+                if EdgeGuard.ON_GOAL_MISS not in guards:
+                    raise ValueError("every verification node requires a goal-miss edge")
+                goal_miss_target = next(
+                    edge.target_node_id
+                    for edge in outgoing[node.node_id]
+                    if edge.guard is EdgeGuard.ON_GOAL_MISS
+                )
+                target = nodes_by_id[goal_miss_target]
+                if (
+                    target.kind is not ActionNodeKind.TERMINAL
+                    or target.parameters.get("outcome") != "return_to_agent"
+                ):
+                    raise ValueError("verification goal miss must return to agent")
+            elif EdgeGuard.ON_GOAL_MISS in guards:
+                raise ValueError("only verification nodes may declare goal-miss edges")
             failure_target = next(
                 edge.target_node_id
                 for edge in outgoing[node.node_id]

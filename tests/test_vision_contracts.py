@@ -9,6 +9,7 @@ from curious_robot.vision import (
     VisionPoseEstimate,
     WristCameraCalibration,
     validate_camera_frame_binding,
+    validate_pose_estimate_binding,
 )
 
 HASH_A = "sha256:" + "a" * 64
@@ -115,6 +116,34 @@ def test_camera_frame_contains_artifact_provenance_but_no_hidden_pose() -> None:
             frame.model_copy(update={"robot_state_monotonic_s": 10.1}),
             intrinsics,
             calibration,
+        )
+    estimate = VisionPoseEstimate(
+        estimate_id=HASH_A,
+        episode_id=frame.episode_id,
+        object_id="t-bar",
+        frame_id="franka_base",
+        position_m=(0.1, 0.0, 0.02),
+        orientation_xyzw=(0.0, 0.0, 0.0, 1.0),
+        covariance_6x6=(0.0,) * 36,
+        contributing_frame_ids=(frame.observation_id,),
+        estimator_id="tbar-depth-registration",
+        estimator_version="1.0.0",
+        maximum_corner_residual_m=0.0,
+        rms_corner_residual_m=0.0,
+        occlusion_fraction=0.0,
+        valid_depth_fraction=1.0,
+        captured_monotonic_s=frame.captured_monotonic_s,
+    )
+    validate_pose_estimate_binding(estimate, frame)
+    with pytest.raises(ValueError, match="episode"):
+        validate_pose_estimate_binding(
+            estimate.model_copy(update={"episode_id": "other-episode"}),
+            frame,
+        )
+    with pytest.raises(ValueError, match="does not cite"):
+        validate_pose_estimate_binding(
+            estimate.model_copy(update={"contributing_frame_ids": (HASH_B,)}),
+            frame,
         )
 
 
