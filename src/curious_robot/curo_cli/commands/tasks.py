@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from ..core import Operation, Report
+from ..core import CommandFailure, Operation, Report
 
 
 def task_document(task_id: str) -> Report:
@@ -51,4 +51,8 @@ def list_tasks() -> Report:
 @click.argument("task_id")
 def show_task(task_id: str) -> Report:
     """Inspect a task, goal and public geometry."""
-    return {"schema_version": "curo-task-v1", "status": "passed", **task_document(task_id)}
+    try:
+        document = task_document(task_id)
+    except KeyError as error:
+        raise CommandFailure(error, context={"task_id": task_id}, exit_code=2) from error
+    return {"schema_version": "curo-task-v1", "status": "passed", **document}

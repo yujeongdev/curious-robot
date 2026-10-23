@@ -149,11 +149,12 @@ def test_setup_cli_failure_is_one_json_result(tmp_path, monkeypatch, capsys) -> 
     monkeypatch.setattr(sim_setup, "_build_prior_world", Mock(side_effect=RuntimeError("no GPU")))
     with pytest.raises(SystemExit) as error:
         main(["sim", "setup", "--task", "push-cube-v1", "--output", str(tmp_path / "setup")])
-    assert error.value.code == 2
+    assert error.value.code == 1
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "failed"
     assert report["purpose"] == "prior_only_setup_smoke"
     assert report["error"]["message"] == "no GPU"
+    assert report["error"]["code"] == "runtime_error"
 
 
 @pytest.mark.parametrize(
@@ -240,6 +241,9 @@ def test_concurrent_setup_requests_cannot_replace_owned_report(tmp_path) -> None
         )
         try:
             assert initialized.wait(timeout=5)
+            active_report = json.loads((tmp_path / "setup_report.json").read_text())
+            assert active_report["status"] == "failed"
+            assert active_report["error"]["code"] == "setup_incomplete"
             with pytest.raises(FileExistsError):
                 sim_setup.setup_simulation(
                     task_id="push-t-bar-v1",
@@ -279,9 +283,61 @@ def test_reduced_scene_can_step_without_robot_joint_arrays(tmp_path) -> None:
         return world
 
     report = sim_setup.setup_simulation(
-        task_id="push-cube-v1", output_directory=tmp_path, steps=1,
-        include_robot=False, world_factory=build,
+        task_id="push-cube-v1",
+        output_directory=tmp_path,
+        steps=1,
+        include_robot=False,
+        world_factory=build,
     )
     assert report["status"] == "passed"
     assert report["configuration"]["include_robot"] is False
     assert report["checks"]["finite_state"] is True
+
+
+def test_interrupted_setup_keeps_a_readable_failure_report(tmp_path) -> None:
+    worlds = []
+
+    def build(_belief, config):
+        world = FakeWorld(config)
+        world.step = Mock(side_effect=KeyboardInterrupt)
+        worlds.append(world)
+        return world
+
+    with pytest.raises(KeyboardInterrupt):
+        sim_setup.setup_simulation(
+            task_id="push-cube-v1", output_directory=tmp_path, steps=1, world_factory=build
+        )
+    report = json.loads((tmp_path / "setup_report.json").read_text())
+    assert report["status"] == "failed"
+    assert report["error"]["code"] == "setup_incomplete"
+    worlds[0].close.assert_called_once()
+
+
+def test_nonfinite_simulation_time_is_a_validation_failure(tmp_path) -> None:
+    def build(_belief, config):
+        world = FakeWorld(config)
+        world.sim_time_s = float("nan")
+        return world
+
+    report = sim_setup.setup_simulation(
+        task_id="push-cube-v1", output_directory=tmp_path, steps=1, world_factory=build
+    )
+    assert report["status"] == "failed"
+    assert report["error"]["code"] == "validation_failed"
+    assert "simulation time" in report["error"]["message"]
+    assert json.loads((tmp_path / "setup_report.json").read_text()) == report
+
+
+def test_report_serialization_failure_retains_safe_runtime_evidence(tmp_path) -> None:
+    def build(_belief, config):
+        world = FakeWorld(config)
+        world.world_instance_id = float("nan")
+        return world
+
+    report = sim_setup.setup_simulation(
+        task_id="push-cube-v1", output_directory=tmp_path, steps=1, world_factory=build
+    )
+    assert report["status"] == "failed"
+    assert report["error"]["code"] == "runtime_error"
+    assert report["checks"]["completed_steps"] == 1
+    assert json.loads((tmp_path / "setup_report.json").read_text()) == report

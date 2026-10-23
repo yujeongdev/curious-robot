@@ -425,3 +425,90 @@ print('{"status":"passed"}')
     result = subprocess.run([sys.executable, "-c", script], text=True, capture_output=True, check=True)
     assert json.loads(result.stdout) == {"status": "passed"}
     assert "native buffered diagnostic" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        TimeoutError("backend timed out"),
+        ConnectionResetError("worker connection reset"),
+        KeyError("solver state disappeared"),
+        ValueError("solver returned an invalid internal state"),
+    ],
+)
+def test_backend_errors_are_runtime_failures_not_input_errors(monkeypatch, capsys, tmp_path, failure) -> None:
+    runner = Mock(side_effect=failure)
+    monkeypatch.setitem(
+        sys.modules, "curious_robot.lab.friction_runner", SimpleNamespace(run_newton_friction_slice=runner)
+    )
+    with pytest.raises(SystemExit) as error:
+        main(["run", "--task", "push-cube-v1", "--output", str(tmp_path / "run"), "--json"])
+    assert error.value.code == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["error"]["code"] == "runtime_error"
+    assert report["error"]["type"] == type(failure).__name__
+    assert report["task_id"] == "push-cube-v1"
+    assert report["pipeline"] == "isolated"
+    assert report["output_directory"] == str(tmp_path / "run")
+
+
+def test_nonfinite_manifest_returns_one_runtime_json_with_evidence_location(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    def run_slice(**kwargs):
+        (kwargs["output_directory"] / "friction_capability_manifest.json").write_text(
+            '{"status":"PASSED","residual":NaN}'
+        )
+
+    monkeypatch.setitem(
+        sys.modules, "curious_robot.lab.friction_runner", SimpleNamespace(run_newton_friction_slice=run_slice)
+    )
+    output = tmp_path / "run"
+    with pytest.raises(SystemExit) as error:
+        main(["run", "--task", "push-t-bar-v1", "--output", str(output), "--json"])
+    assert error.value.code == 1
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert report["status"] == "failed"
+    assert report["error"]["code"] == "runtime_error"
+    assert report["error"]["type"] == "ValueError"
+    assert report["task_id"] == "push-t-bar-v1"
+    assert report["pipeline"] == "isolated"
+    assert report["output_directory"] == str(output)
+    assert report["manifest_path"] == str(output / "friction_capability_manifest.json")
+    assert "result" not in report
+    assert "Traceback" not in captured.err
+
+
+def test_cutoff_manifest_is_a_runtime_error_with_retained_evidence(tmp_path, monkeypatch, capsys) -> None:
+    def run_slice(**kwargs):
+        (kwargs["output_directory"] / "friction_capability_manifest.json").write_text('{"status":')
+
+    monkeypatch.setitem(
+        sys.modules, "curious_robot.lab.friction_runner", SimpleNamespace(run_newton_friction_slice=run_slice)
+    )
+    output = tmp_path / "run"
+    with pytest.raises(SystemExit) as error:
+        main(["run", "--task", "push-cube-v1", "--output", str(output), "--json"])
+    assert error.value.code == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["error"]["code"] == "runtime_error"
+    assert report["error"]["type"] == "JSONDecodeError"
+    assert report["output_directory"] == str(output)
+    assert report["failure_manifest"] == str(output / "friction_capability_manifest.json")
+
+
+def test_unserializable_legacy_result_returns_minimal_runtime_json(tmp_path, monkeypatch, capsys) -> None:
+    runner = Mock(
+        return_value=SimpleNamespace(success=True, model_dump=lambda **_kwargs: {"invalid": {1, 2}})
+    )
+    monkeypatch.setitem(sys.modules, "curious_robot.runner", SimpleNamespace(run_episode=runner))
+    output = tmp_path / "run"
+    with pytest.raises(SystemExit) as error:
+        main(["run", "--task", "push-cube-v1", "--pipeline", "legacy", "--output", str(output), "--json"])
+    assert error.value.code == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["error"]["code"] == "runtime_error"
+    assert report["error"]["type"] == "TypeError"
+    assert report["output_directory"] == str(output)
+    assert "result" not in report

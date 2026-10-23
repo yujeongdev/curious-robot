@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from ..core import Operation, Report
+from ..core import CommandFailure, Operation, Report
 from ..parameters import device_option, task_option
 
 
@@ -21,7 +21,10 @@ def open_web(
     from curious_robot.cli import main as legacy_main
     from curious_robot.tasks import get_task_preset
 
-    get_task_preset(task)
+    try:
+        get_task_preset(task)
+    except KeyError as error:
+        raise CommandFailure(error, context={"task_id": task}, exit_code=2) from error
     arguments = [
         "web",
         "--task",
@@ -42,7 +45,8 @@ def open_web(
         legacy_main(arguments)
     except SystemExit as error:
         if error.code == 2:
-            raise ValueError("Agent Lab rejected its launch arguments; see stderr for details") from error
+            cause = ValueError("Agent Lab rejected its launch arguments; see stderr for details")
+            raise CommandFailure(cause, context={"task_id": task}, exit_code=2) from error
         message = (
             error.code
             if isinstance(error.code, str)

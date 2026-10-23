@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 from itertools import chain
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -22,6 +23,10 @@ if TYPE_CHECKING:
 DEFAULT_SETUP_STEPS = 24
 MAX_SETUP_STEPS = 2400
 type WorldFactory = Callable[[PhysicalBelief, WorldConfig], BeliefEnvironment]
+
+
+class SetupValidationError(ValueError):
+    """An initialized world failed a setup evidence check."""
 
 
 def _runtime_versions() -> dict[str, str]:
@@ -120,27 +125,29 @@ def _smoke_rollout(world: BeliefEnvironment, *, steps: int, report: dict[str, An
     }
     report["checks"]["world_initialized"] = True
     if actual_device != resolved_device:
-        raise RuntimeError(f"requested {resolved_device}, but world was built on {actual_device}")
+        raise SetupValidationError(f"requested {resolved_device}, but world was built on {actual_device}")
     # Hold the public initial robot posture rather than command a zero target.
     target_q = world.control.joint_target_q
     initial_q = world.state_0.joint_q
     if report["configuration"]["include_robot"] and (target_q is None or initial_q is None):
-        raise RuntimeError("robot joint state or control targets are unavailable")
+        raise SetupValidationError("robot joint state or control targets are unavailable")
     if target_q is not None and initial_q is not None:
         target_q.assign(initial_q.numpy())
     for _ in range(steps):
         world.step()
         state = world.state_0
         if state.body_q is None or state.body_qd is None:
-            raise RuntimeError("simulation body state is unavailable")
+            raise SetupValidationError("simulation body state is unavailable")
         if not all(
             np.isfinite(array.numpy()).all()
             for array in (state.body_q, state.body_qd, state.joint_q, state.joint_qd)
             if array is not None
         ):
-            raise RuntimeError("simulation state contains NaN or Inf")
+            raise SetupValidationError("simulation state contains NaN or Inf")
         report["checks"]["completed_steps"] += 1
     report["checks"]["finite_state"] = True
+    if not math.isfinite(world.sim_time_s):
+        raise SetupValidationError("simulation time contains NaN or Inf")
     report["simulation_time_s"] = world.sim_time_s
     observation = world.observe_object_pose()
     observed_values = chain(
@@ -152,10 +159,69 @@ def _smoke_rollout(world: BeliefEnvironment, *, steps: int, report: dict[str, An
         (observation.timestamp_s,),
     )
     if not all(math.isfinite(value) for value in observed_values):
-        raise RuntimeError("simulation observation contains NaN or Inf")
+        raise SetupValidationError("simulation observation contains NaN or Inf")
     report["observation"] = observation.model_dump(mode="json")
     report["checks"]["observation_returned"] = True
     report["status"] = "passed"
+
+
+def _replace_report(path: Path, serialized: str) -> None:
+    temporary_path = None
+    try:
+        with NamedTemporaryFile(
+            "w", dir=path.parent, prefix=".setup-", encoding="utf-8", delete=False
+        ) as file:
+            temporary_path = Path(file.name)
+            file.write(serialized)
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _execute_setup(
+    factory: WorldFactory,
+    belief: PhysicalBelief,
+    config: WorldConfig,
+    *,
+    steps: int,
+    report: dict[str, Any],
+) -> None:
+    world = None
+    try:
+        world = factory(belief, config)
+        _smoke_rollout(world, steps=steps, report=report)
+    except Exception as error:
+        report["error"] = {
+            "code": "validation_failed" if isinstance(error, SetupValidationError) else "runtime_error",
+            "type": type(error).__name__,
+            "message": str(error),
+        }
+    finally:
+        if world is not None:
+            try:
+                world.close()
+            except Exception as error:
+                report["status"] = "failed"
+                cleanup_error = {
+                    "code": "runtime_error",
+                    "type": type(error).__name__,
+                    "message": str(error),
+                }
+                report["cleanup_error"] = cleanup_error
+                report.setdefault("error", cleanup_error)
+
+
+def _terminal_json(report: dict[str, Any], initial_serialized: str) -> str:
+    try:
+        return json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    except (TypeError, ValueError) as error:
+        safe_report = {
+            **json.loads(initial_serialized),
+            "checks": report["checks"],
+            "error": {"code": "runtime_error", "type": type(error).__name__, "message": str(error)},
+        }
+        return json.dumps(safe_report, indent=2, sort_keys=True, allow_nan=False) + "\n"
 
 
 def setup_simulation(
@@ -184,22 +250,25 @@ def setup_simulation(
     output = Path(output_directory).resolve()
     output.mkdir(parents=True, exist_ok=True)
     report_path = output / "setup_report.json"
+    report = _initial_report(task, config, belief, steps=steps, report_path=report_path)
+    initial_serialized = (
+        json.dumps(
+            {
+                **report,
+                "error": {"code": "setup_incomplete", "message": "Setup did not reach a terminal result"},
+            },
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n"
+    )
     with report_path.open("x", encoding="utf-8") as report_file:
-        report = _initial_report(task, config, belief, steps=steps, report_path=report_path)
-        world = None
-        try:
-            world = (world_factory or _build_prior_world)(belief, config)
-            _smoke_rollout(world, steps=steps, report=report)
-        except Exception as error:
-            report["error"] = {"type": type(error).__name__, "message": str(error)}
-        finally:
-            if world is not None:
-                try:
-                    world.close()
-                except Exception as error:
-                    report["status"] = "failed"
-                    report["cleanup_error"] = {"type": type(error).__name__, "message": str(error)}
-        serialized = json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n"
-        report_file.write(serialized)
+        # Commit a readable failure record before allocating runtime resources.
+        report_file.write(initial_serialized)
+        report_file.flush()
+        _execute_setup(world_factory or _build_prior_world, belief, config, steps=steps, report=report)
+        serialized = _terminal_json(report, initial_serialized)
+        _replace_report(report_path, serialized)
     # Match the persisted JSON representation, including tuples serialized as lists.
     return cast(dict[str, Any], json.loads(serialized))

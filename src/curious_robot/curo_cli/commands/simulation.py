@@ -8,7 +8,7 @@ import click
 
 from curious_robot.sim_setup import DEFAULT_SETUP_STEPS, MAX_SETUP_STEPS
 
-from ..core import Operation, Report
+from ..core import CommandFailure, Operation, Report
 from ..output import output_directory
 from ..parameters import device_option, output_option, task_option
 
@@ -30,11 +30,26 @@ def sim() -> None:
 def setup(task: str, device: str, output: Path | None, steps: int, no_robot: bool) -> Report:
     """Build and step a public prior-only task world."""
     from curious_robot.sim_setup import setup_simulation
+    from curious_robot.tasks import get_task_preset
 
-    return setup_simulation(
-        task_id=task,
-        output_directory=output_directory(output, "sim"),
-        device=device,
-        steps=steps,
-        include_robot=not no_robot,
-    )
+    directory = output_directory(output, "sim")
+    context = {"task_id": task, "output_directory": str(directory)}
+    try:
+        get_task_preset(task)
+    except KeyError as error:
+        raise CommandFailure(error, context=context, exit_code=2) from error
+    try:
+        return setup_simulation(
+            task_id=task,
+            output_directory=directory,
+            device=device,
+            steps=steps,
+            include_robot=not no_robot,
+        )
+    except FileExistsError as error:
+        raise CommandFailure(error, context=context, exit_code=2) from error
+    except Exception as error:
+        report_path = directory / "setup_report.json"
+        if report_path.is_file():
+            context["report_path"] = str(report_path)
+        raise CommandFailure(error, context=context) from error

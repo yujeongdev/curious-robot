@@ -37,15 +37,19 @@ def run(task: str, device: str, output: Path | None, seed: int, pipeline: str, n
     """Run discovery for an explicitly selected task."""
     from curious_robot.tasks import get_task_preset
 
-    get_task_preset(task)
+    try:
+        get_task_preset(task)
+    except KeyError as error:
+        raise CommandFailure(error, context={"task_id": task, "pipeline": pipeline}, exit_code=2) from error
     if no_robot and pipeline == "isolated":
-        raise ValueError("--no-robot requires --pipeline legacy; isolated discovery requires Franka")
+        cause = ValueError("--no-robot requires --pipeline legacy; isolated discovery requires Franka")
+        raise CommandFailure(cause, context={"task_id": task, "pipeline": pipeline}, exit_code=2)
     directory = output_directory(output, "run")
     context = {"task_id": task, "pipeline": pipeline, "output_directory": str(directory)}
     try:
         _reserve_run_directory(directory, task=task, pipeline=pipeline)
     except OSError as error:
-        raise CommandFailure(error, context=context) from error
+        raise CommandFailure(error, context=context, exit_code=2) from error
     try:
         return _execute_pipeline(
             task=task,
@@ -71,6 +75,7 @@ def _execute_pipeline(
         from curious_robot.lab.friction_runner import run_newton_friction_slice
 
         manifest = output / "friction_capability_manifest.json"
+        details["manifest_path"] = str(manifest)
         try:
             run_newton_friction_slice(task_id=task, seed=seed, device=device, output_directory=output)
         except CapabilityExecutionError as error:
