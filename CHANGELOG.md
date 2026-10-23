@@ -8,6 +8,7 @@ All notable changes to Curious Robot are documented here.
 
 - Stream content-addressed ActionGraph commitments and recorded node transitions through the same append-only event log used by live view and replay.
 - Show the current execution node, neighboring success-path nodes, deadline, and explicit safe-stop/return-to-agent branches in Agent Lab.
+- Compile each live Newton deployment into an honest single-skill execution graph and record observation, motion, verification, and terminal transitions.
 
 ### Changed
 
@@ -18,7 +19,7 @@ All notable changes to Curious Robot are documented here.
 ### Boundaries
 
 - Backends that do not emit a compiled graph remain visibly `NOT ADMITTED`; the browser never fabricates graph nodes from an action name.
-- The ordinary monolithic Newton runner does not claim atomic node-transition telemetry. The synthetic preview is explicitly labeled illustrative.
+- The monolithic Newton controller is represented as one atomic motion node; internal servo phases are not fabricated. The synthetic preview is explicitly labeled illustrative.
 
 ## [0.3.0] - 2026-10-23
 
