@@ -147,6 +147,7 @@ class FakeTransport:
         self.preflight_feasible = True
         self.preflight_errors = ()
         self.mutate_graph_during_preflight = False
+        self.mutate_graph_during_execution = False
         self.arm_calls = 0
 
     def read_tool_pose(self, timeout_s: float) -> HardwareToolPose:
@@ -206,6 +207,11 @@ class FakeTransport:
     def execute_bounded_push(self, **kwargs):  # noqa: ANN003, ANN201
         self.calls.append(kwargs)
         motion_plan = kwargs["motion_plan"]
+        if self.mutate_graph_during_execution:
+            motion_node = next(
+                node for node in motion_plan.action_graph.nodes if node.kind.value == "motion"
+            )
+            motion_node.parameters["phase"] = "tampered"
         values = {
             "motion_plan_id": motion_plan.plan_id,
             "action_graph_id": motion_plan.action_graph.graph_id,
@@ -658,6 +664,17 @@ def test_preflight_cannot_mutate_admitted_graph_before_motion(tmp_path) -> None:
     assert result.status == "failed"
     assert transport.arm_calls == 0
     assert transport.calls == []
+    assert transport.safe_stop_calls == 1
+
+
+def test_transport_cannot_mutate_admitted_graph_and_recompute_attestation(tmp_path) -> None:
+    _, _, transport, _, reality, request = _hardware_case(tmp_path)
+    transport.mutate_graph_during_execution = True
+
+    result = reality.execute(request)
+
+    assert result.status == "failed"
+    assert len(transport.calls) == 1
     assert transport.safe_stop_calls == 1
 
 

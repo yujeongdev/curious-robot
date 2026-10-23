@@ -84,6 +84,8 @@ class ActionGraphNode(_GraphModel):
             raise ValueError("physical motion nodes require the deterministic transport")
         if self.kind is ActionNodeKind.MOTION and self.authority is not NodeAuthority.HARDWARE:
             raise ValueError("physical motion nodes require hardware authority")
+        if self.kind is ActionNodeKind.SAFE_STOP and self.authority is not NodeAuthority.HARDWARE:
+            raise ValueError("safe-stop nodes require hardware authority")
         if (self.kind is ActionNodeKind.MOTION) != (self.control_mode is not None):
             raise ValueError("exactly motion nodes must declare a control mode")
         if self.kind in {ActionNodeKind.TERMINAL, ActionNodeKind.SAFE_STOP} and (

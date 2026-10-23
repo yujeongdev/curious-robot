@@ -134,21 +134,25 @@ def test_camera_frame_contains_artifact_provenance_but_no_hidden_pose() -> None:
         valid_depth_fraction=1.0,
         captured_monotonic_s=frame.captured_monotonic_s,
     )
-    validate_pose_estimate_binding(estimate, frame, "t-bar")
+    validate_pose_estimate_binding(estimate, frame, "t-bar", "franka_base")
     with pytest.raises(ValueError, match="episode"):
         validate_pose_estimate_binding(
             estimate.model_copy(update={"episode_id": "other-episode"}),
             frame,
             "t-bar",
+            "franka_base",
         )
     with pytest.raises(ValueError, match="does not cite"):
         validate_pose_estimate_binding(
             estimate.model_copy(update={"contributing_frame_ids": (HASH_B,)}),
             frame,
             "t-bar",
+            "franka_base",
         )
     with pytest.raises(ValueError, match="object"):
-        validate_pose_estimate_binding(estimate, frame, "cube")
+        validate_pose_estimate_binding(estimate, frame, "cube", "franka_base")
+    with pytest.raises(ValueError, match="frame"):
+        validate_pose_estimate_binding(estimate, frame, "t-bar", "camera_optical")
 
 
 def test_vision_pose_rejects_non_symmetric_covariance_and_bad_residual_order() -> None:

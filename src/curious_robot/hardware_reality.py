@@ -322,14 +322,20 @@ class FrankaHardwareReality:
                 command_timeout_s=transport_timeout_s,
             )
             self._require_open()
+            motion_plan = FrankaPushMotionPlan.model_validate_json(canonical_plan)
+            if (
+                motion_plan.plan_id != expected_plan_id
+                or motion_plan.action_graph.graph_id != expected_graph_id
+            ):
+                raise ValueError("hardware transport mutated the admitted deployment plan")
             _validate_push_result(
                 result,
                 maximum_force_n=motion_plan.maximum_force_n,
                 maximum_speed_m_s=skill.payload.safety.maximum_speed_m_s,
                 command_timeout_s=transport_timeout_s,
                 watchdog_token=watchdog_token,
-                motion_plan_id=motion_plan.plan_id,
-                action_graph_id=motion_plan.action_graph.graph_id,
+                motion_plan_id=expected_plan_id,
+                action_graph_id=expected_graph_id,
                 deployment_bundle_id=deployment_bundle.bundle_id,
                 calibration_id=motion_plan.calibration_id,
                 maximum_acceleration_m_s2=motion_plan.maximum_linear_acceleration_m_s2,

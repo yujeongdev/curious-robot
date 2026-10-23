@@ -203,6 +203,7 @@ def validate_pose_estimate_binding(
     estimate: VisionPoseEstimate,
     frame: CameraFrameObservation,
     requested_object_id: str,
+    requested_frame_id: str,
 ) -> None:
     """Require a pose estimate to cite the supplied camera observation and episode."""
 
@@ -210,6 +211,8 @@ def validate_pose_estimate_binding(
         raise ValueError("vision estimate episode does not match the camera frame")
     if estimate.object_id != requested_object_id:
         raise ValueError("vision estimate object does not match the request")
+    if estimate.frame_id != requested_frame_id:
+        raise ValueError("vision estimate frame does not match the request")
     if frame.observation_id not in estimate.contributing_frame_ids:
         raise ValueError("vision estimate does not cite the supplied camera observation")
 

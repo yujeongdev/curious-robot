@@ -225,6 +225,20 @@ def test_graph_rejects_regular_terminal_omitted_from_declarations() -> None:
         )
 
 
+def test_graph_rejects_safe_stop_without_hardware_authority() -> None:
+    graph = _compiled_graph()
+    document = graph.model_dump()
+    safe_stop = next(
+        node
+        for node in document["nodes"]
+        if node["node_id"] == "terminal_safe_stop"
+    )
+    safe_stop["authority"] = "supervisor"
+
+    with pytest.raises(ValidationError, match="safe-stop nodes require hardware authority"):
+        ActionGraph.model_validate(document)
+
+
 def test_graph_rejects_operational_node_without_success_transition() -> None:
     graph = _compiled_graph()
     node_id = "observe_initial_object_pose"
